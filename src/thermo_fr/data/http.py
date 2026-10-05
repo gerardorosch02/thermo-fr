@@ -33,6 +33,8 @@ class HttpClient:
     which is how rate limits such as "2 requests per minute" are respected.
     `backoff` is the first wait after a transient failure; every further wait
     doubles, capped at `max_wait`. A Retry-After header, when present, wins.
+    `retry_statuses` lists the HTTP statuses treated as transient; a source
+    whose gateway answers with other codes (ENTSO-E uses 599) can extend it.
     """
 
     def __init__(
@@ -44,8 +46,10 @@ class HttpClient:
         max_wait: float = 120.0,
         timeout: float = 60.0,
         user_agent: str = "thermo-fr/0.1 (research tool)",
+        retry_statuses=RETRY_STATUSES,
     ):
         self.session = session or requests.Session()
+        self.retry_statuses = tuple(retry_statuses)
         self.min_interval = min_interval
         self.retries = retries
         self.backoff = backoff
@@ -80,7 +84,7 @@ class HttpClient:
                 last_status = f"HTTP {response.status_code}"
                 if response.status_code < 400:
                     return response
-                if response.status_code not in RETRY_STATUSES:
+                if response.status_code not in self.retry_statuses:
                     raise HttpError(f"{last_status} from {url}: {response.text[:300]}")
             if attempt < self.retries:
                 time.sleep(self._wait_for_retry(attempt, response))

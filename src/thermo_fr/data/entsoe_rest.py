@@ -43,7 +43,7 @@ import pandas as pd
 
 from ..config import BIDDING_ZONE
 from .dataset import to_hourly_utc
-from .http import FileCache, HttpClient, HttpError
+from .http import RETRY_STATUSES, FileCache, HttpClient, HttpError
 from .sources import clip
 
 BASE_URL = "https://web-api.tp.entsoe.eu/api"
@@ -52,6 +52,9 @@ EIC = {"FR": "10YFR-RTE------C"}
 FREQ = {"PT60M": "60min", "PT30M": "30min", "PT15M": "15min"}
 PSR_NAMES = {"B16": "solar", "B19": "wind_onshore", "B18": "wind_offshore"}
 NO_DATA_REASON = "999"  # Acknowledgement reason code for "No matching data found"
+# The platform's gateway answers 599 "Unable to access service within time limit" when a
+# large query (a year of prices is one TimeSeries per day) takes too long; it is transient.
+ENTSOE_RETRY_STATUSES = RETRY_STATUSES + (500, 599)
 
 
 class EntsoeApiError(RuntimeError):
@@ -188,7 +191,9 @@ class EntsoeApi:
         self.zone = zone
         self.eic = EIC.get(zone, zone)
         self.cache = FileCache(cache_dir)
-        self.client = client or HttpClient(min_interval=0.5, backoff=10.0, timeout=180.0)
+        self.client = client or HttpClient(
+            min_interval=0.5, backoff=15.0, max_wait=120.0, timeout=300.0, retry_statuses=ENTSOE_RETRY_STATUSES
+        )
         self._now = now  # injectable clock for tests
         self.details: dict = {}
 

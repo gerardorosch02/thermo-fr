@@ -195,3 +195,15 @@ def test_prices_clip_to_requested_window(tmp_path, client_factory):
     assert s.index[0] == pd.Timestamp("2024-03-01", tz="UTC") and len(s) == 48
     assert s.name == "price_eur_mwh"
     assert entsoe_rest.BASE_URL.startswith("https://web-api.tp.entsoe.eu")
+
+
+def test_gateway_timeouts_are_retried(tmp_path, sleeps):
+    from thermo_fr.data.http import HttpClient
+
+    answers = iter([FakeResponse(599, content=b'{"message":"Unable to access service within time limit."}'),
+                    FakeResponse(200, content=price_document([period_xml("2024-03-01T00:00Z", "2024-03-02T00:00Z", "PT60M", {1: 5}, "price.amount")]))])
+    session = FakeSession(handler=lambda url, params: next(answers))
+    client = HttpClient(session=session, retries=2, backoff=1.0, retry_statuses=entsoe_rest.ENTSOE_RETRY_STATUSES)
+    api = EntsoeApi(api_key="SECRET-TOKEN", cache_dir=tmp_path, client=client, now=pd.Timestamp("2026-10-05T12:00Z"))
+    s = api.day_ahead_prices("2024-03-01", "2024-03-02")
+    assert len(session.calls) == 2 and len(s) == 24 and s.eq(5).all()
