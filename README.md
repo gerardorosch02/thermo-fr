@@ -136,3 +136,7 @@ src/thermo_fr/
 tests/                   DST handling, weighting, parameter recovery, every source offline
 tests/fixtures/          small ENTSO-E style CSV samples covering both DST days
 ```
+
+## Licence
+
+The code is released under the MIT licence (see `LICENSE`). The data keep their own licences, listed under Attribution and licences above.
