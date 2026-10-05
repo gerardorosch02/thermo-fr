@@ -31,7 +31,8 @@ def out_of_sample(daily: pd.DataFrame) -> dict:
     }
 
 
-def run(daily: pd.DataFrame, out_dir) -> dict:
+def run(daily: pd.DataFrame, out_dir, sources: dict | None = None) -> dict:
+    """Fit, chart and summarise. `sources` (from sources.json) is recorded as-is for attribution."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -50,11 +51,13 @@ def run(daily: pd.DataFrame, out_dir) -> dict:
         "price_r2": round(price.fit_.r2, 3),
         "out_of_sample": out_of_sample(daily),
     }
+    if sources:
+        summary["sources"] = sources
 
     response_plot(load, daily, out / "load_vs_temperature.png", "Daily mean load (GW)", scale=1000)
     response_plot(price, daily, out / "price_vs_temperature.png", "Daily mean day-ahead price (EUR/MWh)")
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
-    (out / "summary.md").write_text(to_markdown(summary))
+    (out / "summary.md").write_text(to_markdown(summary), encoding="utf-8")
     return summary
 
 
@@ -75,4 +78,17 @@ def to_markdown(s: dict) -> str:
         "",
         "Standard errors are conditional on the chosen threshold.",
         "",
+        *sources_section(s.get("sources")),
     ])
+
+
+def sources_section(sources: dict | None) -> list[str]:
+    """Markdown lines naming each data source and its licence attribution."""
+    if not sources:
+        return []
+    lines = ["## Data sources", ""]
+    for series in ("load", "price", "temperature"):
+        entry = sources.get(series)
+        if entry:
+            lines.append(f"- {series.capitalize()}: {entry['source']}. {entry.get('attribution', '')}".rstrip())
+    return lines + [""]
