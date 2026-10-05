@@ -131,7 +131,7 @@ def forecast_day_chart(curve: pd.DataFrame, date: str, path: Path, feature_set: 
         ax.step(hours, curve["naive_day"], where="mid", color="grey", linestyle="--", linewidth=1, label="Same hour D-1")
     ax.set_xlabel("Delivery hour (Paris time)")
     ax.set_ylabel("EUR/MWh")
-    ax.set_title(f"French day-ahead price forecast for {date}, made with information available at 12:00 the day before")
+    ax.set_title(f"French day-ahead price, {date}: forecast as of 12:00 the day before")
     ax.set_xticks(range(0, 24, 2))
     ax.grid(alpha=0.3)
     ax.legend()

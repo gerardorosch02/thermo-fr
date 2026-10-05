@@ -43,7 +43,7 @@ Load sensitivity has fallen: the 2024 and 2025 estimates are about 14% below the
 ```bash
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"            # add ",entsoe" inside the brackets for the ENTSO-E client
+pip install -e ".[dev]"            # add ",forecast" inside the brackets for the price forecast (LightGBM, scikit-learn)
 ```
 
 Open-Meteo, Energy-Charts and RTE need no key. Only the `entsoe` source does.
@@ -66,13 +66,28 @@ thermo-fr fetch --start 2021-01-01 --end 2026-01-01 --load-source csv --price-so
 
 Next to `data/hourly.csv`, `fetch` writes `sources.json` (which source produced which series, with licence attribution and the dataset details) and `quality.json`. A short quality summary is printed: the share of missing hours per series, negative load, load outside 20,000 to 100,000 MW, and prices outside -500 to 4,000 EUR/MWh. Gaps are reported, never filled. `fit` copies the source information into `summary.json` and `summary.md`.
 
+## Day-ahead price forecast
+
+A second pipeline forecasts the hourly French day-ahead price for a delivery day using only information available when the auction closes, at 12:00 Paris time the day before. Method, timing findings and backtest results are in [docs/forecast.md](docs/forecast.md).
+
+```bash
+pip install -e ".[dev,forecast]"                  # adds LightGBM and scikit-learn
+export ENTSOE_API_KEY="your-token"
+thermo-fr forecast-fetch                           # inputs 2021-01-01 to the last complete month, into data/forecast/
+thermo-fr forecast-backtest                        # walk-forward 2024 and 2025, report in reports/forecast/
+thermo-fr forecast --date 2026-10-06               # one day's curve and chart, as of 12:00 the day before
+thermo-fr timing-probe                             # log which ENTSO-E items already exist for tomorrow
+```
+
+Inputs: ENTSO-E day-ahead prices, day-ahead total load forecast and day-ahead wind and solar forecasts (RESTful API, cached under `data/cache/entsoe/`), and Open-Meteo weather forecasts for the eight cities as they were issued two days ahead (previous-runs archive, cached under `data/cache/open-meteo/`). Two feature sets are evaluated: an honest one whose every input is published before the gate, and an extended one that adds the ENTSO-E wind and solar forecasts, which the platform allows until 18:00 on D-1. A test fails if any feature for delivery day D is timestamped after 12:00 Paris on D-1.
+
 ## Data sources
 
 | Name | Series | Key | Where the data comes from |
 |---|---|---|---|
 | `rte` | load | none | RTE eCO2mix national consumption on ODRE, `eco2mix-national-cons-def` (definitive and consolidated) plus `eco2mix-national-tr` (real time) for the most recent weeks |
 | `energy-charts` | load, prices | none | Energy-Charts API by Fraunhofer ISE: `/price?bzn=FR` and the `Load` series of `/public_power?country=fr` |
-| `entsoe` | load, prices | `ENTSOE_API_KEY` | ENTSO-E Transparency Platform through entsoe-py |
+| `entsoe` | load, prices, day-ahead forecasts | `ENTSOE_API_KEY` | ENTSO-E Transparency Platform RESTful API, raw XML cached under `data/cache/entsoe/` |
 | `csv` | load, prices | none | CSV files exported by hand from the ENTSO-E Transparency Platform website, placed in `--csv-dir` |
 
 Raw responses from `rte` and `energy-charts` are cached under `data/cache/`, so a rerun downloads nothing. Delete that directory to refresh. Requests are spaced out to respect the published rate limits (about 2 per minute on the Energy-Charts price endpoint), and retried with exponential backoff on 429 and 503. If a service stays down, the fetch stops with a clear error instead of writing partial data.
@@ -123,7 +138,17 @@ src/thermo_fr/
   data/sources.py        the Source interface and get_source() factory
   data/http.py           rate-limited GET with retries, plus the raw-response cache
   data/weather.py        Open-Meteo temperatures and population weighting
-  data/entsoe_client.py  ENTSO-E load and prices (needs a key)
+  data/entsoe_rest.py    ENTSO-E RESTful API client: prices, load, day-ahead forecasts (needs a key)
+  data/entsoe_client.py  the entsoe source built on it
+  data/weather_forecast.py Open-Meteo forecasts as issued (previous runs) and the historical-forecast proxy
+  forecast/timing.py     the 12:00 Paris gate, issue-time rules, look-ahead check
+  forecast/inputs.py     one hourly table of every forecast input, plus the API-versus-CSV price comparison
+  forecast/features.py   honest and extended feature sets in Paris delivery hours
+  forecast/models.py     benchmarks, LightGBM, ridge
+  forecast/backtest.py   monthly walk-forward, metrics by slice, worst days
+  forecast/report.py     reports/forecast/ tables and charts
+  forecast/day.py        one delivery day as of 12:00 the day before
+  forecast/probe.py      timing probe for tomorrow's ENTSO-E items
   data/energy_charts.py  Energy-Charts load and prices (no key)
   data/rte_eco2mix.py    RTE eCO2mix load from ODRE (no key)
   data/csv_source.py     ENTSO-E CSV exports made by hand
