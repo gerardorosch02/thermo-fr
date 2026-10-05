@@ -29,3 +29,9 @@ LOCAL_TZ = "Europe/Paris"
 
 # Candidate heating thresholds (degrees C) searched when fitting: start, stop, step.
 THRESHOLD_GRID = (10.0, 20.0, 0.25)
+
+# Plausibility bounds used by the data quality checks after a fetch.
+PLAUSIBLE_RANGES = {
+    "load_mw": (20_000.0, 100_000.0),  # MW, French national load
+    "price_eur_mwh": (-500.0, 4_000.0),  # EUR/MWh, day-ahead
+}
