@@ -13,6 +13,31 @@ France heats a large share of its homes with electricity, so its demand is unusu
 5. Trains on all but the last 12 months and forecasts the last 12 months of load to check the model out of sample.
 6. Writes a summary and two charts to `reports/`.
 
+## Results
+
+Run on 2021-01-01 to 2025-12-31 (1,826 days) with RTE load, ENTSO-E day-ahead prices and Open-Meteo temperatures. All numbers below are copied from `reports/summary.json` and `reports/yearly.csv` as produced by `thermo-fr fit`.
+
+- Heating threshold: 13.00 °C
+- Load: +1,605 MW per degree colder below the threshold (s.e. 22), R² 0.962
+- Price: +9.67 EUR/MWh per degree colder (s.e. 0.45), R² 0.874; excluding 2022: +6.58 (s.e. 0.30)
+- Out of sample, last 365 days trained to 2024-12-31: MAE 1,593 MW, MAPE 3.12%
+
+Year by year, with the threshold held at 13.00 °C:
+
+| Year | Load MW per °C (s.e.) | Price EUR/MWh per °C (s.e.) | Price R² | Mean price EUR/MWh | Price gradient, % of mean |
+|---|---|---|---|---|---|
+| 2021 | 1,649 (50) | 6.92 (0.74) | 0.863 | 109.2 | 6.33 |
+| 2022 | 1,763 (50) | 22.40 (1.69) | 0.754 | 275.9 | 8.12 |
+| 2023 | 1,694 (48) | 8.27 (0.53) | 0.714 | 96.9 | 8.54 |
+| 2024 | 1,456 (53) | 4.62 (0.56) | 0.647 | 58.0 | 7.96 |
+| 2025 | 1,469 (46) | 6.30 (0.50) | 0.722 | 61.1 | 10.31 |
+
+Load sensitivity has fallen: the 2024 and 2025 estimates are about 14% below the 2021 to 2023 average, in line with the demand reductions that followed the 2022 energy crisis. The price effect in EUR/MWh moves with the price level, 22.4 in 2022 against 4.6 to 8.3 in the other years, but as a share of each year's mean price it stays within 6 to 10%. A cold day therefore raises the day-ahead price by a fairly constant fraction, whatever gas costs that year.
+
+![Daily load against temperature](docs/img/load_vs_temperature.png)
+
+![Daily day-ahead price against temperature](docs/img/price_vs_temperature.png)
+
 ## Setup
 
 ```bash
