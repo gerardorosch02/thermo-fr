@@ -71,7 +71,7 @@ export ENTSOE_API_KEY="your-token"   # Windows: set ENTSOE_API_KEY=your-token
 
 ### CSV exports from the ENTSO-E website (the `csv` source)
 
-Export "Actual Total Load" and "Day-ahead Prices" for the France bidding zone as CSV and put the files in one directory. Files are recognised by their header, so names do not matter and one file per year is fine. The interval column ("MTU (CET/CEST)" or "Time (CET/CEST)") is parsed as Paris local time; the repeated 02:00 hour on the autumn daylight-saving day is resolved by file order. Both 15-minute and hourly files work.
+Export "Actual Total Load" and "Day-ahead Prices" for the France bidding zone as CSV and put the files in one directory. Files are recognised by their header, so names do not matter and one file per year is fine; empty files are skipped and timestamps repeated across files are dropped. The current export writes "MTU (UTC)" intervals such as "01/01/2025 00:00:00 - 01/01/2025 00:15:00", which are taken as UTC. Older exports with "MTU (CET/CEST)" or "Time (CET/CEST)" are parsed as Paris local time, and the repeated 02:00 hour on the autumn daylight-saving day is resolved by file order. Both 15-minute and hourly files work. When a Sequence column lists more than one auction, only the main day-ahead coupling result ("Without Sequence", else the lowest sequence number) is kept.
 
 ## Design choices
 
