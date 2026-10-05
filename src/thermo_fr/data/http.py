@@ -3,8 +3,9 @@
 Two concerns live here so that every source behaves the same way:
 
 - `HttpClient` spaces requests out to respect rate limits, retries on the
-  transient statuses (429, 502, 503, 504) with exponential backoff, and gives
-  up with a clear message when a service is down.
+  transient statuses (429, 502, 503, 504), on connection errors and on
+  timeouts with exponential backoff, and gives up with a clear message when
+  a service is down.
 - `FileCache` keeps raw responses on disk under data/cache/ so that reruns do
   not download anything again.
 """
@@ -78,7 +79,7 @@ class HttpClient:
             self._last_request = time.monotonic()
             try:
                 response = self.session.get(url, params=params, timeout=self.timeout, headers=self.headers)
-            except requests.exceptions.ConnectionError as exc:
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
                 response, last_status = None, f"connection error ({exc.__class__.__name__})"
             else:
                 last_status = f"HTTP {response.status_code}"

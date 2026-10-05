@@ -78,7 +78,7 @@ class OpenMeteoForecastSource:
     ):
         self.cities = cities
         self.cache = FileCache(cache_dir)
-        self.client = client or HttpClient(min_interval=0.5, backoff=10.0)
+        self.client = client or HttpClient(min_interval=0.5, backoff=10.0, timeout=180.0)
         self.lead_days = lead_days
         self.model = model
         self._now = now
