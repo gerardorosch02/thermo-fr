@@ -131,6 +131,14 @@ def cmd_forecast(args) -> None:
     print(f"Saved {out / f'day_{args.date}.csv'} and {out / f'day_{args.date}.png'}")
 
 
+def cmd_timing_probe(args) -> None:
+    from .forecast.probe import run_probe
+
+    rows = run_probe(log_path=Path(args.log), cache_dir=Path(args.cache_dir) / "entsoe", delivery_day=args.date)
+    print(rows.to_string(index=False))
+    print(f"Appended to {args.log}")
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(prog="thermo-fr", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -179,6 +187,12 @@ def main(argv=None) -> None:
     fc.add_argument("--cache-dir", default="data/cache")
     fc.add_argument("--no-refresh", action="store_true", help="use the stored inputs only, no download")
     fc.set_defaults(func=cmd_forecast)
+
+    probe = sub.add_parser("timing-probe", help="Log which ENTSO-E day-ahead items already exist for tomorrow")
+    probe.add_argument("--date", default=None, help="delivery day to probe, default tomorrow (Paris)")
+    probe.add_argument("--log", default="data/timing_probe.csv")
+    probe.add_argument("--cache-dir", default="data/cache")
+    probe.set_defaults(func=cmd_timing_probe)
 
     args = parser.parse_args(argv)
     if args.command == "forecast-fetch" and args.end is None:
