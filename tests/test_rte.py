@@ -118,3 +118,15 @@ def test_cache_prevents_second_download(tmp_path, client_factory):
 def test_prices_are_unsupported(tmp_path, client_factory):
     with pytest.raises(UnsupportedSeriesError):
         make_source(tmp_path, FakeSession(), client_factory).day_ahead_prices("2025-01-01", "2025-01-02")
+
+
+def test_truncated_export_is_returned_but_not_cached(tmp_path, client_factory, capsys):
+    """While ODRE reprocesses a dataset an export can come back nearly empty; never cache that."""
+    short = lambda p: export_csv(window(p)[0], pd.Timestamp(window(p)[0]) + pd.Timedelta(hours=2))
+    session = FakeSession(make_handler("2026-01-01T00:00:00+00:00", short))
+    source = make_source(tmp_path, session, client_factory)
+    series = source.load("2025-01-01", "2025-01-08")
+    assert series.notna().sum() == 2
+    assert "not caching" in capsys.readouterr().out
+    source.load("2025-01-01", "2025-01-08")
+    assert len([u for u, _ in session.calls if "exports" in u]) == 2  # downloaded again

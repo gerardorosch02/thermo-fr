@@ -93,10 +93,20 @@ class RteEco2mixSource:
             "delimiter": ";",
         }
 
-        def download() -> bytes:
-            return self.client.get(f"{BASE_URL}/{dataset}/exports/csv", params=params).content
-
-        return parse_export(self.cache.fetch(key, download))
+        cached = self.cache.get(key)
+        if cached is not None:
+            return parse_export(cached)
+        content = self.client.get(f"{BASE_URL}/{dataset}/exports/csv", params=params).content
+        frame = parse_export(content)
+        # ODRE occasionally serves a near-empty export while a dataset is being reprocessed.
+        # Such a response is returned but not cached, so the next run tries again.
+        expected_rows = (b - a) / pd.Timedelta(hours=1)  # at least hourly data is expected
+        if len(frame) < 0.5 * expected_rows:
+            print(f"Warning: {dataset} returned {len(frame)} rows for {a.date()} to {b.date()}, "
+                  f"expected about {expected_rows:.0f}; not caching this response.")
+        else:
+            self.cache.put(key, content)
+        return frame
 
     def load(self, start: str, end: str) -> pd.Series:
         """National consumption in MW, averaged to hourly UTC."""
