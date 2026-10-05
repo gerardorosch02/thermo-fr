@@ -52,9 +52,9 @@ EIC = {"FR": "10YFR-RTE------C"}
 FREQ = {"PT60M": "60min", "PT30M": "30min", "PT15M": "15min"}
 PSR_NAMES = {"B16": "solar", "B19": "wind_onshore", "B18": "wind_offshore"}
 NO_DATA_REASON = "999"  # Acknowledgement reason code for "No matching data found"
-# The platform's gateway answers 599 "Unable to access service within time limit" when a
-# large query (a year of prices is one TimeSeries per day) takes too long; it is transient.
-ENTSOE_RETRY_STATUSES = RETRY_STATUSES + (500, 599)
+# The gateway in front of the platform answers 599 "Unable to access service within time limit" or 527 when a
+# large query (a year of prices is one TimeSeries per day) takes too long; every 5xx is treated as transient.
+ENTSOE_RETRY_STATUSES = RETRY_STATUSES + tuple(range(500, 600))
 
 
 class EntsoeApiError(RuntimeError):

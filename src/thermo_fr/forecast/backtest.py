@@ -5,10 +5,12 @@ delivery day is before the first day of that month, then used to forecast
 every hour of that month. Nothing from the month itself, or later, enters the
 fit. Both benchmarks and both models are evaluated on exactly the same hours.
 
-Honest rows are those whose features all passed the look-ahead check. Rows
+Two notions of point in time are kept apart. A feature set either passes the
+look-ahead check for every row (honest) or not (extended, which carries the
+ENTSO-E wind and solar forecasts); that is recorded once per backtest. Rows
 whose weather came from the historical-forecast proxy (before the as-issued
-archive begins) are still forecast and reported, but kept out of the strict
-metrics and flagged in the output.
+archive begins) are still forecast and reported, but flagged as not strict
+and kept out of the strict metrics, for both feature sets.
 """
 
 from dataclasses import dataclass, field
@@ -28,6 +30,7 @@ class BacktestResult:
     feature_set: str
     predictions: pd.DataFrame  # actual, benchmarks, models, info columns, strict flag
     months: list[str] = field(default_factory=list)
+    point_in_time: bool = True  # whether every feature of the set passes the 12:00 gate
 
 
 def month_starts(test_start: str, test_end: str) -> list[pd.Timestamp]:
@@ -51,24 +54,23 @@ def walk_forward(table: FeatureTable, test_start: str, test_end: str, models=MOD
         out = out.join(benchmark_predictions(X_test))
         for name in models:
             out[name] = fit_predict(name, X_train, y_train, X_test)
-        out["strict"] = strict_rows(table, test)
+        out["strict"] = table.info.loc[test, "weather_point_in_time"].to_numpy()
         out["train_rows"] = int(y_train.notna().sum())
         frames.append(out)
         log(f"  {table.feature_set}: {start:%Y-%m} trained on {int(y_train.notna().sum()):,} hours")
     predictions = pd.concat(frames).sort_index()
-    return BacktestResult(table.feature_set, predictions, [m.strftime("%Y-%m") for m in months])
+    return BacktestResult(
+        table.feature_set, predictions, [m.strftime("%Y-%m") for m in months], passes_gate(table, predictions.index)
+    )
 
 
-def strict_rows(table: FeatureTable, mask) -> np.ndarray:
-    """True where every feature of the row is point in time under the timing rules."""
-    timings = feature_timings(table.feature_set)
-    index = table.X.index[mask]
+def passes_gate(table: FeatureTable, index) -> bool:
+    """Whether every feature of the set is published before the gate for every forecast row."""
     try:
-        check_point_in_time(index, timings)
-        passes = np.ones(len(index), dtype=bool)
+        check_point_in_time(index, feature_timings(table.feature_set))
+        return True
     except LookaheadError:
-        passes = np.zeros(len(index), dtype=bool)
-    return passes & table.info.loc[index, "weather_point_in_time"].to_numpy()
+        return False
 
 
 def errors(frame: pd.DataFrame, column: str) -> dict:

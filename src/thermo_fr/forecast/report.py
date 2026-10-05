@@ -13,6 +13,7 @@ from .models import BENCHMARKS, MODELS  # noqa: E402
 
 COLUMN_LABELS = {"naive_day": "Same hour D-1", "naive_week": "Same hour D-7", "gbm": "Gradient boosting", "linear": "Linear"}
 DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+SET_LABELS = {"honest": "honest", "extended": "extended (may use late information)"}
 
 
 def write_report(results: dict, out=Path("reports/forecast"), sample_week: str | None = None, sources: dict | None = None,
@@ -26,6 +27,7 @@ def write_report(results: dict, out=Path("reports/forecast"), sample_week: str |
         r["worst_days"].to_csv(out / f"worst_days_{feature_set}.csv", index_label="delivery_day")
         summary[feature_set] = {
             "months": bt.months,
+            "point_in_time": bt.point_in_time,
             "metrics_strict": r["metrics_strict"],
             "metrics_all": r["metrics_all"],
             "worst_summary": r["worst_summary"],
@@ -56,6 +58,8 @@ def default_sample_week(results: dict) -> str:
 
 
 def mae_by_hour_chart(metrics: dict, path: Path, feature_set: str) -> None:
+    if not metrics["by_hour"]:
+        return
     by_hour = pd.DataFrame(metrics["by_hour"]).T.sort_index()
     fig, ax = plt.subplots(figsize=(9, 4.5))
     for column in list(BENCHMARKS) + list(MODELS):
@@ -73,6 +77,8 @@ def mae_by_hour_chart(metrics: dict, path: Path, feature_set: str) -> None:
 
 
 def monthly_chart(metrics: dict, path: Path, feature_set: str) -> None:
+    if not metrics["by_month"]:
+        return
     by_month = pd.DataFrame(metrics["by_month"]).T
     fig, ax = plt.subplots(figsize=(10, 4.5))
     x = range(len(by_month))
@@ -147,7 +153,7 @@ def metrics_table(metrics_by_set: dict[str, dict], slice_name: str = "all") -> s
         imp = metrics["improvement_pct"]
         cells = [f"{s[c]['mae']} / {s[c]['rmse']}" if s[c]["mae"] is not None else "n/a" for c in columns]
         cells += [f"{imp['gbm'].get('naive_day', 'n/a')}%", f"{imp['gbm'].get('naive_week', 'n/a')}%", f"{imp['linear'].get('naive_day', 'n/a')}%"]
-        lines.append(_row(feature_set, cells))
+        lines.append(_row(SET_LABELS.get(feature_set, feature_set), cells))
     return "\n".join(lines)
 
 
@@ -204,7 +210,8 @@ def to_markdown(summary: dict) -> str:
         "",
         f"## Headline, strict point-in-time rows ({any_strict['first_day']} to {any_strict['last_day']}, {any_strict['rows']:,} hours)",
         "",
-        "Rows whose weather forecasts come from the as-issued archive. Improvement is the MAE reduction against the benchmark.",
+        "Rows whose weather forecasts come from the as-issued archive. Improvement is the MAE reduction against the benchmark. "
+        "The honest set passes the look-ahead check for every row; the extended set does not, by construction.",
         "",
         metrics_table(strict),
         "",
@@ -218,7 +225,7 @@ def to_markdown(summary: dict) -> str:
     for k in sets:
         m = strict[k]
         parts += [
-            f"## {k.capitalize()} feature set, by slice (strict rows)",
+            f"## {SET_LABELS[k].capitalize()} feature set, by slice (strict rows)",
             "",
             f"Top price hours are those at or above {m['top_price_cut_eur_mwh']} EUR/MWh (95th percentile of the test window). "
             "Peak is 08:00 to 20:00 on weekdays.",

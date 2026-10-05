@@ -144,12 +144,13 @@ def test_walk_forward_never_trains_on_the_month_it_forecasts(inputs, fast_gbm):
     assert preds["strict"].all()  # issued weather from 10 January, honest features
 
 
-def test_strict_flag_marks_proxy_weather_and_extended_rows(inputs, fast_gbm):
+def test_strict_flag_marks_proxy_weather_and_the_gate_check_marks_the_set(inputs, fast_gbm):
     honest = walk_forward(build_features(inputs, "honest"), "2024-01-01", "2024-02-01", models=("linear",), log=lambda *_: None)
     flags = honest.predictions.groupby("delivery_day")["strict"].all()
     assert not flags[pd.Timestamp("2024-01-05")] and flags[pd.Timestamp("2024-01-20")]
+    assert honest.point_in_time
     extended = walk_forward(build_features(inputs, "extended"), "2024-02-01", "2024-03-01", models=("linear",), log=lambda *_: None)
-    assert not extended.predictions["strict"].any()
+    assert extended.predictions["strict"].all() and not extended.point_in_time
 
 
 def test_evaluate_reports_slices_hours_and_improvements(inputs, fast_gbm):
@@ -172,5 +173,5 @@ def test_run_backtest_covers_both_feature_sets(inputs, fast_gbm):
     results = run_backtest(inputs, "2024-03-01", "2024-04-01", log=lambda *_: None)
     assert set(results) == {"honest", "extended"}
     assert results["honest"]["metrics_strict"]["rows"] > 0
-    assert results["extended"]["metrics_strict"]["rows"] == 0  # nothing in the extended set is point in time
-    assert results["extended"]["metrics_all"]["rows"] == results["honest"]["metrics_all"]["rows"]
+    assert results["extended"]["metrics_strict"]["rows"] == results["honest"]["metrics_strict"]["rows"]
+    assert results["honest"]["backtest"].point_in_time and not results["extended"]["backtest"].point_in_time
