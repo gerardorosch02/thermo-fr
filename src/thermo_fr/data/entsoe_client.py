@@ -6,19 +6,21 @@ import pandas as pd
 
 from ..config import BIDDING_ZONE
 from .dataset import to_hourly_utc
+from .sources import date_chunks
+
+ATTRIBUTION = "ENTSO-E Transparency Platform, https://transparency.entsoe.eu, via entsoe-py."
 
 
 def year_chunks(start: pd.Timestamp, end: pd.Timestamp):
     """Split [start, end) into pieces of at most one year, the API's request limit."""
-    cursor = start
-    while cursor < end:
-        nxt = min(cursor + pd.DateOffset(years=1), end)
-        yield cursor, nxt
-        cursor = nxt
+    return date_chunks(start, end, years=1)
 
 
 class EntsoeSource:
     """Thin wrapper around entsoe-py that returns clean hourly UTC series."""
+
+    name = "entsoe"
+    attribution = ATTRIBUTION
 
     def __init__(self, api_key: str | None = None, zone: str = BIDDING_ZONE):
         key = api_key or os.environ.get("ENTSOE_API_KEY")
@@ -31,6 +33,7 @@ class EntsoeSource:
 
         self.client = EntsoePandasClient(api_key=key)
         self.zone = zone
+        self.details: dict = {"zone": zone}
 
     @staticmethod
     def _bounds(start: str, end: str):

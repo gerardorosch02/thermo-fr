@@ -9,6 +9,7 @@ import pandas as pd
 from ..config import CITIES, City
 
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+ATTRIBUTION = "Weather data by Open-Meteo.com, https://open-meteo.com, CC BY 4.0."
 
 
 def weighted_temperature(frames: dict, weights: dict) -> pd.Series:
