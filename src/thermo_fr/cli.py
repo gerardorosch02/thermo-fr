@@ -1,4 +1,4 @@
-"""Command line: fetch real data, fit it, or run the offline demo."""
+"""Command line: fetch real data, fit it, run the offline demo, or forecast day-ahead prices."""
 
 import argparse
 import json
@@ -84,6 +84,53 @@ def cmd_demo(args) -> None:
     print((Path(args.out) / "summary.md").read_text(encoding="utf-8"))
 
 
+def first_of_this_month() -> str:
+    return pd.Timestamp.now(tz="UTC").strftime("%Y-%m-01")
+
+
+def cmd_forecast_fetch(args) -> None:
+    from .forecast.inputs import fetch_inputs, save_inputs
+
+    hourly, sources, comparison = fetch_inputs(args.start, args.end, cache_dir=Path(args.cache_dir), csv_dir=Path(args.csv_dir))
+    path = save_inputs(hourly, sources, comparison, out=Path(args.out))
+    print(f"Saved {len(hourly):,} hourly rows to {path}")
+    for column, cov in sources["coverage"].items():
+        print(f"  {column:22s} {cov.get('hours', 0):>7,} hours  {cov.get('first', '')} to {cov.get('last', '')}")
+
+
+def cmd_forecast_backtest(args) -> None:
+    from .forecast.backtest import run_backtest
+    from .forecast.inputs import load_inputs
+    from .forecast.report import write_report
+
+    data = Path(args.data)
+    hourly = load_inputs(data)
+    sources = json.loads((data.parent / "sources.json").read_text()) if (data.parent / "sources.json").exists() else None
+    comparison_path = data.parent / "price_comparison.json"
+    comparison = json.loads(comparison_path.read_text()) if comparison_path.exists() else None
+    results = run_backtest(hourly, args.test_start, args.test_end)
+    path = write_report(results, out=Path(args.out), sample_week=args.sample_week, sources=sources, comparison=comparison)
+    print(path.read_text(encoding="utf-8"))
+
+
+def cmd_forecast(args) -> None:
+    from .forecast.day import forecast_day, refresh_window
+    from .forecast.inputs import load_inputs
+    from .forecast.report import forecast_day_chart
+
+    inputs = load_inputs(Path(args.data))
+    fresh = None if args.no_refresh else refresh_window(args.date, cache_dir=Path(args.cache_dir))
+    curve = forecast_day(args.date, inputs, fresh)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    curve.to_csv(out / f"day_{args.date}.csv")
+    forecast_day_chart(curve, args.date, out / f"day_{args.date}.png", "honest")
+    shown = curve[["hour", "forecast", "naive_day", "actual", "load_fc_mw", "temp_c"]]
+    print(f"Day-ahead price forecast for {args.date} (EUR/MWh), information as of 12:00 Paris the day before:")
+    print(shown.to_string(index=False, na_rep=""))
+    print(f"Saved {out / f'day_{args.date}.csv'} and {out / f'day_{args.date}.png'}")
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(prog="thermo-fr", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -109,5 +156,31 @@ def main(argv=None) -> None:
     demo.add_argument("--out", default="reports/demo")
     demo.set_defaults(func=cmd_demo)
 
+    ffetch = sub.add_parser("forecast-fetch", help="Download the day-ahead forecast inputs (ENTSO-E key needed)")
+    ffetch.add_argument("--start", default="2021-01-01", help="YYYY-MM-DD, inclusive")
+    ffetch.add_argument("--end", default=None, help="YYYY-MM-DD, exclusive; default: first day of the current month")
+    ffetch.add_argument("--out", default="data/forecast")
+    ffetch.add_argument("--cache-dir", default="data/cache")
+    ffetch.add_argument("--csv-dir", default="data/csv", help="ENTSO-E price exports to compare the API prices with")
+    ffetch.set_defaults(func=cmd_forecast_fetch)
+
+    fbt = sub.add_parser("forecast-backtest", help="Walk-forward backtest of the day-ahead price forecast")
+    fbt.add_argument("--data", default="data/forecast/inputs.csv")
+    fbt.add_argument("--out", default="reports/forecast")
+    fbt.add_argument("--test-start", default="2024-01-01", help="first month forecast out of sample")
+    fbt.add_argument("--test-end", default="2026-01-01", help="exclusive")
+    fbt.add_argument("--sample-week", default=None, help="Monday (YYYY-MM-DD) of the week to chart")
+    fbt.set_defaults(func=cmd_forecast_backtest)
+
+    fc = sub.add_parser("forecast", help="Hourly price forecast for one delivery day, as of 12:00 the day before")
+    fc.add_argument("--date", required=True, help="delivery day, YYYY-MM-DD (Paris)")
+    fc.add_argument("--data", default="data/forecast/inputs.csv")
+    fc.add_argument("--out", default="reports/forecast")
+    fc.add_argument("--cache-dir", default="data/cache")
+    fc.add_argument("--no-refresh", action="store_true", help="use the stored inputs only, no download")
+    fc.set_defaults(func=cmd_forecast)
+
     args = parser.parse_args(argv)
+    if args.command == "forecast-fetch" and args.end is None:
+        args.end = first_of_this_month()
     args.func(args)
