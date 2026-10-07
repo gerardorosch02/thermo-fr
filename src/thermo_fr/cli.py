@@ -139,6 +139,46 @@ def cmd_timing_probe(args) -> None:
     print(f"Appended to {args.log}")
 
 
+def cmd_morning_run(args) -> None:
+    from .forecast.jobs import morning_run, setup_logging
+    from .forecast.store import Store
+
+    setup_logging("morning-run", logs_dir=Path(args.logs_dir))
+    store = Store(Path(args.db))
+    try:
+        summary = morning_run(store, args.date, kind=args.kind, inputs_path=Path(args.data), cache_dir=Path(args.cache_dir),
+                              reports_dir=Path(args.reports_dir))
+    finally:
+        store.close()
+    print(f"morning-run {summary['status']}: delivery day {summary['delivery_day']}, "
+          f"forecasts {', '.join(summary['forecasts']) or 'none'}" + (f"; errors: {summary['errors']}" if summary["errors"] else ""))
+
+
+def cmd_settle(args) -> None:
+    from .forecast.jobs import settle, setup_logging
+    from .forecast.store import Store
+
+    setup_logging("settle", logs_dir=Path(args.logs_dir))
+    store = Store(Path(args.db))
+    try:
+        summary = settle(store, cache_dir=Path(args.cache_dir), kind=args.kind)
+    finally:
+        store.close()
+    print(f"settle {summary['status']}: actual prices for {summary['actual_days'] or 'no new days'}, "
+          f"{summary['scored']} forecast versions scored" + (f"; errors: {summary['errors']}" if summary["errors"] else ""))
+
+
+def cmd_dashboard(args) -> None:
+    import subprocess
+    import sys
+
+    app = Path(__file__).parent / "dashboard" / "app.py"
+    command = [sys.executable, "-m", "streamlit", "run", str(app), "--server.port", str(args.port), "--server.headless", "true",
+               "--browser.gatherUsageStats", "false", "--", "--db", args.db]
+    print("Starting the dashboard at http://localhost:%d (Ctrl+C to stop)" % args.port)
+    subprocess.run(command, check=False)
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(prog="thermo-fr", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -193,6 +233,28 @@ def main(argv=None) -> None:
     probe.add_argument("--log", default="data/timing_probe.csv")
     probe.add_argument("--cache-dir", default="data/cache")
     probe.set_defaults(func=cmd_timing_probe)
+
+    morning = sub.add_parser("morning-run", help="Fetch tomorrow's inputs, log their timing, store the forecasts")
+    morning.add_argument("--date", default=None, help="delivery day, default tomorrow (Paris)")
+    morning.add_argument("--kind", default="scheduled", choices=("scheduled", "manual", "test"))
+    morning.add_argument("--db", default="data/forecast.db")
+    morning.add_argument("--data", default="data/forecast/inputs.csv")
+    morning.add_argument("--cache-dir", default="data/cache")
+    morning.add_argument("--reports-dir", default="reports/forecast", help="backtest predictions for the error band")
+    morning.add_argument("--logs-dir", default="logs")
+    morning.set_defaults(func=cmd_morning_run)
+
+    stl = sub.add_parser("settle", help="Fetch actual prices and score the stored forecasts")
+    stl.add_argument("--kind", default="scheduled", choices=("scheduled", "manual", "test"))
+    stl.add_argument("--db", default="data/forecast.db")
+    stl.add_argument("--cache-dir", default="data/cache")
+    stl.add_argument("--logs-dir", default="logs")
+    stl.set_defaults(func=cmd_settle)
+
+    dash = sub.add_parser("dashboard", help="Open the local Streamlit dashboard")
+    dash.add_argument("--db", default="data/forecast.db")
+    dash.add_argument("--port", type=int, default=8501)
+    dash.set_defaults(func=cmd_dashboard)
 
     args = parser.parse_args(argv)
     if args.command == "forecast-fetch" and args.end is None:
