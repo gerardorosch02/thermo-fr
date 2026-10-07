@@ -61,9 +61,8 @@ def forecast_panel(path, delivery_day: str, feature_set: str, actual_day: str) -
     by_hour = table.groupby("hour").agg(forecast=("forecast", "mean"), naive_day=("naive_day", "mean")).reset_index()
     for name, series in (("actual_other", out["actual_other"]), ("actual_own", out["actual_own"])):
         if len(series):
-            hours = series.index.tz_convert(LOCAL_TZ).hour
-            by_hour = by_hour.merge(series.groupby(hours).mean().rename(name).reset_index().rename(columns={"index": "hour"}),
-                                    on="hour", how="left")
+            hourly = pd.DataFrame({"hour": series.index.tz_convert(LOCAL_TZ).hour, name: series.to_numpy()})
+            by_hour = by_hour.merge(hourly.groupby("hour")[name].mean().reset_index(), on="hour", how="left")
         else:
             by_hour[name] = float("nan")
     if not out["band"].empty:

@@ -81,6 +81,33 @@ thermo-fr timing-probe                             # log which ENTSO-E items alr
 
 Inputs: ENTSO-E day-ahead prices, day-ahead total load forecast and day-ahead wind and solar forecasts (RESTful API, cached under `data/cache/entsoe/`), and Open-Meteo weather forecasts for the eight cities as they were issued two days ahead (previous-runs archive, cached under `data/cache/open-meteo/`). Two feature sets are evaluated: an honest one whose every input is published before the gate, and an extended one that adds the ENTSO-E wind and solar forecasts, which the platform allows until 18:00 on D-1. A test fails if any feature for delivery day D is timestamped after 12:00 Paris on D-1.
 
+## Scheduled jobs and dashboard
+
+Two jobs keep a local SQLite database (`data/forecast.db`) up to date, and a Streamlit dashboard reads it. The jobs are the only code that calls the APIs.
+
+```bash
+pip install -e ".[dev,forecast,dashboard]"       # adds streamlit and plotly
+thermo-fr morning-run                             # tomorrow's inputs, timing log, both forecasts (new version each run)
+thermo-fr settle                                  # actual prices, then every unscored forecast version is scored
+thermo-fr dashboard                               # http://localhost:8501
+```
+
+`morning-run` fetches the ENTSO-E day-ahead load forecast, wind and solar forecasts and prices around the next delivery day, and the Open-Meteo weather forecasts issued two days ahead. For each input it records whether it is present for the delivery day, its hour count, revision number and a hash of its values, so the timing log (table `timing_log`) shows when each input first appeared relative to the 12:00 Paris gate and whether it changed between runs. It then stores the hourly inputs and a forecast for the honest feature set and, when the wind and solar forecasts exist, for the extended set. Every forecast is a new version stamped with its issue time; nothing is overwritten. A source that is down is logged in `data_status` and the run finishes as `partial` or `failed` instead of crashing. `settle` fetches the actual prices for today, tomorrow and every forecast day, stores them, and scores each version against them and against the same-hour-previous-day benchmark. Both commands log to `logs/<command>_<date>.log`.
+
+Windows Task Scheduler entries (the jobs run as the current user and read `ENTSOE_API_KEY` from the user environment, so set it with `setx ENTSOE_API_KEY ...` once):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Install   # morning-run weekdays 07:00, 08:00, 09:00, 10:00, 10:45, 11:30; settle daily 14:00 (local time, London intended)
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Show
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Remove
+```
+
+Both tasks have "run task as soon as possible after a scheduled start is missed" turned on.
+
+The dashboard shows tomorrow's latest forecast with today's actual prices, the same-hour-previous-day benchmark and a shaded band built from the backtest's error distribution at each hour (historical error, not a probability forecast); tomorrow's forecast load, wind, solar, residual load and temperature with the change against today's inputs; the last 30 settled days against actual prices with rolling MAE and the share of days the model won; the data status for tomorrow (arrival time of each input, anything missing or late) and the timing-probe summary across all logged days. A sidebar toggle switches between the honest and extended feature sets, with a note that the extended set may use information published after the gate until the timing log shows otherwise. Database reads are cached; the "Refresh now" button runs `morning-run` once.
+
+![Dashboard](docs/img/dashboard.png)
+
 ## Data sources
 
 | Name | Series | Key | Where the data comes from |
@@ -148,7 +175,13 @@ src/thermo_fr/
   forecast/backtest.py   monthly walk-forward, metrics by slice, worst days
   forecast/report.py     reports/forecast/ tables and charts
   forecast/day.py        one delivery day as of 12:00 the day before
-  forecast/probe.py      timing probe for tomorrow's ENTSO-E items
+  forecast/probe.py      timing probe for tomorrow's ENTSO-E items (superseded by morning-run)
+  forecast/store.py      SQLite store: runs, data status, timing log, inputs, forecast versions, actuals, scores, error band
+  forecast/jobs.py       morning-run and settle
+  dashboard/data.py      read-only queries for the dashboard
+  dashboard/app.py       the Streamlit app
+scripts/schedule_tasks.ps1   install, show or remove the Task Scheduler entries
+scripts/screenshot_dashboard.py  full-page screenshot of the running dashboard
   data/energy_charts.py  Energy-Charts load and prices (no key)
   data/rte_eco2mix.py    RTE eCO2mix load from ODRE (no key)
   data/csv_source.py     ENTSO-E CSV exports made by hand
