@@ -49,6 +49,7 @@ def test_timing_log_records_first_appearance_and_revisions(store):
     summary = store.timing_summary().set_index("item")
     assert summary.loc["load_forecast", "days_seen_before_gate"] == 1 and summary.loc["wind_solar_forecast", "days_seen_before_gate"] == 0
     assert summary.loc["load_forecast", "days_with_changes"] == 1
+    assert summary.loc["load_forecast", "days_polled_before_gate"] == 1 and summary.loc["wind_solar_forecast", "days_polled_before_gate"] == 0
 
 
 def test_forecast_versions_are_kept_and_never_overwritten(store):

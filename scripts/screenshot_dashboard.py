@@ -18,14 +18,12 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     driver = Driver(browser="chrome", headless=True)
     try:
-        driver.set_window_size(1500, 1000)
+        # Streamlit scrolls inside its own container, so a tall window is the simple way to a full-page capture.
+        driver.set_window_size(1500, 3600)
         driver.get(url)
-        time.sleep(12)  # let Streamlit render the charts
-        height = driver.execute_script("return document.documentElement.scrollHeight")
-        driver.set_window_size(1500, min(int(height) + 100, 4200))
-        time.sleep(3)
+        time.sleep(15)  # let Streamlit render the charts
         driver.save_screenshot(str(out))
-        print(f"saved {out} ({height}px tall)")
+        print(f"saved {out}")
     finally:
         driver.quit()
 

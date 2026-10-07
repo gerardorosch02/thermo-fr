@@ -168,11 +168,12 @@ def main() -> None:
         issued = pd.Timestamp(meta["issued_at_utc"]).tz_convert("Europe/Paris")
         gate_badge = "passes the 12:00 gate" if meta["passes_gate"] else "may use information published after the 12:00 gate"
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Issued at (Paris)", issued.strftime("%Y-%m-%d %H:%M"))
+        c1.metric("Issued at (Paris)", issued.strftime("%H:%M"), help=issued.strftime("%Y-%m-%d %H:%M Paris"))
         c2.metric("Versions today", int(len(panel["versions"])))
         c3.metric("Daily mean forecast", f"{panel['by_hour']['forecast'].mean():.1f} EUR/MWh")
         c4.metric("Run kind", str(meta["kind"]))
-        st.caption(f"Model: {meta['model']} fitted on {int(meta['train_hours']):,} hours; this feature set {gate_badge}.")
+        st.caption(f"Issued {issued:%Y-%m-%d %H:%M} Paris. Model: {meta['model']} fitted on {int(meta['train_hours']):,} hours; "
+                   f"this feature set {gate_badge}.")
         has_band = "band_p10" in panel["by_hour"]
         st.plotly_chart(forecast_chart(panel["by_hour"], feature_set, today, has_band), use_container_width=True)
         if has_band:
@@ -256,7 +257,8 @@ def main() -> None:
     else:
         st.dataframe(status["summary"].round(0), hide_index=True, use_container_width=True)
         st.caption("Minutes before the 12:00 Paris gate at which the input was first seen (negative means after the gate). "
-                   "Only the runs' polling times are known, so a first-appearance time is an upper bound on the true publication time.")
+                   "Only the runs' polling times are known, so a first-appearance time is an upper bound on the true publication time, "
+                   "and only days whose first poll was before the gate (days_polled_before_gate) say anything about the gate.")
         with st.expander("Timing log by day"):
             st.dataframe(status["timing"], hide_index=True, use_container_width=True)
     with st.expander("Recent job runs"):

@@ -172,18 +172,27 @@ class Store:
     def timing_summary(self) -> pd.DataFrame:
         """Per input across all logged days: how many days, first-appearance statistics, revisions."""
         log = self.timing_log()
+        columns = ["item", "days", "days_polled_before_gate", "earliest_min_before_gate", "median_min_before_gate",
+                   "latest_min_before_gate", "days_seen_before_gate", "days_with_changes"]
         if log.empty:
-            return pd.DataFrame(columns=["item", "days", "earliest_min_before_gate", "median_min_before_gate",
-                                         "latest_min_before_gate", "days_seen_before_gate", "days_with_changes"])
+            return pd.DataFrame(columns=columns)
+        first_checks = pd.read_sql_query(
+            "SELECT delivery_day, item, MIN(checked_at_utc) AS first_checked_utc FROM data_status GROUP BY delivery_day, item", self.conn
+        )
+        log = log.merge(first_checks, on=["delivery_day", "item"], how="left")
+        gate = gate_closure(log["delivery_day"])
+        first_checked = pd.to_datetime(log["first_checked_utc"], utc=True)
+        log["polled_before_gate"] = (first_checked < gate).fillna(False).to_numpy()
         grouped = log.groupby("item")
         return pd.DataFrame({
             "days": grouped.size(),
+            "days_polled_before_gate": grouped["polled_before_gate"].sum().astype(int),
             "earliest_min_before_gate": grouped["minutes_before_gate"].max(),
             "median_min_before_gate": grouped["minutes_before_gate"].median(),
             "latest_min_before_gate": grouped["minutes_before_gate"].min(),
             "days_seen_before_gate": grouped["minutes_before_gate"].apply(lambda s: int((s > 0).sum())),
             "days_with_changes": grouped["changes"].apply(lambda s: int((s > 0).sum())),
-        }).reset_index()
+        }).reset_index()[columns]
 
     # Input values
 
