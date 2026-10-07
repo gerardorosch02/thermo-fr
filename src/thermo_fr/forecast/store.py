@@ -207,6 +207,25 @@ class Store:
         self.conn.commit()
         return len(rows)
 
+    def input_value_runs(self, delivery_day: str) -> pd.DataFrame:
+        """The runs that stored inputs for a delivery day, oldest first, with their start times."""
+        return pd.read_sql_query(
+            "SELECT r.run_id, r.started_at_utc, r.kind FROM runs r WHERE r.run_id IN"
+            " (SELECT DISTINCT run_id FROM input_values WHERE delivery_day = ?) ORDER BY r.started_at_utc",
+            self.conn, params=(delivery_day,),
+        )
+
+    def input_values_for_run(self, run_id: int, delivery_day: str) -> pd.DataFrame:
+        frame = pd.read_sql_query(
+            "SELECT series, timestamp_utc, value FROM input_values WHERE run_id = ? AND delivery_day = ?",
+            self.conn, params=(int(run_id), delivery_day),
+        )
+        if frame.empty:
+            return pd.DataFrame()
+        wide = frame.pivot(index="timestamp_utc", columns="series", values="value")
+        wide.index = pd.to_datetime(wide.index, utc=True)
+        return wide.sort_index()
+
     def latest_input_values(self, delivery_day: str) -> pd.DataFrame:
         """Hourly inputs of a delivery day from the most recent run that stored them (wide frame)."""
         run = self.conn.execute(
@@ -214,13 +233,7 @@ class Store:
         ).fetchone()[0]
         if run is None:
             return pd.DataFrame()
-        frame = pd.read_sql_query(
-            "SELECT series, timestamp_utc, value FROM input_values WHERE run_id = ? AND delivery_day = ?",
-            self.conn, params=(run, delivery_day),
-        )
-        wide = frame.pivot(index="timestamp_utc", columns="series", values="value")
-        wide.index = pd.to_datetime(wide.index, utc=True)
-        return wide.sort_index()
+        return self.input_values_for_run(run, delivery_day)
 
     # Forecasts
 

@@ -4,7 +4,10 @@ Install or remove the Windows Task Scheduler entries for the thermo-fr forecast 
 
 .DESCRIPTION
 Creates two tasks that run as the current user, with "run task as soon as
-possible after a scheduled start is missed" turned on:
+possible after a scheduled start is missed" and "wake the computer to run this
+task" turned on. Waking only works if Windows allows wake timers (Power Options,
+Sleep, Allow wake timers: Enable, for both plugged in and on battery) and the
+machine is asleep or hibernating rather than shut down:
 
   thermo-fr morning-run   weekdays at 07:00, 08:00, 09:00, 10:00, 10:45 and 11:30
                           (local machine time; the machine is expected to be on
@@ -50,7 +53,7 @@ if ($Remove) {
 if ($Install) {
     Remove-IfPresent $morningName
     Remove-IfPresent $settleName
-    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
         -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $weekdays = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
 
@@ -78,7 +81,8 @@ if ($Show -or $Install) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -eq $task) { Write-Host "Task '$name' is not installed"; continue }
         $info = Get-ScheduledTaskInfo -TaskName $name
-        Write-Host ("{0}: state {1}, next run {2}, last run {3} (result {4})" -f $name, $task.State, $info.NextRunTime, $info.LastRunTime, $info.LastTaskResult)
+        Write-Host ("{0}: state {1}, next run {2}, last run {3} (result {4}), wake to run {5}, start when available {6}" -f `
+            $name, $task.State, $info.NextRunTime, $info.LastRunTime, $info.LastTaskResult, $task.Settings.WakeToRun, $task.Settings.StartWhenAvailable)
         foreach ($trigger in $task.Triggers) {
             $start = ([datetime]$trigger.StartBoundary).ToString("HH:mm")
             $days = if ($trigger.DaysOfWeek) { $trigger.DaysOfWeek } else { "daily" }

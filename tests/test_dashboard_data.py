@@ -81,3 +81,24 @@ def test_db_version_and_day_helpers(db):
     assert q.db_version(db) > 0 and q.db_version(db.parent / "missing.db") == 0.0
     assert q.today_and_tomorrow(pd.Timestamp("2026-10-07T08:00Z")) == (TODAY, TOMORROW)
     assert not np.isnan(q.db_version(db))
+
+
+def test_revisions_panel_compares_first_and_latest_run(db):
+    s = Store(db)
+    c = curve_for(TOMORROW, 100)
+    later = pd.DataFrame({"load_fc_mw": 51000.0, "solar_fc_mw": 3000.0, "wind_onshore_fc_mw": 4000.0, "wind_offshore_fc_mw": 500.0,
+                          "temp_fc_c": 11.0, "wind100_fc_ms": 6.0, "radiation_fc_wm2": 100.0}, index=c.index)
+    first_run = s.start_run("morning-run", "scheduled", TOMORROW, now=pd.Timestamp("2026-10-07T05:00Z"))
+    second_run = s.start_run("morning-run", "scheduled", TOMORROW, now=pd.Timestamp("2026-10-07T09:00Z"))
+    # the fixture stored inputs under run_id 2 already; add an earlier and a later snapshot
+    s.save_input_values(first_run, TOMORROW, later - 2000.0)
+    s.save_input_values(second_run, TOMORROW, later)
+    s.close()
+    panel = q.revisions_panel(db, TOMORROW, "honest")
+    table = panel["table"].set_index("quantity")
+    assert panel["run_count"] == 2 and panel["first_run_paris"] == "07:00" and panel["latest_run_paris"] == "11:00"
+    assert table.loc["Load forecast (MW)", "change"] == pytest.approx(2000.0)
+    assert table.loc["Temperature (C)", "change"] == pytest.approx(2000.0)  # every column was shifted by 2000 in the fixture
+    assert table.loc["Forecast daily mean price, honest (EUR/MWh)", "change"] == pytest.approx(10.0)
+    assert panel["version_count"] == 2 and panel["first_issue_paris"] == "09:00" and panel["latest_issue_paris"] == "11:00"
+    assert q.revisions_panel(db, "2026-10-09", "honest")["table"].empty

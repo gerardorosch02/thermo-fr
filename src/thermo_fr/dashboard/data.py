@@ -154,3 +154,47 @@ def flag_for(row) -> str:
     if row.get("hours") is not None and row["hours"] < 23:
         return "incomplete"
     return "ok"
+
+
+REVISION_ROWS = [("load_fc_mw", "Load forecast (MW)"), ("wind_fc_mw", "Wind forecast (MW)"), ("solar_fc_mw", "Solar forecast (MW)"),
+                 ("residual_fc_mw", "Residual load (MW)"), ("temp_fc_c", "Temperature (C)")]
+
+
+def _paris_clock(ts) -> str:
+    return pd.Timestamp(ts).tz_convert(LOCAL_TZ).strftime("%H:%M")
+
+
+def revisions_panel(path, delivery_day: str, feature_set: str) -> dict:
+    """How the inputs and the forecast daily mean moved between the first and the latest run of the morning."""
+
+    def read(store: Store):
+        runs = store.input_value_runs(delivery_day)
+        versions = store.forecast_versions(delivery_day, feature_set)
+        out = {"runs": runs, "versions": versions}
+        if len(runs):
+            out["first_inputs"] = daily_inputs(store.input_values_for_run(int(runs.iloc[0]["run_id"]), delivery_day))
+            out["latest_inputs"] = daily_inputs(store.input_values_for_run(int(runs.iloc[-1]["run_id"]), delivery_day))
+        if len(versions):
+            out["first_curve"] = store.forecast_curve(int(versions.iloc[0]["forecast_id"]))
+            out["latest_curve"] = store.forecast_curve(int(versions.iloc[-1]["forecast_id"]))
+        return out
+
+    out = _with_store(path, read)
+    rows = []
+    if len(out["runs"]):
+        first, latest = out["first_inputs"].get("means", {}), out["latest_inputs"].get("means", {})
+        for key, label in REVISION_ROWS:
+            a, b = first.get(key), latest.get(key)
+            usable = a is not None and b is not None and not pd.isna(a) and not pd.isna(b)
+            rows.append({"quantity": label, "first": a, "latest": b, "change": (b - a) if usable else None})
+        out["first_run_paris"] = _paris_clock(out["runs"].iloc[0]["started_at_utc"])
+        out["latest_run_paris"] = _paris_clock(out["runs"].iloc[-1]["started_at_utc"])
+        out["run_count"] = int(len(out["runs"]))
+    if len(out["versions"]):
+        a, b = float(out["first_curve"]["forecast"].mean()), float(out["latest_curve"]["forecast"].mean())
+        rows.append({"quantity": f"Forecast daily mean price, {feature_set} (EUR/MWh)", "first": a, "latest": b, "change": b - a})
+        out["first_issue_paris"] = _paris_clock(out["versions"].iloc[0]["issued_at_utc"])
+        out["latest_issue_paris"] = _paris_clock(out["versions"].iloc[-1]["issued_at_utc"])
+        out["version_count"] = int(len(out["versions"]))
+    out["table"] = pd.DataFrame(rows, columns=["quantity", "first", "latest", "change"])
+    return out

@@ -102,7 +102,7 @@ powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Show
 powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Remove
 ```
 
-Both tasks have "run task as soon as possible after a scheduled start is missed" turned on.
+Both tasks have "run task as soon as possible after a scheduled start is missed" and "wake the computer to run this task" turned on. Waking from sleep or hibernation also needs Windows to allow wake timers: Power Options, Sleep, Allow wake timers set to Enable for both plugged in and on battery (`powercfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 1`, the same with `/setdcvalueindex`, then `powercfg /setactive SCHEME_CURRENT`). A machine that is shut down cannot be woken by a task.
 
 The dashboard shows tomorrow's latest forecast with today's actual prices, the same-hour-previous-day benchmark and a shaded band built from the backtest's error distribution at each hour (historical error, not a probability forecast); tomorrow's forecast load, wind, solar, residual load and temperature with the change against today's inputs; the last 30 settled days against actual prices with rolling MAE and the share of days the model won; the data status for tomorrow (arrival time of each input, anything missing or late) and the timing-probe summary across all logged days. A sidebar toggle switches between the honest and extended feature sets, with a note that the extended set may use information published after the gate until the timing log shows otherwise. Database reads are cached; the "Refresh now" button runs `morning-run` once.
 

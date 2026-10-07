@@ -44,6 +44,11 @@ def inputs_panel(path, version, day, previous):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
+def revisions_panel(path, version, day, feature_set):
+    return q.revisions_panel(path, day, feature_set)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
 def performance_panel(path, version, feature_set):
     return q.performance_panel(path, feature_set)
 
@@ -217,6 +222,26 @@ def main() -> None:
         left, right = st.columns([2, 1])
         left.plotly_chart(inputs_chart(inputs["tomorrow"]["hourly"]), use_container_width=True)
         right.plotly_chart(temperature_chart(inputs["tomorrow"]["hourly"]), use_container_width=True)
+
+    st.markdown("**Revisions this morning**")
+    revisions = revisions_panel(db, version, tomorrow, feature_set)
+    if revisions["table"].empty:
+        st.caption("No morning-run has stored inputs for tomorrow yet.")
+    else:
+        parts = []
+        if "run_count" in revisions:
+            parts.append(f"inputs from {revisions['run_count']} run(s), first at {revisions['first_run_paris']}, "
+                         f"latest at {revisions['latest_run_paris']} Paris")
+        if "version_count" in revisions:
+            parts.append(f"{revisions['version_count']} {feature_set} forecast version(s), issued "
+                         f"{revisions['first_issue_paris']} to {revisions['latest_issue_paris']}")
+        st.caption("Daily means for tomorrow in the first and the latest morning-run of today; " + "; ".join(parts) + ".")
+        shown = revisions["table"].copy()
+        for column in ("first", "latest", "change"):
+            fmt = "{:+,.1f}" if column == "change" else "{:,.1f}"
+            shown[column] = shown[column].map(lambda v, fmt=fmt: "n/a" if v is None or pd.isna(v) else fmt.format(v))
+        st.dataframe(shown.rename(columns={"quantity": "Quantity", "first": "First run", "latest": "Latest run", "change": "Change"}),
+                     hide_index=True, use_container_width=True)
 
     # 3. Recent performance
     st.subheader(f"Recent performance, last 30 settled days ({feature_set})")
