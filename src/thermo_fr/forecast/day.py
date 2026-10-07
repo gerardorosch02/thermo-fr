@@ -3,9 +3,12 @@
 The stored inputs table (forecast-fetch) supplies the history. The days around
 the requested date are fetched fresh from ENTSO-E (prices up to D-1, the load
 forecast for D) and Open-Meteo (the forecasts issued two days before each
-hour of D), merged over the stored table, and the honest feature set is built.
-The gradient boosting model is fitted on every delivery day before D and the
-look-ahead check is run on the rows of D before predicting.
+hour of D), merged over the stored table, and the feature set is built. The
+gradient boosting model is fitted on every delivery day before D. For the
+honest set the look-ahead check is run on the rows of D before predicting;
+the extended set fails that check by construction (ENTSO-E wind and solar
+forecasts may be published after the gate), so it is only built when asked
+for explicitly and flagged as such.
 """
 
 from pathlib import Path
@@ -23,7 +26,7 @@ HISTORY_DAYS = 10  # refreshed around the target day so that lags and the day it
 
 
 def refresh_window(date: str, cache_dir=Path("data/cache"), log=print) -> pd.DataFrame:
-    """Inputs for [D - HISTORY_DAYS, D + 1) straight from the sources."""
+    """Inputs for [D - HISTORY_DAYS, D + 1) straight from the sources (honest inputs only)."""
     day = pd.Timestamp(date).normalize()
     start = (day - pd.Timedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%d")
     end = (day + pd.Timedelta(days=2)).strftime("%Y-%m-%d")  # UTC window covers the whole Paris day
@@ -37,24 +40,37 @@ def refresh_window(date: str, cache_dir=Path("data/cache"), log=print) -> pd.Dat
     return fresh.reindex(columns=INPUT_COLUMNS)
 
 
-def forecast_day(date: str, inputs: pd.DataFrame, fresh: pd.DataFrame | None = None, model: str = "gbm", log=print) -> pd.DataFrame:
-    """Hourly forecast curve for delivery day `date` (Paris), honest feature set only."""
-    day = pd.Timestamp(date).normalize()
+def merge_inputs(inputs: pd.DataFrame, fresh: pd.DataFrame | None) -> pd.DataFrame:
     merged = inputs.copy()
-    if fresh is not None:
+    if fresh is not None and not fresh.empty:
         merged = fresh.combine_first(merged).sort_index()
-        merged = merged.reindex(columns=INPUT_COLUMNS)
-    table = build_features(merged, "honest")
+    return merged.reindex(columns=INPUT_COLUMNS)
+
+
+def forecast_day(date: str, inputs: pd.DataFrame, fresh: pd.DataFrame | None = None, model: str = "gbm", log=print,
+                 feature_set: str = "honest") -> pd.DataFrame:
+    """Hourly forecast curve for delivery day `date` (Paris) with one feature set.
+
+    The returned frame carries `train_hours` and `passes_gate` in its attrs.
+    """
+    day = pd.Timestamp(date).normalize()
+    merged = merge_inputs(inputs, fresh)
+    table = build_features(merged, feature_set)
     rows = table.info["delivery_day"] == day
     if not rows.any():
         raise ValueError(f"No input hours found for {date}; the inputs table ends at {merged.index.max()}.")
-    check_point_in_time(table.X.index[rows], feature_timings("honest"))
+    passes_gate = feature_set == "honest"
+    if passes_gate:
+        check_point_in_time(table.X.index[rows], feature_timings(feature_set))
     if not table.info.loc[rows, "weather_point_in_time"].all():
         raise ValueError(f"Weather forecasts as issued are missing for {date}; refusing to use the proxy.")
     if table.X.loc[rows, "load_fc_mw"].isna().all():
         raise ValueError(f"ENTSO-E load forecast for {date} is not available yet.")
+    if feature_set == "extended" and table.X.loc[rows, "residual_load_fc_mw"].isna().all():
+        raise ValueError(f"ENTSO-E wind and solar forecasts for {date} are not available yet.")
     train = table.info["delivery_day"] < day
-    log(f"Fitting {model} on {int(table.y[train].notna().sum()):,} hours before {date} ...")
+    train_hours = int(table.y[train].notna().sum())
+    log(f"Fitting {model} ({feature_set}) on {train_hours:,} hours before {date} ...")
     prediction = fit_predict(model, table.X[train], table.y[train], table.X[rows])
     curve = pd.DataFrame(
         {
@@ -68,4 +84,6 @@ def forecast_day(date: str, inputs: pd.DataFrame, fresh: pd.DataFrame | None = N
         index=table.X.index[rows],
     )
     curve.index.name = "timestamp_utc"
+    curve.attrs["train_hours"] = train_hours
+    curve.attrs["passes_gate"] = passes_gate
     return curve
