@@ -17,8 +17,8 @@ import streamlit as st
 
 from thermo_fr.dashboard import data as q
 
-COLORS = {"honest": "#2a78d6", "extended": "#eb6834", "actual": "#0b0b0b", "benchmark": "#52514e", "grid": "#e6e5e1"}
-BAND_RGBA = {"honest": ("rgba(42,120,214,0.14)", "rgba(42,120,214,0.30)"), "extended": ("rgba(235,104,52,0.14)", "rgba(235,104,52,0.30)")}
+COLORS = {"honest": "#2a78d6", "extended": "#1baf7a", "actual": "#eb6834", "benchmark": "#52514e", "grid": "#e6e5e1"}
+BAND_RGBA = {"honest": ("rgba(42,120,214,0.14)", "rgba(42,120,214,0.30)"), "extended": ("rgba(27,175,122,0.14)", "rgba(27,175,122,0.30)")}
 EXTENDED_NOTE = (
     "The extended feature set adds the ENTSO-E day-ahead wind and solar forecasts, which the platform allows to be "
     "published until 18:00 on the day before delivery, after the 12:00 gate. Until the timing log shows them arriving "
@@ -108,7 +108,7 @@ def performance_chart(scores: pd.DataFrame, feature_set: str) -> go.Figure:
     fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_naive_mae"], name="Benchmark, 7-day rolling", mode="lines",
                              line=dict(color=COLORS["benchmark"], width=2, dash="dash")))
     fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_mae"], name="Model, 7-day rolling", mode="lines",
-                             line=dict(color=COLORS["actual"], width=2)))
+                             line=dict(color="#0b0b0b", width=2)))
     fig.update_layout(barmode="group")
     return base_layout(fig, "MAE, EUR/MWh", "Delivery day")
 
