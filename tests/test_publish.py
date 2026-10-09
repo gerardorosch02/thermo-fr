@@ -44,7 +44,8 @@ def test_export_writes_the_public_files_for_the_window(tmp_path):
     assert set(forecasts["delivery_day"]) == set(DAYS)  # June is outside the 90-day window, extended is never exported
     assert forecasts.groupby("delivery_day")["issued_at_utc"].nunique().eq(2).all()
     assert list(forecasts.columns) == ["delivery_day", "issued_at_utc", "kind", "train_hours", "premarket", "timestamp_utc", "hour", "forecast", "naive_day"]
-    assert forecasts["premarket"].eq(1).all()  # 06:00Z and 09:00Z on D-1 are both before the 11:15 Paris market window
+    flags = forecasts.groupby("delivery_day")["premarket"].first()
+    assert flags["2026-10-07"] == 0 and flags[["2026-10-08", "2026-10-09", "2026-10-10"]].eq(1).all()  # the fixture issues the first day on the day itself
     tomorrow = pd.read_csv(out / "tomorrow.csv")
     assert tomorrow["delivery_day"].unique().tolist() == ["2026-10-10"] and tomorrow["issued_at_utc"].nunique() == 1
     assert tomorrow["forecast"].iloc[0] == 108.0  # the later (105 + 3) version
