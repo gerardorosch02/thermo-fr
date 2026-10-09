@@ -1,0 +1,94 @@
+name: Day-ahead forecast
+
+# Keeps published/ current without a local machine. Each job restores the
+# public dataset into a fresh SQLite store, runs one step, exports the dataset
+# again and commits only published/. The ENTSO-E token comes from the
+# repository secret ENTSOE_API_KEY and is only ever read as an environment
+# variable by the job; nothing prints or writes it.
+#
+# GitHub cron runs in UTC. London is UTC+1 from late March to late October and
+# UTC in winter, so the morning runs below are 10:30 and 11:30 London in
+# summer and 09:30 and 10:30 London in winter, both before the 12:00 Paris
+# gate in winter and the second one shortly after it in summer. Settle runs
+# at 14:15 London in summer and 13:15 in winter, after the auction results
+# (published around 12:45 to 13:00 Paris).
+
+on:
+  schedule:
+    - cron: "30 9 * * 1-5"    # morning-run
+    - cron: "30 10 * * 1-5"   # morning-run
+    - cron: "15 13 * * *"     # settle
+  workflow_dispatch:
+    inputs:
+      step:
+        description: "Which step to run"
+        type: choice
+        options: [morning-run, settle]
+        default: morning-run
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forecast-publish
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[forecast]"
+
+      - name: Decide which step to run
+        id: step
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "step=${{ github.event.inputs.step }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "15 13 * * *" ]; then
+            echo "step=settle" >> "$GITHUB_OUTPUT"
+          else
+            echo "step=morning-run" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore the public dataset into a fresh store
+        run: thermo-fr import-published --from published --db data/forecast.db --data data/forecast/inputs.csv
+
+      - name: Run ${{ steps.step.outputs.step }}
+        env:
+          ENTSOE_API_KEY: ${{ secrets.ENTSOE_API_KEY }}
+        run: |
+          if [ "${{ steps.step.outputs.step }}" = "settle" ]; then
+            thermo-fr settle --kind scheduled --db data/forecast.db --extend-history data/forecast/inputs.csv
+          else
+            thermo-fr morning-run --kind scheduled --db data/forecast.db --data data/forecast/inputs.csv \
+              --feature-sets honest --extend-history data/forecast/inputs.csv
+          fi
+
+      - name: Export the public dataset
+        run: thermo-fr publish --out published --db data/forecast.db --data data/forecast/inputs.csv
+
+      - name: Commit published/
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add published
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+          else
+            git commit -m "Publish ${{ steps.step.outputs.step }} $(date -u +%Y-%m-%dT%H:%MZ)"
+            git pull --rebase origin "${{ github.ref_name }}"
+            git push
+          fi
