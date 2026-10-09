@@ -1,0 +1,48 @@
+{
+  "feature_set": "honest",
+  "model": "lightgbm",
+  "model_file": "honest.txt",
+  "fitted_at_utc": "2026-10-09T15:32:03Z",
+  "train_from": "2021-01-01",
+  "train_to": "2026-10-01",
+  "train_hours": 50376,
+  "features": [
+    "hour",
+    "dow",
+    "month",
+    "holiday",
+    "day_of_year",
+    "load_fc_mw",
+    "temp_c",
+    "wind100_ms",
+    "radiation_wm2",
+    "price_lag1",
+    "price_lag2",
+    "price_lag7",
+    "price_lag1_mean",
+    "price_lag1_min",
+    "price_lag1_max",
+    "price_lag7_mean"
+  ],
+  "params": {
+    "n_estimators": 800,
+    "learning_rate": 0.03,
+    "num_leaves": 63,
+    "min_child_samples": 40,
+    "subsample": 0.8,
+    "subsample_freq": 1,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 1.0,
+    "random_state": 7
+  },
+  "holdout": {
+    "holdout_from": "2026-09-02",
+    "holdout_to": "2026-10-01",
+    "holdout_hours": 698,
+    "mae": 29.22,
+    "rmse": 38.24,
+    "naive_mae": 36.8,
+    "naive_rmse": 53.91
+  },
+  "note": "Honest feature set: every input is published before 12:00 Paris on the day before delivery."
+}
