@@ -1,6 +1,6 @@
 # thermo-fr
 
-**Live dashboard:** https://YOUR-APP.streamlit.app (updated on weekday mornings and after each auction; see [docs/public_dashboard.md](docs/public_dashboard.md) for how it is produced)
+**Live dashboard:** thermo-fr-cy6smxhzz5tj77jmvyqfng (updated on weekday mornings and after each auction; see [docs/public_dashboard.md](docs/public_dashboard.md) for how it is produced)
 
 How much does French electricity demand rise when it gets colder, and what does that do to the day-ahead price?
 
