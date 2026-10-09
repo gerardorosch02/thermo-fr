@@ -115,7 +115,9 @@ def performance_chart(scores: pd.DataFrame, feature_set: str) -> go.Figure:
     fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_mae"], name="Model, 7-day rolling", mode="lines",
                              line=dict(color="#0b0b0b", width=2)))
     fig.update_layout(barmode="group")
-    return base_layout(fig, "MAE, EUR/MWh", "Delivery day")
+    fig = base_layout(fig, "MAE, EUR/MWh", "Delivery day")
+    fig.update_xaxes(type="category", dtick=None, tickangle=-45)  # delivery days are labels, not a time axis
+    return fig
 
 
 def hourly_history_chart(hourly: pd.DataFrame, feature_set: str) -> go.Figure:
