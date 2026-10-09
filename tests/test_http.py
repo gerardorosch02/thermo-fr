@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 from conftest import FakeResponse, FakeSession
 from thermo_fr.data.http import FileCache, HttpClient, HttpError, ServiceUnavailableError
@@ -67,3 +68,25 @@ def test_file_cache_round_trip(tmp_path):
 def test_file_cache_sanitises_keys(tmp_path):
     cache = FileCache(tmp_path)
     assert cache.path("a/b c?d=1").name == "a_b_c_d_1"
+
+
+def test_timeouts_are_retried_like_connection_errors(client_factory, sleeps):
+    from conftest import FakeResponse
+
+    answers = iter([requests.exceptions.ReadTimeout("slow"), FakeResponse(200, payload={"ok": True})])
+
+    class Session:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, params=None, timeout=None, headers=None):
+            self.calls += 1
+            answer = next(answers)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+    session = Session()
+    client = client_factory(session)
+    assert client.get("https://x.test/slow").json() == {"ok": True}
+    assert session.calls == 2 and sleeps == [1.0]

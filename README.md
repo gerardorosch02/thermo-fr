@@ -1,5 +1,7 @@
 # thermo-fr
 
+**Live dashboard:** https://YOUR-APP.streamlit.app (updated on weekday mornings and after each auction; see [docs/public_dashboard.md](docs/public_dashboard.md) for how it is produced)
+
 How much does French electricity demand rise when it gets colder, and what does that do to the day-ahead price?
 
 France heats a large share of its homes with electricity, so its demand is unusually sensitive to temperature. RTE usually puts the winter figure at roughly 2,400 MW for each degree colder. This project estimates that number from public data, along with the matching day-ahead price effect, and checks the model out of sample.
@@ -43,7 +45,7 @@ Load sensitivity has fallen: the 2024 and 2025 estimates are about 14% below the
 ```bash
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"            # add ",entsoe" inside the brackets for the ENTSO-E client
+pip install -e ".[dev]"            # add ",forecast" inside the brackets for the price forecast (LightGBM, scikit-learn)
 ```
 
 Open-Meteo, Energy-Charts and RTE need no key. Only the `entsoe` source does.
@@ -66,13 +68,69 @@ thermo-fr fetch --start 2021-01-01 --end 2026-01-01 --load-source csv --price-so
 
 Next to `data/hourly.csv`, `fetch` writes `sources.json` (which source produced which series, with licence attribution and the dataset details) and `quality.json`. A short quality summary is printed: the share of missing hours per series, negative load, load outside 20,000 to 100,000 MW, and prices outside -500 to 4,000 EUR/MWh. Gaps are reported, never filled. `fit` copies the source information into `summary.json` and `summary.md`.
 
+## Day-ahead price forecast
+
+A second pipeline forecasts the hourly French day-ahead price for a delivery day using only information available when the auction closes, at 12:00 Paris time the day before. Method, timing findings and backtest results are in [docs/forecast.md](docs/forecast.md).
+
+```bash
+pip install -e ".[dev,forecast]"                  # adds LightGBM and scikit-learn
+export ENTSOE_API_KEY="your-token"
+thermo-fr forecast-fetch                           # inputs 2021-01-01 to the last complete month, into data/forecast/
+thermo-fr forecast-backtest                        # walk-forward 2024 and 2025, report in reports/forecast/
+thermo-fr forecast --date 2026-10-06               # one day's curve and chart, as of 12:00 the day before
+thermo-fr timing-probe                             # log which ENTSO-E items already exist for tomorrow
+```
+
+Inputs: ENTSO-E day-ahead prices, day-ahead total load forecast and day-ahead wind and solar forecasts (RESTful API, cached under `data/cache/entsoe/`), and Open-Meteo weather forecasts for the eight cities as they were issued two days ahead (previous-runs archive, cached under `data/cache/open-meteo/`). Two feature sets are evaluated: an honest one whose every input is published before the gate, and an extended one that adds the ENTSO-E wind and solar forecasts, which the platform allows until 18:00 on D-1. A test fails if any feature for delivery day D is timestamped after 12:00 Paris on D-1.
+
+## Scheduled jobs and dashboard
+
+Two jobs keep a local SQLite database (`data/forecast.db`) up to date, and a Streamlit dashboard reads it. The jobs are the only code that calls the APIs.
+
+```bash
+pip install -e ".[dev,forecast,dashboard]"       # adds streamlit and plotly
+thermo-fr morning-run                             # tomorrow's inputs, timing log, both forecasts (new version each run)
+thermo-fr settle                                  # actual prices, then every unscored forecast version is scored
+thermo-fr dashboard                               # http://localhost:8501
+```
+
+`morning-run` fetches the ENTSO-E day-ahead load forecast, wind and solar forecasts and prices around the next delivery day, and the Open-Meteo weather forecasts issued two days ahead. For each input it records whether it is present for the delivery day, its hour count, revision number and a hash of its values, so the timing log (table `timing_log`) shows when each input first appeared relative to the 12:00 Paris gate and whether it changed between runs. It then stores the hourly inputs and a forecast for the honest feature set and, when the wind and solar forecasts exist, for the extended set. Every forecast is a new version stamped with its issue time; nothing is overwritten. A source that is down is logged in `data_status` and the run finishes as `partial` or `failed` instead of crashing. `settle` fetches the actual prices for today, tomorrow and every forecast day, stores them, and scores each version against them and against the same-hour-previous-day benchmark. Both commands log to `logs/<command>_<date>.log`.
+
+Windows Task Scheduler entries (the jobs run as the current user and read `ENTSOE_API_KEY` from the user environment, so set it with `setx ENTSOE_API_KEY ...` once):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Install   # morning-run weekdays 07:00, 08:00, 09:00, 10:00, 10:45, 11:30; settle daily 14:00 (local time, London intended)
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Show
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Remove
+```
+
+Both tasks have "run task as soon as possible after a scheduled start is missed" and "wake the computer to run this task" turned on. Waking from sleep or hibernation also needs Windows to allow wake timers: Power Options, Sleep, Allow wake timers set to Enable for both plugged in and on battery (`powercfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 1`, the same with `/setdcvalueindex`, then `powercfg /setactive SCHEME_CURRENT`). A machine that is shut down cannot be woken by a task.
+
+The dashboard shows tomorrow's latest forecast with today's actual prices, the same-hour-previous-day benchmark and a shaded band built from the backtest's error distribution at each hour (historical error, not a probability forecast); tomorrow's forecast load, wind, solar, residual load and temperature with the change against today's inputs; the last 30 settled days against actual prices with rolling MAE and the share of days the model won; the data status for tomorrow (arrival time of each input, anything missing or late) and the timing-probe summary across all logged days. A sidebar toggle switches between the honest and extended feature sets, with a note that the extended set may use information published after the gate until the timing log shows otherwise. Database reads are cached; the "Refresh now" button runs `morning-run` once.
+
+![Dashboard](docs/img/dashboard.png)
+
+## Public dashboard and automated updates
+
+`streamlit_app.py` is a public version of the dashboard that reads only `published/` and runs on Streamlit Community Cloud. A GitHub Actions workflow keeps that folder current without any local machine: on weekday mornings it fetches the days around the next delivery day and publishes the forecast made with the stored model, every afternoon it fetches the auction results and scores the stored forecasts, and on the first weekday of each month it fetches the full history, refits the honest model and commits the model file with its metadata. The token lives in a repository secret and is never printed or committed. `published/` holds the last 90 days of forecasts (with issue times), actual prices, the benchmark, daily errors, tomorrow's latest forecast, the backtest error band and the model; no inputs history is kept in the repository.
+
+```bash
+thermo-fr publish                   # export the public dataset from the local database
+thermo-fr import-published          # the reverse, used by the workflow to restore its state
+thermo-fr refit-model               # fetch the full history and save published/model/honest.txt plus metadata
+thermo-fr morning-run --model-file published/model/honest.txt --feature-sets honest   # predict with the stored model
+streamlit run streamlit_app.py      # the public app, locally
+```
+
+Setup steps (secret, Streamlit deployment, live link) and the data-terms notes are in [docs/public_dashboard.md](docs/public_dashboard.md).
+
 ## Data sources
 
 | Name | Series | Key | Where the data comes from |
 |---|---|---|---|
 | `rte` | load | none | RTE eCO2mix national consumption on ODRE, `eco2mix-national-cons-def` (definitive and consolidated) plus `eco2mix-national-tr` (real time) for the most recent weeks |
 | `energy-charts` | load, prices | none | Energy-Charts API by Fraunhofer ISE: `/price?bzn=FR` and the `Load` series of `/public_power?country=fr` |
-| `entsoe` | load, prices | `ENTSOE_API_KEY` | ENTSO-E Transparency Platform through entsoe-py |
+| `entsoe` | load, prices, day-ahead forecasts | `ENTSOE_API_KEY` | ENTSO-E Transparency Platform RESTful API, raw XML cached under `data/cache/entsoe/` |
 | `csv` | load, prices | none | CSV files exported by hand from the ENTSO-E Transparency Platform website, placed in `--csv-dir` |
 
 Raw responses from `rte` and `energy-charts` are cached under `data/cache/`, so a rerun downloads nothing. Delete that directory to refresh. Requests are spaced out to respect the published rate limits (about 2 per minute on the Energy-Charts price endpoint), and retried with exponential backoff on 429 and 503. If a service stays down, the fetch stops with a clear error instead of writing partial data.
@@ -123,7 +181,27 @@ src/thermo_fr/
   data/sources.py        the Source interface and get_source() factory
   data/http.py           rate-limited GET with retries, plus the raw-response cache
   data/weather.py        Open-Meteo temperatures and population weighting
-  data/entsoe_client.py  ENTSO-E load and prices (needs a key)
+  data/entsoe_rest.py    ENTSO-E RESTful API client: prices, load, day-ahead forecasts (needs a key)
+  data/entsoe_client.py  the entsoe source built on it
+  data/weather_forecast.py Open-Meteo forecasts as issued (previous runs) and the historical-forecast proxy
+  forecast/timing.py     the 12:00 Paris gate, issue-time rules, look-ahead check
+  forecast/inputs.py     one hourly table of every forecast input, plus the API-versus-CSV price comparison
+  forecast/features.py   honest and extended feature sets in Paris delivery hours
+  forecast/models.py     benchmarks, LightGBM, ridge
+  forecast/backtest.py   monthly walk-forward, metrics by slice, worst days
+  forecast/report.py     reports/forecast/ tables and charts
+  forecast/day.py        one delivery day as of 12:00 the day before
+  forecast/probe.py      timing probe for tomorrow's ENTSO-E items (superseded by morning-run)
+  forecast/store.py      SQLite store: runs, data status, timing log, inputs, forecast versions, actuals, scores, error band
+  forecast/jobs.py       morning-run and settle
+  dashboard/data.py      read-only queries for the dashboard
+  dashboard/app.py       the Streamlit app
+scripts/schedule_tasks.ps1   install, show or remove the Task Scheduler entries
+scripts/screenshot_dashboard.py  full-page screenshot of the running dashboard
+forecast/publish.py      export and import of the public dataset under published/
+forecast/refit.py        monthly refit: model file and metadata under published/model/
+streamlit_app.py         public dashboard reading published/ only (Streamlit Community Cloud entry point)
+.github/workflows/forecast.yml  scheduled morning-run and settle, committing published/
   data/energy_charts.py  Energy-Charts load and prices (no key)
   data/rte_eco2mix.py    RTE eCO2mix load from ODRE (no key)
   data/csv_source.py     ENTSO-E CSV exports made by hand

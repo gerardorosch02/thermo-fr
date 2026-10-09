@@ -1,0 +1,6 @@
+# Streamlit Community Cloud installs this file for the public app (streamlit_app.py).
+# The app reads published/ only; the forecasting code and its heavier dependencies
+# (LightGBM, scikit-learn) are installed from pyproject.toml by the GitHub Actions workflow instead.
+streamlit>=1.30
+pandas>=2.0
+plotly>=5.18

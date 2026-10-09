@@ -3,8 +3,9 @@
 Two concerns live here so that every source behaves the same way:
 
 - `HttpClient` spaces requests out to respect rate limits, retries on the
-  transient statuses (429, 502, 503, 504) with exponential backoff, and gives
-  up with a clear message when a service is down.
+  transient statuses (429, 502, 503, 504), on connection errors and on
+  timeouts with exponential backoff, and gives up with a clear message when
+  a service is down.
 - `FileCache` keeps raw responses on disk under data/cache/ so that reruns do
   not download anything again.
 """
@@ -33,6 +34,8 @@ class HttpClient:
     which is how rate limits such as "2 requests per minute" are respected.
     `backoff` is the first wait after a transient failure; every further wait
     doubles, capped at `max_wait`. A Retry-After header, when present, wins.
+    `retry_statuses` lists the HTTP statuses treated as transient; a source
+    whose gateway answers with other codes (ENTSO-E uses 599) can extend it.
     """
 
     def __init__(
@@ -44,8 +47,10 @@ class HttpClient:
         max_wait: float = 120.0,
         timeout: float = 60.0,
         user_agent: str = "thermo-fr/0.1 (research tool)",
+        retry_statuses=RETRY_STATUSES,
     ):
         self.session = session or requests.Session()
+        self.retry_statuses = tuple(retry_statuses)
         self.min_interval = min_interval
         self.retries = retries
         self.backoff = backoff
@@ -74,13 +79,13 @@ class HttpClient:
             self._last_request = time.monotonic()
             try:
                 response = self.session.get(url, params=params, timeout=self.timeout, headers=self.headers)
-            except requests.exceptions.ConnectionError as exc:
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
                 response, last_status = None, f"connection error ({exc.__class__.__name__})"
             else:
                 last_status = f"HTTP {response.status_code}"
                 if response.status_code < 400:
                     return response
-                if response.status_code not in RETRY_STATUSES:
+                if response.status_code not in self.retry_statuses:
                     raise HttpError(f"{last_status} from {url}: {response.text[:300]}")
             if attempt < self.retries:
                 time.sleep(self._wait_for_retry(attempt, response))
