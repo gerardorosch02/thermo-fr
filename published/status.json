@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-10-09T14:45:51Z",
+  "written_at_utc": "2026-10-09T17:51:36Z",
   "feature_set": "honest",
   "window_days": 90,
   "from_day": "2026-07-11",
@@ -7,7 +7,21 @@
   "forecast_versions": 11,
   "actual_days": 4,
   "scored_versions": 10,
-  "history_rows": 50376,
+  "model": {
+    "fitted_at_utc": "2026-10-09T15:43:07Z",
+    "train_from": "2021-01-01",
+    "train_to": "2026-10-01",
+    "train_hours": 50376,
+    "holdout": {
+      "holdout_from": "2026-09-02",
+      "holdout_to": "2026-10-01",
+      "holdout_hours": 698,
+      "mae": 29.33,
+      "rmse": 39.09,
+      "naive_mae": 36.8,
+      "naive_rmse": 53.91
+    }
+  },
   "last_run": {
     "run_id": 15,
     "command": "morning-run",
@@ -23,5 +37,5 @@
     "French load history used in the thermosensitivity work: RTE eCO2mix via ODRE, https://opendata.reseaux-energies.fr, Licence Ouverte v2.0 (Etalab).",
     "Weather forecasts: Open-Meteo.com, https://open-meteo.com, CC BY 4.0."
   ],
-  "note": "Forecasts use only information available at 12:00 Paris time on the day before delivery. Historical errors are shown as context, not as a probability forecast."
+  "note": "Forecasts use only information available at 12:00 Paris time on the day before delivery. Scores are forecast errors against a naive same-hour-previous-day baseline, not against traded market prices (EEX futures or OTC day-ahead quotes); no claim is made about beating the market. Historical errors are shown as context, not as a probability forecast."
 }
