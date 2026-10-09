@@ -1,5 +1,7 @@
 # thermo-fr
 
+**Live dashboard:** https://YOUR-APP.streamlit.app (updated on weekday mornings and after each auction; see [docs/public_dashboard.md](docs/public_dashboard.md) for how it is produced)
+
 How much does French electricity demand rise when it gets colder, and what does that do to the day-ahead price?
 
 France heats a large share of its homes with electricity, so its demand is unusually sensitive to temperature. RTE usually puts the winter figure at roughly 2,400 MW for each degree colder. This project estimates that number from public data, along with the matching day-ahead price effect, and checks the model out of sample.
@@ -108,6 +110,18 @@ The dashboard shows tomorrow's latest forecast with today's actual prices, the s
 
 ![Dashboard](docs/img/dashboard.png)
 
+## Public dashboard and automated updates
+
+`streamlit_app.py` is a public version of the dashboard that reads only `published/` and runs on Streamlit Community Cloud. A GitHub Actions workflow keeps that folder current without any local machine: on weekday mornings it refits the honest model and publishes the next day's forecast, and every afternoon it fetches the auction results and scores the stored forecasts. The token lives in a repository secret and is never printed or committed. `published/` holds the last 90 days of forecasts (with issue times), actual prices, the benchmark, daily errors, tomorrow's latest forecast, the backtest error band and the hourly inputs history the model trains on.
+
+```bash
+thermo-fr publish                   # export the public dataset from the local database
+thermo-fr import-published          # the reverse, used by the workflow to restore its state
+streamlit run streamlit_app.py      # the public app, locally
+```
+
+Setup steps (secret, Streamlit deployment, live link) and the data-terms notes are in [docs/public_dashboard.md](docs/public_dashboard.md).
+
 ## Data sources
 
 | Name | Series | Key | Where the data comes from |
@@ -182,6 +196,9 @@ src/thermo_fr/
   dashboard/app.py       the Streamlit app
 scripts/schedule_tasks.ps1   install, show or remove the Task Scheduler entries
 scripts/screenshot_dashboard.py  full-page screenshot of the running dashboard
+forecast/publish.py      export and import of the public dataset under published/
+streamlit_app.py         public dashboard reading published/ only (Streamlit Community Cloud entry point)
+.github/workflows/forecast.yml  scheduled morning-run and settle, committing published/
   data/energy_charts.py  Energy-Charts load and prices (no key)
   data/rte_eco2mix.py    RTE eCO2mix load from ODRE (no key)
   data/csv_source.py     ENTSO-E CSV exports made by hand
