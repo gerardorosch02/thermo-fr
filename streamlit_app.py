@@ -144,14 +144,15 @@ HOW_IT_WORKS = """
 **Information gate.** The auction closes at 12:00 Paris time on the day before delivery. Every input is dated by when it is
 published and the forecast uses only inputs available before that moment: the ENTSO-E day-ahead load forecast (due two hours
 before gate closure), Open-Meteo weather forecasts issued two days ahead (temperature, 100 m wind, solar radiation for eight
-cities), a wind generation proxy (100 m wind forecasts issued two days ahead at 17 points in the French wind regions, turned
-into MW with weights fitted monthly on past actual wind generation), the calendar, and the prices of the previous days (D-1,
-D-2, D-7), which also stand in for gas and carbon costs. ENTSO-E's own wind and solar forecasts are not used, because the
-platform allows them until 18:00 on D-1.
+cities), wind and solar generation proxies (100 m wind forecasts at 17 points in the French wind regions and radiation
+forecasts at 21 points in the solar regions, both issued two days ahead and turned into MW with weights fitted monthly on past
+actual generation), the calendar (weekday, public holidays, bridge days, the days around holidays and the Christmas break),
+and the prices of the previous days (D-1, D-2, D-7 and the most recent day of the same type), which also stand in for gas and
+carbon costs. ENTSO-E's own wind and solar forecasts are not used, because the platform allows them until 18:00 on D-1.
 
 **Model.** Gradient boosting (LightGBM) fitted on all history before the delivery day. Results are reported as forecast
 error (mean absolute error, MAE, in EUR/MWh) against a naive baseline: the price of the same hour on the previous day. In a
-walk-forward backtest over 2024 and 2025 the model's MAE was about 16 EUR/MWh and the baseline's about 21.
+walk-forward backtest over 2024 and 2025 the model's MAE was about 15.5 EUR/MWh and the baseline's about 21.
 
 **Error band.** The shaded band around tomorrow's curve is the forecast plus the 10th to 90th (and 25th to 75th) percentile
 of the model's signed error at the same hour in that backtest. It describes how wrong the model has been at that hour in
@@ -165,8 +166,9 @@ not benchmarked against traded market prices (EEX futures or OTC day-ahead quote
 market, and a lower error than the baseline says nothing about whether a trade would have made money. The error band is the
 model's past error distribution, not a probability forecast. Errors are largest on days with regime changes (cold snaps,
 price collapses, days after holidays), which is also where a forecast matters most. A known weakness is the top 5% price
-hours, typically cold, calm winter evenings when gas sets the price: the wind generation proxy improves the error elsewhere
-but made those hours slightly worse in the backtest (24.1 against 22.6 EUR/MWh).
+hours, typically cold, calm winter evenings when gas sets the price: the generation proxies improve the error elsewhere but
+made those hours slightly worse in the backtest (23.2 against 22.6 EUR/MWh without them). Weekend and holiday middays with
+very low prices are still forecast too high more often than not.
 """
 
 

@@ -47,3 +47,7 @@ class EntsoeSource:
     def wind_generation_actual(self, start: str, end: str) -> pd.DataFrame:
         """Actual wind onshore and offshore generation in MW, hourly means."""
         return self.api.wind_generation_actual(start, end)
+
+    def solar_generation_actual(self, start: str, end: str) -> pd.Series:
+        """Actual solar generation in MW, hourly means."""
+        return self.api.solar_generation_actual(start, end)

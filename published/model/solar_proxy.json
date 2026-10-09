@@ -1,0 +1,37 @@
+{
+  "proxy": "solar",
+  "reference_wm2": 1000.0,
+  "weights_mw": {
+    "solar_pt_Landes_wm2": 0.0,
+    "solar_pt_Gironde_wm2": 336.7,
+    "solar_pt_LotGaronne_wm2": 1010.4,
+    "solar_pt_Charente_wm2": 129.6,
+    "solar_pt_Toulouse_wm2": 741.5,
+    "solar_pt_Herault_wm2": 1576.1,
+    "solar_pt_Gard_wm2": 428.0,
+    "solar_pt_Roussillon_wm2": 0.0,
+    "solar_pt_Provence_wm2": 0.0,
+    "solar_pt_Var_wm2": 1670.6,
+    "solar_pt_AlpesHP_wm2": 6858.5,
+    "solar_pt_Drome_wm2": 0.0,
+    "solar_pt_Lyon_wm2": 1400.8,
+    "solar_pt_Nantes_wm2": 0.0,
+    "solar_pt_Orleans_wm2": 222.4,
+    "solar_pt_Champagne_wm2": 2977.6,
+    "solar_pt_Alsace_wm2": 4316.5,
+    "solar_pt_Bourgogne_wm2": 50.9,
+    "solar_pt_Paris_wm2": 683.4,
+    "solar_pt_Lille_wm2": 0.0,
+    "solar_pt_Rennes_wm2": 0.0
+  },
+  "fit": {
+    "from": "2025-10-01 00:00:00+00:00",
+    "to": "2026-09-30 23:00:00+00:00",
+    "hours": 8731,
+    "capacity_mw": 22403.0,
+    "mae_mw": 1050.6,
+    "bias_mw": -215.7,
+    "r2": 0.8986,
+    "mean_actual_mw": 4037.1
+  }
+}

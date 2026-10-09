@@ -61,6 +61,7 @@ class WindPointsSource(OpenMeteoForecastSource):
     """Hourly UTC 100 m wind speed (m/s) at each point, forecast two days ahead."""
 
     name = "open-meteo-wind-points"
+    cache_prefix = "windpt_"
 
     def __init__(self, points=WIND_POINTS, cache_dir=Path("data/cache/open-meteo"), client=None, lead_days: int = LEAD_DAYS,
                  model: str = "best_match", now=None):

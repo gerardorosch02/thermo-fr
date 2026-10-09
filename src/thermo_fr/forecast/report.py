@@ -13,7 +13,14 @@ from .models import BENCHMARKS, MODELS  # noqa: E402
 
 COLUMN_LABELS = {"naive_day": "Same hour D-1", "naive_week": "Same hour D-7", "gbm": "Gradient boosting", "linear": "Linear"}
 DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-SET_LABELS = {"honest": "honest", "honest_base": "honest without the wind proxy", "extended": "extended (may use late information)"}
+SET_LABELS = {
+    "honest": "honest",
+    "honest_wind": "honest with the wind proxy only (before the solar proxy and the calendar structure)",
+    "honest_base": "honest without the proxies and the calendar structure",
+    "honest_solar": "honest_wind plus the solar proxy",
+    "honest_calendar": "honest_wind plus the calendar structure and the same-type lag",
+    "extended": "extended (may use late information)",
+}
 
 
 def write_report(results: dict, out=Path("reports/forecast"), sample_week: str | None = None, sources: dict | None = None,
@@ -203,8 +210,10 @@ def to_markdown(summary: dict) -> str:
         "",
         "Feature sets:",
         "",
-        "- **honest**: calendar, ENTSO-E day-ahead load forecast, Open-Meteo weather as forecast two days ahead "
-        "(temperature, 100 m wind, radiation) and lagged prices (D-1, D-2, D-7). Everything passes the 12:00 gate.",
+        "- **honest**: calendar (hour, weekday, month, holidays, day types, bridge days, holiday neighbours), ENTSO-E day-ahead "
+        "load forecast, Open-Meteo weather as forecast two days ahead (temperature, 100 m wind, radiation), the pre-gate wind and "
+        "solar generation proxies, and lagged prices (D-1, D-2, D-7 and the most recent day of the same type). Everything passes "
+        "the 12:00 gate. The honest_* variants drop parts of it to measure what each part adds.",
         "- **extended**: honest plus the ENTSO-E day-ahead wind and solar forecasts and the residual load built from them. "
         "ENTSO-E allows these to be published until 18:00 on D-1, after the auction, so **this set may use late information**.",
         "",

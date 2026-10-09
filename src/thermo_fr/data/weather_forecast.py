@@ -66,6 +66,7 @@ class OpenMeteoForecastSource:
 
     name = "open-meteo-forecast"
     attribution = ATTRIBUTION
+    cache_prefix = ""  # subclasses that fetch other variables at other points prefix their cache keys, so names cannot collide
 
     def __init__(
         self,
@@ -112,7 +113,7 @@ class OpenMeteoForecastSource:
             year_end = min(pd.Timestamp(year=cursor.year + 1, month=1, day=1), e)
             last_day = year_end - pd.Timedelta(days=1)  # Open-Meteo end_date is inclusive
             a, b = cursor.strftime("%Y-%m-%d"), last_day.strftime("%Y-%m-%d")
-            key = f"{kind}_{self.model}_lead{self.lead_days}_{city.name}_{a}_{b}.json"
+            key = f"{self.cache_prefix}{kind}_{self.model}_lead{self.lead_days}_{city.name}_{a}_{b}.json"
             download = lambda a=a, b=b: self._download(kind, city, a, b)  # noqa: E731
             content = download() if year_end > today else self.cache.fetch(key, download)
             frames.append(self._parse(content, kind))

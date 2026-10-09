@@ -145,6 +145,20 @@ def test_actual_wind_generation_is_queried_per_type_and_averaged_to_hourly(tmp_p
         "wind_offshore_actual_FR_202406010000_202406030000.xml", "wind_onshore_actual_FR_202406010000_202406030000.xml"]
 
 
+def test_actual_solar_generation_is_psr_type_b16(tmp_path, client_factory):
+    def handler(url, params):
+        start = pd.Timestamp(params["periodStart"]).tz_localize("UTC").strftime("%Y-%m-%dT%H:%MZ")
+        end = pd.Timestamp(params["periodEnd"]).tz_localize("UTC").strftime("%Y-%m-%dT%H:%MZ")
+        assert params["documentType"] == "A75" and params["processType"] == "A16" and params["psrType"] == "B16"
+        quarter_hours = {1: 0, 2: 400, 3: 800, 4: 1200}
+        return FakeResponse(200, content=gl_document([gl_timeseries([period_xml(start, end, "PT15M", quarter_hours)], psr="B16")]))
+
+    api, _ = make_api(tmp_path, handler, client_factory)
+    series = api.solar_generation_actual("2024-06-01", "2024-06-02")
+    assert series.name == "solar_mw" and len(series) == 24 and series.iloc[0] == 600.0 and series.iloc[1] == 1200.0
+    assert [p.name for p in (tmp_path / "entsoe").iterdir()] == ["solar_actual_FR_202406010000_202406020000.xml"]
+
+
 def test_requests_are_chunked_by_calendar_year_and_cached_without_the_token(tmp_path, client_factory):
     api, session = make_api(tmp_path, wind_solar_handler, client_factory)
     frame = api.wind_solar_forecast("2024-06-01", "2025-02-01")

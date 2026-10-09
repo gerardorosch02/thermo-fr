@@ -83,6 +83,24 @@ def test_wind_proxy_is_the_later_of_weather_run_and_calibration_data():
     assert one_day[0] > gate_for(first)[0]
 
 
+def test_solar_proxy_shares_the_generation_proxy_rule():
+    first, mid = hours("2024-07-01"), hours("2024-07-15")
+    assert (issue_times(first, "solar_proxy") == issue_times(first, "wind_proxy")).all()
+    assert (issue_times(mid, "solar_proxy") == issue_times(mid, "weather_issued")).all()
+    assert (lateness(first, "solar_proxy") < pd.Timedelta(0)).all()
+
+
+def test_same_type_price_lag_is_the_comparable_days_price_published_before_the_gate():
+    monday = hours("2024-07-15")  # comparable day: Friday 12 July, price published 13:00 Paris on 11 July
+    assert (issue_times(monday, "price_lag_same_type") == pd.Timestamp("2024-07-11T11:00Z")).all()
+    tuesday = hours("2024-07-16")  # comparable day: Monday, so the same as price_lag1
+    assert (issue_times(tuesday, "price_lag_same_type") == issue_times(tuesday, "price_lag1")).all()
+    ascension = hours("2024-05-09")  # comparable day: Wednesday 8 May, a holiday
+    assert (issue_times(ascension, "price_lag_same_type") == pd.Timestamp("2024-05-07T11:00Z")).all()
+    year = pd.DatetimeIndex([h for d in pd.date_range("2025-01-01", "2025-12-31", freq="D") for h in hours(d.strftime("%Y-%m-%d"))])
+    assert (lateness(year, "price_lag_same_type") <= pd.Timedelta(hours=-23)).all()
+
+
 def test_weather_proxy_is_never_point_in_time():
     idx = hours("2024-07-15")
     assert (lateness(idx, "weather_proxy") > pd.Timedelta(0)).all()

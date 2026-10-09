@@ -6,7 +6,20 @@ import pytest
 
 from thermo_fr.forecast import models
 from thermo_fr.forecast.backtest import evaluate, run_backtest, walk_forward, worst_days
-from thermo_fr.forecast.features import EXTENDED, HONEST, HONEST_BASE, FEATURE_TIMINGS, build_features, feature_timings
+from thermo_fr.forecast.features import (
+    CALENDAR_STRUCTURE,
+    EXTENDED,
+    FEATURE_TIMINGS,
+    HONEST,
+    HONEST_BASE,
+    HONEST_CALENDAR,
+    HONEST_SOLAR,
+    HONEST_WIND,
+    SAME_TYPE_LAGS,
+    build_features,
+    feature_timings,
+)
+from thermo_fr.data.solar_points import POINT_COLUMNS as SOLAR_POINT_COLUMNS
 from thermo_fr.data.wind_points import POINT_COLUMNS
 from thermo_fr.forecast.inputs import INPUT_COLUMNS
 from thermo_fr.forecast.models import benchmark_predictions, fit_predict
@@ -21,7 +34,8 @@ def synthetic_inputs(start="2023-09-01", end="2024-05-01", issued_from="2024-01-
     hours = np.asarray(local.hour)
     load = 50_000 + 8_000 * np.sin((hours - 6) / 24 * 2 * np.pi) + rng.normal(0, 1_500, len(index))
     wind = np.clip(5_000 + 4_000 * rng.standard_normal(len(index)).cumsum() / 50, 500, 15_000)
-    solar = np.clip(6_000 * np.sin((hours - 6) / 12 * np.pi), 0, None) * (local.month.isin([4, 5, 6, 7, 8]) * 0.5 + 0.5)
+    cloud = pd.Series(rng.uniform(0.4, 1.0, len(index)), index=index).groupby(local.normalize()).transform("first").to_numpy()
+    solar = np.clip(6_000 * np.sin((hours - 6) / 12 * np.pi), 0, None) * (local.month.isin([4, 5, 6, 7, 8]) * 0.5 + 0.5) * cloud
     residual = load - wind - solar
     price = 20 + residual / 500 + 10 * (np.asarray(local.dayofweek) < 5) + rng.normal(0, 5, len(index))
     temp = 10 + 8 * np.sin((np.asarray(local.dayofyear) - 100) / 365 * 2 * np.pi) + rng.normal(0, 2, len(index))
@@ -45,6 +59,12 @@ def synthetic_inputs(start="2023-09-01", end="2024-05-01", issued_from="2024-01-
     for column in POINT_COLUMNS:
         frame.loc[issued, column] = np.clip(speed[issued] + rng.normal(0, 0.8, issued.sum()), 0, None)
     frame.loc[issued, "wind_proxy_mw"] = wind[issued] + rng.normal(0, 400, issued.sum())
+    # actual solar generation, the radiation at the points that implies it (21 points of 1,000 MW each at 1,000 W/m2), and the proxy
+    frame["solar_mw"] = solar
+    radiation = solar / len(SOLAR_POINT_COLUMNS) / 1000.0 * 1000.0  # W/m2 per point when every point carries 1,000 MW
+    for column in SOLAR_POINT_COLUMNS:
+        frame.loc[issued, column] = np.clip(radiation[issued] * rng.uniform(0.8, 1.2, issued.sum()), 0, None)
+    frame.loc[issued, "solar_proxy_mw"] = np.clip(solar[issued] + rng.normal(0, 200, issued.sum()), 0, None)
     return frame
 
 
@@ -54,27 +74,62 @@ def inputs():
 
 
 def test_feature_lists_and_timings_are_consistent():
-    assert set(HONEST_BASE) < set(HONEST) <= set(EXTENDED)
+    assert set(HONEST_BASE) < set(HONEST_WIND) < set(HONEST) < set(EXTENDED)
     assert all(f in FEATURE_TIMINGS for f in EXTENDED)
     assert {"solar_fc_mw", "wind_fc_mw", "residual_load_fc_mw"} == set(EXTENDED) - set(HONEST)
-    assert set(HONEST) - set(HONEST_BASE) == {"wind_proxy_mw"} and FEATURE_TIMINGS["wind_proxy_mw"] == "wind_proxy"
-    honest = feature_timings("honest")
-    assert "wind_solar_forecast" not in honest.values()
+    assert set(HONEST_WIND) - set(HONEST_BASE) == {"wind_proxy_mw"} and FEATURE_TIMINGS["wind_proxy_mw"] == "wind_proxy"
+    assert set(HONEST_SOLAR) - set(HONEST_WIND) == {"solar_proxy_mw"} and FEATURE_TIMINGS["solar_proxy_mw"] == "solar_proxy"
+    assert set(HONEST_CALENDAR) - set(HONEST_WIND) == set(CALENDAR_STRUCTURE) | set(SAME_TYPE_LAGS)
+    assert set(HONEST) == set(HONEST_SOLAR) | set(HONEST_CALENDAR)
+    assert all(FEATURE_TIMINGS[f] == "calendar" for f in CALENDAR_STRUCTURE)
+    assert all(FEATURE_TIMINGS[f] == "price_lag_same_type" for f in SAME_TYPE_LAGS)
+    for name in ("honest", "honest_wind", "honest_base", "honest_solar", "honest_calendar"):
+        assert "wind_solar_forecast" not in feature_timings(name).values()
     assert "wind_solar_forecast" in feature_timings("extended").values()
 
 
-def test_honest_base_drops_the_wind_proxy_and_old_tables_get_nan(inputs):
+def test_feature_set_variants_drop_their_parts_and_old_tables_get_nan(inputs):
     table = build_features(inputs, "honest")
+    wind = build_features(inputs, "honest_wind")
     base = build_features(inputs, "honest_base")
-    assert "wind_proxy_mw" in table.X and "wind_proxy_mw" not in base.X
+    assert {"wind_proxy_mw", "solar_proxy_mw", "day_type", "price_lag_same_type"} <= set(table.X)
+    assert "wind_proxy_mw" in wind.X and not {"solar_proxy_mw", "day_type", "price_lag_same_type"} & set(wind.X)
+    assert "wind_proxy_mw" not in base.X
     ts = pd.Timestamp("2024-02-14T17:00Z")
     assert table.X.loc[ts, "wind_proxy_mw"] == inputs.loc[ts, "wind_proxy_mw"]
+    assert table.X.loc[ts, "solar_proxy_mw"] == inputs.loc[ts, "solar_proxy_mw"]
     assert table.info.loc[ts, "wind_mw"] == pytest.approx(inputs.loc[ts, "wind_onshore_mw"] + inputs.loc[ts, "wind_offshore_mw"])
-    old = inputs.drop(columns=["wind_proxy_mw", "wind_onshore_mw", "wind_offshore_mw"] + POINT_COLUMNS)
+    assert table.info.loc[ts, "solar_mw"] == inputs.loc[ts, "solar_mw"]
+    old = inputs.drop(columns=["wind_proxy_mw", "wind_onshore_mw", "wind_offshore_mw", "solar_mw", "solar_proxy_mw"] + POINT_COLUMNS
+                      + SOLAR_POINT_COLUMNS)
     legacy = build_features(old, "honest")
-    assert legacy.X["wind_proxy_mw"].isna().all() and legacy.info["wind_mw"].isna().all()
+    assert legacy.X["wind_proxy_mw"].isna().all() and legacy.X["solar_proxy_mw"].isna().all()
+    assert legacy.info["wind_mw"].isna().all() and legacy.info["solar_mw"].isna().all()
+    assert legacy.X["day_type"].notna().all()  # the calendar needs no inputs
     with pytest.raises(ValueError, match="feature_set must be"):
         build_features(inputs, "secret")
+
+
+def test_calendar_structure_and_same_type_lag(inputs):
+    table = build_features(inputs, "honest")
+    X, y, info = table.X, table.y, table.info
+    monday = pd.Timestamp("2024-02-12T16:00Z")  # 17:00 Paris on a Monday
+    friday = pd.Timestamp("2024-02-09T16:00Z")
+    saturday, saturday_before = pd.Timestamp("2024-02-10T16:00Z"), pd.Timestamp("2024-02-03T16:00Z")
+    assert X.loc[monday, "price_lag_same_type"] == pytest.approx(y[friday]) and X.loc[monday, "same_type_lag_days"] == 3
+    assert X.loc[saturday, "price_lag_same_type"] == pytest.approx(y[saturday_before]) and X.loc[saturday, "same_type_lag_days"] == 7
+    assert X.loc[saturday, "price_lag_same_type"] == pytest.approx(X.loc[saturday, "price_lag7"])
+    day_before = info["delivery_day"] == pd.Timestamp("2024-02-09")
+    assert X.loc[monday, "price_lag_same_type_mean"] == pytest.approx(y[day_before].mean())
+    tuesday = pd.Timestamp("2024-02-13T16:00Z")
+    assert X.loc[tuesday, "price_lag_same_type"] == pytest.approx(X.loc[tuesday, "price_lag1"]) and X.loc[tuesday, "same_type_lag_days"] == 1
+    pont = info["delivery_day"] == pd.Timestamp("2024-05-10")  # Friday after Ascension
+    assert X.loc[pont, "bridge_day"].eq(1).all() and X.loc[pont, "post_holiday"].eq(1).all() and X.loc[pont, "day_type"].eq(0).all()
+    ascension = info["delivery_day"] == pd.Timestamp("2024-05-09")
+    assert X.loc[ascension, "day_type"].eq(2).all() and X.loc[ascension, "holiday"].eq(1).all()
+    christmas = info["delivery_day"] == pd.Timestamp("2023-12-25")
+    assert X.loc[christmas, "year_end_break"].eq(1).all() and info.loc[christmas, "holiday"].eq(1).all()
+    assert set(X["day_type"].unique()) == {0, 1, 2} and (X["same_type_lag_days"] >= 1).all()
 
 
 def test_honest_features_pass_the_gate_and_extended_do_not(inputs):
@@ -178,16 +233,21 @@ def test_strict_flag_marks_proxy_weather_and_the_gate_check_marks_the_set(inputs
 
 def test_evaluate_reports_slices_hours_and_improvements(inputs, fast_gbm):
     table = build_features(inputs, "honest")
-    bt = walk_forward(table, "2024-02-01", "2024-04-01", log=lambda *_: None)
+    bt = walk_forward(table, "2024-02-01", "2024-05-01", log=lambda *_: None)
     metrics = evaluate(bt.predictions)
-    assert set(metrics["slices"]) == {"all", "peak", "off_peak", "top_5pct_price_hours", "negative_price_hours", "windiest_10pct_days"}
+    assert set(metrics["slices"]) == {"all", "peak", "off_peak", "top_5pct_price_hours", "negative_price_hours", "weekends", "holidays",
+                                      "windiest_10pct_days", "sunniest_10pct_days"}
     windy = metrics["slices"]["windiest_10pct_days"]["gbm"]["hours"]
     assert 0 < windy <= 0.11 * metrics["rows"] + 48 and metrics["windy_day_cut_mw"] > 0
+    sunny = metrics["slices"]["sunniest_10pct_days"]["gbm"]["hours"]
+    assert 0 < sunny <= 0.11 * metrics["rows"] + 48 and metrics["sunny_day_cut_mw"] > 0
+    assert metrics["slices"]["weekends"]["gbm"]["hours"] == int((bt.predictions["dow"] >= 5).sum()) > 0
+    assert metrics["slices"]["holidays"]["gbm"]["hours"] == 24  # Easter Monday, 1 April 2024, is the only holiday in the window
     assert metrics["slices"]["all"]["gbm"]["hours"] == len(bt.predictions)
     assert metrics["slices"]["peak"]["gbm"]["hours"] + metrics["slices"]["off_peak"]["gbm"]["hours"] == len(bt.predictions)
     assert metrics["slices"]["negative_price_hours"]["gbm"]["mae"] is None  # synthetic prices stay positive
     assert sorted(metrics["by_hour"]) == list(range(24))
-    assert set(metrics["by_month"]) == {"2024-02", "2024-03"}
+    assert set(metrics["by_month"]) == {"2024-02", "2024-03", "2024-04"}
     assert set(metrics["improvement_pct"]["gbm"]) == {"naive_day", "naive_week"}
     worst = worst_days(bt.predictions, table, inputs, n=5)
     assert len(worst) == 5 and worst["mae"].is_monotonic_decreasing
@@ -196,7 +256,8 @@ def test_evaluate_reports_slices_hours_and_improvements(inputs, fast_gbm):
 
 def test_run_backtest_covers_both_feature_sets(inputs, fast_gbm):
     results = run_backtest(inputs, "2024-03-01", "2024-04-01", log=lambda *_: None)
-    assert set(results) == {"honest", "honest_base", "extended"}
+    assert set(results) == {"honest", "honest_wind", "honest_base", "extended"}
+    assert results["honest_wind"]["backtest"].point_in_time and results["honest_base"]["backtest"].point_in_time
     assert results["honest"]["metrics_strict"]["rows"] > 0
     assert results["extended"]["metrics_strict"]["rows"] == results["honest"]["metrics_strict"]["rows"]
     assert results["honest"]["backtest"].point_in_time and not results["extended"]["backtest"].point_in_time

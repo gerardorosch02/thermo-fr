@@ -24,6 +24,8 @@ from .timing import LookaheadError, check_point_in_time
 
 TOP_SHARE = 0.05
 WINDY_SHARE = 0.10  # the windiest days by actual national wind generation (daily mean)
+SUNNY_SHARE = 0.10  # the sunniest days by actual national solar generation (daily mean)
+DEFAULT_SETS = ("honest", "honest_wind", "honest_base", "extended")
 
 
 @dataclass
@@ -100,12 +102,21 @@ def evaluate(predictions: pd.DataFrame, strict_only: bool = True) -> dict:
         f"top_{int(TOP_SHARE * 100)}pct_price_hours": frame[frame["actual"] >= top_cut],
         "negative_price_hours": frame[frame["actual"] < 0],
     }
-    windy_cut = None
+    if "dow" in frame:
+        slices["weekends"] = frame[frame["dow"] >= 5]
+    if "holiday" in frame:
+        slices["holidays"] = frame[frame["holiday"] == 1]
+    windy_cut = sunny_cut = None
     if "wind_mw" in frame and frame["wind_mw"].notna().any():
         daily_wind = frame.groupby("delivery_day")["wind_mw"].mean().dropna()
         windy_cut = float(daily_wind.quantile(1 - WINDY_SHARE))
         windy_days = daily_wind[daily_wind >= windy_cut].index
         slices[f"windiest_{int(WINDY_SHARE * 100)}pct_days"] = frame[frame["delivery_day"].isin(windy_days)]
+    if "solar_mw" in frame and frame["solar_mw"].notna().any():
+        daily_solar = frame.groupby("delivery_day")["solar_mw"].mean().dropna()
+        sunny_cut = float(daily_solar.quantile(1 - SUNNY_SHARE))
+        sunny_days = daily_solar[daily_solar >= sunny_cut].index
+        slices[f"sunniest_{int(SUNNY_SHARE * 100)}pct_days"] = frame[frame["delivery_day"].isin(sunny_days)]
     result = {
         "rows": int(len(frame)),
         "strict_only": strict_only,
@@ -113,6 +124,7 @@ def evaluate(predictions: pd.DataFrame, strict_only: bool = True) -> dict:
         "last_day": str(frame["delivery_day"].max().date()) if len(frame) else None,
         "top_price_cut_eur_mwh": round(float(top_cut), 2) if len(frame) else None,
         "windy_day_cut_mw": round(windy_cut, 1) if windy_cut is not None else None,
+        "sunny_day_cut_mw": round(sunny_cut, 1) if sunny_cut is not None else None,
         "slices": {name: {col: errors(part, col) for col in columns} for name, part in slices.items()},
         "by_hour": {},
         "by_month": {},
@@ -199,8 +211,8 @@ def summarise_worst(worst: pd.DataFrame, predictions: pd.DataFrame, model: str =
     }
 
 
-def run_backtest(hourly: pd.DataFrame, test_start: str, test_end: str, feature_sets=("honest", "honest_base", "extended"), log=print) -> dict:
-    """Both feature sets through the walk-forward, with metrics and worst days for each."""
+def run_backtest(hourly: pd.DataFrame, test_start: str, test_end: str, feature_sets=DEFAULT_SETS, log=print) -> dict:
+    """The requested feature sets through the walk-forward, with metrics and worst days for each."""
     results = {}
     for feature_set in feature_sets:
         log(f"Feature set {feature_set}: building features and running the walk-forward ...")

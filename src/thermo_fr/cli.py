@@ -10,6 +10,8 @@ from .data.dataset import daily_frame
 from .data.quality import format_quality, quality_report
 from .data.sources import SOURCE_NAMES, get_source
 from .data.weather import ATTRIBUTION as OPEN_METEO_ATTRIBUTION
+from .forecast.backtest import DEFAULT_SETS
+from .forecast.features import FEATURE_SETS
 from .report import run
 
 
@@ -119,7 +121,8 @@ def cmd_forecast(args) -> None:
     from .forecast.report import forecast_day_chart
 
     inputs = load_inputs(Path(args.data))
-    fresh = None if args.no_refresh else refresh_window(args.date, cache_dir=Path(args.cache_dir), wind_weights=Path(args.wind_weights))
+    fresh = None if args.no_refresh else refresh_window(args.date, cache_dir=Path(args.cache_dir), wind_weights=Path(args.wind_weights),
+                                                        solar_weights=Path(args.solar_weights))
     curve = forecast_day(args.date, inputs, fresh)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -146,9 +149,10 @@ def cmd_morning_run(args) -> None:
     setup_logging("morning-run", logs_dir=Path(args.logs_dir))
     store = Store(Path(args.db))
     try:
+        model_file = None if args.refit or not args.model_file else Path(args.model_file)
         summary = morning_run(store, args.date, kind=args.kind, inputs_path=Path(args.data), cache_dir=Path(args.cache_dir),
-                              reports_dir=Path(args.reports_dir), feature_sets=tuple(args.feature_sets),
-                              model_file=Path(args.model_file) if args.model_file else None, wind_weights=Path(args.wind_weights))
+                              reports_dir=Path(args.reports_dir), feature_sets=tuple(args.feature_sets), model_file=model_file,
+                              wind_weights=Path(args.wind_weights), solar_weights=Path(args.solar_weights))
     finally:
         store.close()
     print(f"morning-run {summary['status']}: delivery day {summary['delivery_day']}, "
@@ -262,7 +266,8 @@ def main(argv=None) -> None:
     fbt.add_argument("--test-start", default="2024-01-01", help="first month forecast out of sample")
     fbt.add_argument("--test-end", default="2026-01-01", help="exclusive")
     fbt.add_argument("--sample-week", default=None, help="Monday (YYYY-MM-DD) of the week to chart")
-    fbt.add_argument("--feature-sets", nargs="+", default=["honest", "honest_base", "extended"], choices=("honest", "honest_base", "extended"))
+    fbt.add_argument("--feature-sets", nargs="+", default=list(DEFAULT_SETS), choices=FEATURE_SETS,
+                     help="honest_wind is the honest set before the solar proxy and the calendar structure; honest_base has neither proxy")
     fbt.set_defaults(func=cmd_forecast_backtest)
 
     fc = sub.add_parser("forecast", help="Hourly price forecast for one delivery day, as of 12:00 the day before")
@@ -272,6 +277,7 @@ def main(argv=None) -> None:
     fc.add_argument("--cache-dir", default="data/cache")
     fc.add_argument("--no-refresh", action="store_true", help="use the stored inputs only, no download")
     fc.add_argument("--wind-weights", default="published/model/wind_proxy.json", help="wind proxy calibration written by refit-model")
+    fc.add_argument("--solar-weights", default="published/model/solar_proxy.json", help="solar proxy calibration written by refit-model")
     fc.set_defaults(func=cmd_forecast)
 
     probe = sub.add_parser("timing-probe", help="Log which ENTSO-E day-ahead items already exist for tomorrow")
@@ -289,8 +295,11 @@ def main(argv=None) -> None:
     morning.add_argument("--reports-dir", default="reports/forecast", help="backtest predictions for the error band")
     morning.add_argument("--logs-dir", default="logs")
     morning.add_argument("--feature-sets", nargs="+", default=["honest", "extended"], choices=("honest", "extended"))
-    morning.add_argument("--model-file", default=None, help="predict with this stored LightGBM model instead of refitting")
+    morning.add_argument("--model-file", default="published/model/honest.txt",
+                         help="stored LightGBM model for the honest set, the same file the GitHub workflow predicts with (default: %(default)s)")
+    morning.add_argument("--refit", action="store_true", help="ignore --model-file and fit the models live on the inputs history")
     morning.add_argument("--wind-weights", default="published/model/wind_proxy.json", help="wind proxy calibration written by refit-model")
+    morning.add_argument("--solar-weights", default="published/model/solar_proxy.json", help="solar proxy calibration written by refit-model")
     morning.set_defaults(func=cmd_morning_run)
 
     stl = sub.add_parser("settle", help="Fetch actual prices and score the stored forecasts")

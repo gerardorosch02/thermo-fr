@@ -4,14 +4,19 @@ morning-run, several times during the morning of D-1:
 
 1. asks ENTSO-E for the day-ahead load forecast, the wind and solar forecasts
    and the prices around the next delivery day D, and Open-Meteo for the
-   weather forecasts issued two days ahead;
+   weather forecasts issued two days ahead, including the point forecasts
+   that feed the wind and solar generation proxies;
 2. records for every input whether it is present for D, how many hours it
    has, its revision number and a hash of its values, so the timing log can
    say when each input first appeared and whether it changed between runs
    (this replaces the one-off timing probe);
-3. stores the hourly inputs of D, then fits and stores the forecast for D with
-   the honest feature set and, when the wind and solar forecasts exist, the
-   extended set; every forecast is a new version stamped with its issue time;
+3. stores the hourly inputs of D, then stores the forecast for D with the
+   honest feature set, predicted with the stored model under published/model
+   (the same file the GitHub Actions workflow uses, so a local run and the
+   workflow give the same curve for the same inputs) or fitted live when no
+   stored model is given, and, when the wind and solar forecasts exist, the
+   extended set, which has no stored model and is always fitted live; every
+   forecast is a new version stamped with its issue time;
 4. refreshes the error band from the backtest predictions when they exist.
 
 A source that is down is recorded as an error in data_status and the run
@@ -26,6 +31,7 @@ Every message goes through the logging module; the command line attaches a
 file handler under logs/. The ENTSO-E token is never part of any message.
 """
 
+import json
 import logging
 import traceback
 from pathlib import Path
@@ -34,18 +40,23 @@ import pandas as pd
 
 from ..config import LOCAL_TZ
 from ..data.entsoe_client import EntsoeSource
+from ..data.solar_points import SolarPointsSource
 from ..data.weather_forecast import OpenMeteoForecastSource
 from ..data.wind_points import WindPointsSource
 from .day import HISTORY_DAYS, forecast_day, merge_inputs
+from .gen_proxy import apply_weights, load_weights
 from .inputs import INPUT_COLUMNS, load_inputs
+from .solar_proxy import SOLAR
 from .store import Store, error_band_from_predictions, score_curve, value_hash
 from .timing import delivery_days
-from .wind_proxy import DEFAULT_WEIGHTS_PATH, apply_weights, load_weights
+from .wind_proxy import WIND
 
 log = logging.getLogger("thermo_fr.jobs")
 
+DEFAULT_WEIGHTS_PATH = WIND.default_path
+DEFAULT_MODEL_FILE = Path("published/model/honest.txt")
 INPUT_SERIES = ["load_fc_mw", "solar_fc_mw", "wind_onshore_fc_mw", "wind_offshore_fc_mw", "temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2",
-                "wind_proxy_mw"]
+                "wind_proxy_mw", "solar_proxy_mw"]
 WEATHER_SERIES = ["temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2"]
 FEATURE_SETS = ("honest", "extended")
 
@@ -75,12 +86,13 @@ def presence(frame: pd.DataFrame | pd.Series, day: str) -> tuple[str, int, str |
 
 
 def fetch_fresh(day: str, cache_dir: Path, store: Store, run_id: int, entsoe=None, weather=None, now=None, wind_points=None,
-                wind_weights=DEFAULT_WEIGHTS_PATH) -> pd.DataFrame:
+                wind_weights=WIND.default_path, solar_points=None, solar_weights=SOLAR.default_path) -> pd.DataFrame:
     """Fetch every input around `day`, recording each one's status; failures are logged, not raised.
 
-    The wind proxy is derived from the point forecasts with the calibration
-    weights in `wind_weights`; a missing weights file is recorded as an
-    error for the item wind_proxy and the column stays NaN.
+    The wind and solar proxies are derived from the point forecasts with the
+    calibration weights in `wind_weights` and `solar_weights`; a missing
+    weights file is recorded as an error for the item wind_proxy or
+    solar_proxy and that column stays NaN.
     """
     target = pd.Timestamp(day)
     start = (target - pd.Timedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%d")
@@ -88,6 +100,7 @@ def fetch_fresh(day: str, cache_dir: Path, store: Store, run_id: int, entsoe=Non
     entsoe = entsoe or EntsoeSource(cache_dir=Path(cache_dir) / "entsoe")
     weather = weather or OpenMeteoForecastSource(cache_dir=Path(cache_dir) / "open-meteo")
     wind_points = wind_points or WindPointsSource(cache_dir=Path(cache_dir) / "open-meteo")
+    solar_points = solar_points or SolarPointsSource(cache_dir=Path(cache_dir) / "open-meteo")
     pieces = []
 
     def attempt(item: str, fetch, revision_of=lambda: None):
@@ -115,17 +128,22 @@ def fetch_fresh(day: str, cache_dir: Path, store: Store, run_id: int, entsoe=Non
     attempt("prices", lambda: entsoe.day_ahead_prices(start, end), entsoe_revision("prices"))
     attempt("weather_issued", lambda: weather.fetch(start, end, kinds=("issued",))[WEATHER_SERIES])
     attempt("wind_points", lambda: wind_points.fetch_points(start, end))
+    attempt("solar_points", lambda: solar_points.fetch_points(start, end))
 
-    def proxy():
-        points = next((p for p in pieces if isinstance(p, pd.DataFrame) and any(str(c).startswith("wind_pt_") for c in p.columns)), None)
-        if points is None:
-            raise ValueError("no wind point forecasts in this run")
-        weights = load_weights(wind_weights)
-        if weights is None:
-            raise FileNotFoundError(f"no wind proxy weights at {wind_weights} (written by refit-model)")
-        return apply_weights(points, weights)
+    def proxy(spec, weights_path):
+        def compute():
+            points = next((p for p in pieces if isinstance(p, pd.DataFrame) and any(c in spec.columns for c in p.columns)), None)
+            if points is None:
+                raise ValueError(f"no {spec.name} point forecasts in this run")
+            weights = load_weights(weights_path)
+            if weights is None:
+                raise FileNotFoundError(f"no {spec.name} proxy weights at {weights_path} (written by refit-model)")
+            return apply_weights(points, weights, spec)
 
-    attempt("wind_proxy", proxy)
+        return compute
+
+    attempt("wind_proxy", proxy(WIND, wind_weights))
+    attempt("solar_proxy", proxy(SOLAR, solar_weights))
     if not pieces:
         return pd.DataFrame(columns=INPUT_COLUMNS)
     fresh = pd.concat(pieces, axis=1).sort_index()
@@ -145,22 +163,44 @@ def refresh_error_band(store: Store, reports_dir=Path("reports/forecast"), now=N
     return done
 
 
+def stored_model_feature_set(model_file) -> str:
+    """The feature set a stored model was fitted on, from the metadata next to it (honest when there is none)."""
+    meta = Path(model_file).with_suffix(".json")
+    if meta.exists():
+        try:
+            return json.loads(meta.read_text()).get("feature_set", "honest")
+        except (OSError, ValueError):
+            pass
+    return "honest"
+
+
 def morning_run(store: Store, delivery_day: str | None = None, kind: str = "scheduled", inputs_path=Path("data/forecast/inputs.csv"),
                 cache_dir=Path("data/cache"), reports_dir=Path("reports/forecast"), entsoe=None, weather=None, now=None,
-                feature_sets=FEATURE_SETS, model_file=None, wind_points=None, wind_weights=DEFAULT_WEIGHTS_PATH) -> dict:
+                feature_sets=FEATURE_SETS, model_file=None, wind_points=None, wind_weights=WIND.default_path, solar_points=None,
+                solar_weights=SOLAR.default_path) -> dict:
     """One morning run. Returns a summary dict; never raises for a source failure.
 
-    With `model_file` (a LightGBM file written by refit) the forecast is a
-    prediction with that model instead of a refit, and no inputs history is
-    needed beyond the days fetched around the delivery day.
+    With `model_file` (a LightGBM file written by refit) the forecast of the
+    feature set that model was fitted on is a prediction with that model
+    instead of a refit, so no inputs history is needed beyond the days
+    fetched around the delivery day; the other feature sets are fitted live.
+    A `model_file` that does not exist is recorded as an error for the item
+    "model" and every set is fitted live, so the run still produces a
+    forecast but is marked partial.
     """
     day = delivery_day or next_delivery_day(now)
     run_id = store.start_run("morning-run", kind, day, now=now)
     log.info("morning-run %s for delivery day %s (run %d)", kind, day, run_id)
     summary = {"run_id": run_id, "delivery_day": day, "kind": kind, "forecasts": {}, "errors": []}
     try:
+        if model_file is not None and not Path(model_file).exists():
+            message = f"no stored model at {model_file} (written by refit-model); the forecasts are fitted live instead"
+            log.error("model: %s", message)
+            store.record_status(run_id, day, "model", "error", message=message, now=now)
+            model_file = None
+        stored_for = stored_model_feature_set(model_file) if model_file is not None else None
         fresh = fetch_fresh(day, Path(cache_dir), store, run_id, entsoe=entsoe, weather=weather, now=now, wind_points=wind_points,
-                            wind_weights=wind_weights)
+                            wind_weights=wind_weights, solar_points=solar_points, solar_weights=solar_weights)
         history = load_inputs(inputs_path) if Path(inputs_path).exists() else pd.DataFrame(columns=INPUT_COLUMNS)
         merged = merge_inputs(history, fresh)
         hours = day_hours(day)
@@ -169,8 +209,9 @@ def morning_run(store: Store, delivery_day: str | None = None, kind: str = "sche
         issued_at = pd.Timestamp(now).tz_convert("UTC") if now is not None else pd.Timestamp.now(tz="UTC")
         for feature_set in feature_sets:
             try:
-                curve = forecast_day(day, merged, None, log=log.info, feature_set=feature_set, model_file=model_file)
-                model_name = "gbm" if model_file is None else f"gbm:{Path(model_file).name}"
+                stored = model_file if feature_set == stored_for else None
+                curve = forecast_day(day, merged, None, log=log.info, feature_set=feature_set, model_file=stored)
+                model_name = "gbm" if stored is None else f"gbm:{Path(stored).name}"
                 forecast_id = store.save_forecast(
                     run_id, day, feature_set, issued_at, model_name, kind, curve.attrs["train_hours"], curve.attrs["passes_gate"], curve
                 )
