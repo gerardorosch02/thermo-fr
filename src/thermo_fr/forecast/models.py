@@ -35,11 +35,12 @@ def benchmark_predictions(X: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame({name: X[column] for name, column in BENCHMARKS.items()}, index=X.index)
 
 
-def make_model(name: str):
+def make_model(name: str, params: dict | None = None):
+    """A fresh model; `params` overrides entries of GBM_PARAMS for the boosting model."""
     if name == "gbm":
         from lightgbm import LGBMRegressor
 
-        return LGBMRegressor(**GBM_PARAMS)
+        return LGBMRegressor(**{**GBM_PARAMS, **(params or {})})
     if name == "linear":
         from sklearn.compose import ColumnTransformer
         from sklearn.impute import SimpleImputer
@@ -77,10 +78,10 @@ class _LazyLinear:
         return self.pipeline.predict(X)
 
 
-def fit_predict(name: str, X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame) -> np.ndarray:
+def fit_predict(name: str, X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame, params: dict | None = None) -> np.ndarray:
     """Fit one model on the training rows (dropping rows without a target) and predict the test rows."""
     keep = y_train.notna()
-    model = make_model(name)
+    model = make_model(name, params)
     model.fit(X_train[keep], y_train[keep])
     return np.asarray(model.predict(X_test), dtype=float)
 

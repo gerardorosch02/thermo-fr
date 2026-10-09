@@ -23,7 +23,7 @@ def table(monkeypatch):
 
 def test_refit_writes_model_and_metadata_with_holdout_metrics(tmp_path, table):
     history = table[table.index < "2024-03-31T22:00Z"]  # up to the end of the Paris day 2024-03-31
-    meta = refit_model(history, out_dir=tmp_path / "model", holdout_days=30, now=pd.Timestamp("2024-04-01T03:00Z"), log=lambda *_: None)
+    meta = refit_model(history, out_dir=tmp_path / "model", holdout_days=30, now=pd.Timestamp("2024-04-01T03:00Z"), log=lambda *_: None, params={})
     assert (tmp_path / "model" / "honest.txt").exists()
     saved = json.loads((tmp_path / "model" / "honest.json").read_text())
     assert saved == meta
@@ -34,6 +34,8 @@ def test_refit_writes_model_and_metadata_with_holdout_metrics(tmp_path, table):
     assert holdout["holdout_from"] == "2024-03-02" and holdout["holdout_to"] == "2024-03-31" and holdout["holdout_hours"] == 30 * 24 - 1
     assert holdout["mae"] < holdout["naive_mae"]  # the synthetic price is learnable
     assert "params" in meta and meta["params"]["n_estimators"] == 40
+    small = refit_model(history, out_dir=tmp_path / "small", holdout_days=0, log=lambda *_: None)
+    assert small["params"]["n_estimators"] == 300 and small["params"]["num_leaves"] == 31  # REFIT_PARAMS by default
 
 
 def test_stored_model_predicts_on_a_ten_day_window(tmp_path, table):

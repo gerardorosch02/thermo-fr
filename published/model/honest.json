@@ -2,7 +2,7 @@
   "feature_set": "honest",
   "model": "lightgbm",
   "model_file": "honest.txt",
-  "fitted_at_utc": "2026-10-09T15:32:03Z",
+  "fitted_at_utc": "2026-10-09T15:43:07Z",
   "train_from": "2021-01-01",
   "train_to": "2026-10-01",
   "train_hours": 50376,
@@ -25,9 +25,9 @@
     "price_lag7_mean"
   ],
   "params": {
-    "n_estimators": 800,
+    "n_estimators": 300,
     "learning_rate": 0.03,
-    "num_leaves": 63,
+    "num_leaves": 31,
     "min_child_samples": 40,
     "subsample": 0.8,
     "subsample_freq": 1,
@@ -39,8 +39,8 @@
     "holdout_from": "2026-09-02",
     "holdout_to": "2026-10-01",
     "holdout_hours": 698,
-    "mae": 29.22,
-    "rmse": 38.24,
+    "mae": 29.33,
+    "rmse": 39.09,
     "naive_mae": 36.8,
     "naive_rmse": 53.91
   },

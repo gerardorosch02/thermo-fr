@@ -25,11 +25,20 @@ from .inputs import fetch_inputs, load_inputs
 from .models import GBM_PARAMS, fit_predict, make_model, save_model
 
 DEFAULT_MODEL_DIR = Path("published/model")
+# Overrides applied to GBM_PARAMS for the published model. 300 trees with 31 leaves gave a
+# holdout MAE within 0.2 EUR/MWh of the backtest settings (800 trees, 63 leaves) on September
+# 2026 at a fifth of the file size (0.85 MB against 4.45 MB), which matters for a monthly commit.
+REFIT_PARAMS: dict = {"n_estimators": 300, "num_leaves": 31}
 
 
 def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: str = "honest", holdout_days: int = 30,
-                now=None, log=print) -> dict:
-    """Fit on `hourly` (the inputs table) and write the model and metadata. Returns the metadata."""
+                now=None, log=print, params: dict | None = None) -> dict:
+    """Fit on `hourly` (the inputs table) and write the model and metadata. Returns the metadata.
+
+    `params` overrides GBM_PARAMS for the published model (for example fewer
+    trees to keep the file small); the metadata records what was used.
+    """
+    params = {**GBM_PARAMS, **(REFIT_PARAMS if params is None else params)}
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     table = build_features(hourly, feature_set)
@@ -41,7 +50,7 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
     metrics = {}
     if test.sum() >= 24:
         log(f"Holdout fit on {int(train.sum()):,} hours, scoring {int(test.sum()):,} hours after {cut.date()} ...")
-        pred = fit_predict("gbm", table.X[train], table.y[train], table.X[test])
+        pred = fit_predict("gbm", table.X[train], table.y[train], table.X[test], params=params)
         actual = table.y[test].to_numpy()
         naive = table.X.loc[test, "price_lag1"].to_numpy()
         ok = ~np.isnan(naive)
@@ -55,7 +64,7 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
             "naive_rmse": round(float(np.sqrt(np.mean((naive[ok] - actual[ok]) ** 2))), 2),
         }
     log(f"Final fit on {int(known.sum()):,} hours ...")
-    model = make_model("gbm")
+    model = make_model("gbm", params)
     model.fit(table.X[known], table.y[known])
     model_path = save_model(model, out / f"{feature_set}.txt")
     fit_time = pd.Timestamp(now).tz_convert("UTC") if now is not None else pd.Timestamp.now(tz="UTC")
@@ -68,7 +77,7 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
         "train_to": str(last_day.date()),
         "train_hours": int(known.sum()),
         "features": list(FEATURES[feature_set]),
-        "params": {k: v for k, v in GBM_PARAMS.items() if k != "verbose"},
+        "params": {k: v for k, v in params.items() if k != "verbose"},
         "holdout": metrics,
         "note": "Honest feature set: every input is published before 12:00 Paris on the day before delivery.",
     }
