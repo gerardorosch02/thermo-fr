@@ -8,17 +8,21 @@ git stores small deltas when rows are appended.
 Files written by `export_published`:
 
     forecasts.csv      honest forecast versions of the last `days` days: delivery day,
-                       issue time, hour, forecast and the same-hour-previous-day benchmark
+                       issue time, hour, forecast and the same-hour-previous-day baseline
     actuals.csv        actual day-ahead prices for the same window
     scores.csv         daily MAE and RMSE of each version against actuals and the naive baseline
     tomorrow.csv       the latest honest forecast for the next delivery day, hourly
     error_band.csv     backtest error percentiles by hour (the dashboard's shaded band)
     model/honest.txt   the LightGBM model refitted monthly by the workflow (see refit.py)
     model/honest.json  its training period, fit date and holdout metrics
-    status.json        when the dataset was written, the last run and the attributions
+    status.json        when the dataset was written, the last run, the attributions and, under
+                       "market", aggregates of the forecast against EEX traded prices (market.py):
+                       days scored, hit rate, mean P&L per MWh, model and market error. Never a
+                       traded price, and nothing below MIN_PUBLIC_DAYS scored days.
 
 Only the honest feature set is published, and at most `days` days of actual
-prices. The inputs history, the data status and the timing log stay local.
+prices. The inputs history, the data status, the timing log and the traded
+prices stay local.
 """
 
 import json
@@ -26,6 +30,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from .market import DEFAULT_PATH as MARKET_PATH
+from .market import evaluate as evaluate_market
+from .market import load_market, public_summary
 from .store import Store, iso, utc_now
 
 PUBLIC_FEATURE_SET = "honest"
@@ -40,7 +47,16 @@ ATTRIBUTIONS = [
 ]
 
 
-def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None, last_run: dict | None = None) -> dict:
+def market_status(store: Store, market_path=MARKET_PATH) -> dict:
+    """The public aggregates of the forecast against traded prices (see market.public_summary)."""
+    rows = load_market(market_path)
+    if rows.empty:
+        return {"scored_days": 0, "note": "No traded prices recorded yet."}
+    return public_summary(evaluate_market(store, rows, feature_set=PUBLIC_FEATURE_SET))
+
+
+def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None, last_run: dict | None = None,
+                     market_path=MARKET_PATH) -> dict:
     """Write the public files. Returns a summary with row counts."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -106,10 +122,12 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
         "scored_versions": int(len(scores)),
         "model": {k: model_meta.get(k) for k in ("fitted_at_utc", "train_from", "train_to", "train_hours", "holdout")} if model_meta else {},
         "last_run": last_run or {},
+        "market": market_status(store, market_path),
         "attributions": ATTRIBUTIONS,
         "note": "Forecasts use only information available at 12:00 Paris time on the day before delivery. "
-                "Scores are forecast errors against a naive same-hour-previous-day baseline, not against traded market "
-                "prices (EEX futures or OTC day-ahead quotes); no claim is made about beating the market. "
+                "Forecast error is measured against a naive same-hour-previous-day baseline (the spot auction result of the "
+                "previous day); trading value is measured against EEX French day-ahead futures traded before the auction, "
+                "as aggregates under \"market\" once enough days are recorded. Traded prices are not republished. "
                 "Historical errors are shown as context, not as a probability forecast.",
     }
     (out / "status.json").write_text(json.dumps(status, indent=2))

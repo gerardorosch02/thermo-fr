@@ -11,6 +11,9 @@ import pandas as pd
 
 from ..config import LOCAL_TZ
 from ..forecast.jobs import next_delivery_day
+from ..forecast.market import DEFAULT_PATH as MARKET_PATH
+from ..forecast.market import evaluate as evaluate_market
+from ..forecast.market import load_market
 from ..forecast.store import Store
 
 INPUT_LABELS = {
@@ -154,6 +157,17 @@ def flag_for(row) -> str:
     if row.get("hours") is not None and row["hours"] < 23:
         return "incomplete"
     return "ok"
+
+
+def market_panel(path, feature_set: str = "honest", market_path=MARKET_PATH) -> dict:
+    """The forecast against EEX traded prices, day by day, from the hand-entered local file (never published)."""
+    rows = load_market(market_path)
+    if rows.empty:
+        return {"rows": 0, "path": str(market_path)}
+    out = _with_store(path, lambda store: evaluate_market(store, rows, feature_set=feature_set))
+    out["rows"] = int(len(rows))
+    out["path"] = str(market_path)
+    return out
 
 
 REVISION_ROWS = [("load_fc_mw", "Load forecast (MW)"), ("wind_fc_mw", "Wind forecast (MW)"), ("solar_fc_mw", "Solar forecast (MW)"),

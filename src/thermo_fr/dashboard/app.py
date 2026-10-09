@@ -58,6 +58,23 @@ def status_panel(path, version, day):
     return q.status_panel(path, day)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def market_panel(path, version, market_version, feature_set):
+    return q.market_panel(path, feature_set)
+
+
+def market_chart(table: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+    labels = table["delivery_date"] + " " + table["product"]
+    colors = ["#1baf7a" if v > 0 else "#eb6834" for v in table["pnl_per_mwh"].fillna(0)]
+    fig.add_trace(go.Bar(x=labels, y=table["pnl_per_mwh"], name="P&L per MWh (VWAP entry)", marker_color=colors))
+    fig.add_trace(go.Scatter(x=labels, y=table["cumulative_pnl_per_mwh"], name="Cumulative P&L per MWh", mode="lines+markers",
+                             line=dict(color="#0b0b0b", width=2)))
+    fig = base_layout(fig, "EUR/MWh", "Delivery day and product")
+    fig.update_xaxes(type="category", dtick=None, tickangle=-45)
+    return fig
+
+
 def base_layout(fig: go.Figure, ytitle: str, xtitle: str = "Delivery hour (Paris time)") -> go.Figure:
     fig.update_layout(
         template="plotly_white", height=380, margin=dict(l=40, r=20, t=30, b=40),
@@ -264,7 +281,37 @@ def main() -> None:
             st.dataframe(perf["scores"][["delivery_day", "issued_at_utc", "hours", "mae", "rmse", "naive_mae", "naive_rmse", "mae_below_baseline"]].round(2),
                          hide_index=True, use_container_width=True)
 
-    # 4. Data status
+    # 4. Versus the market
+    st.subheader(f"Versus the market: EEX day-ahead futures traded before the auction ({feature_set})")
+    mkt = market_panel(db, version, q.db_version(q.MARKET_PATH), feature_set)
+    if not mkt["rows"]:
+        st.info(f"No traded prices recorded. Add a day with `thermo-fr market add ...`; rows are kept in {mkt['path']}, which is git-ignored "
+                "and never published.")
+    else:
+        s = mkt["summary"]
+        if s["scored_days"]:
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Days scored", s["scored_days"])
+            c2.metric("Hit rate", f"{100 * s['hit_rate']:.0f}%")
+            c3.metric("Mean P&L per MWh", f"{s['mean_pnl_per_mwh']:+.2f} EUR")
+            c4.metric("Model MAE vs auction", f"{s['model_mae']:.2f} EUR/MWh")
+            c5.metric("Market MAE vs auction", f"{s['market_mae']:.2f} EUR/MWh")
+            st.plotly_chart(market_chart(mkt["table"]), use_container_width=True)
+            st.caption("Direction: long when the forecast is above the traded VWAP of the window, short when below. P&L per MWh = "
+                       "(auction result - entry) x direction. Each day uses the latest forecast version issued before the window opened. "
+                       "Traded prices are entered by hand from EEX and stay on this machine.")
+            with st.expander("No-trade bands (in sample)"):
+                st.dataframe(mkt["bands"], hide_index=True, use_container_width=True)
+                st.caption(mkt["bands_note"])
+        with st.expander("Daily table", expanded=True):
+            shown = mkt["table"][["delivery_date", "product", "window_paris", "issued_paris", "model", "forecast", "entry_vwap", "entry_close",
+                                  "auction", "direction", "pnl_per_mwh", "cumulative_pnl_per_mwh", "model_error", "market_error",
+                                  "model_beats_market"]] if not mkt["table"].empty else mkt["table"]
+            st.dataframe(shown, hide_index=True, use_container_width=True)
+        for skipped in s["skipped"]:
+            st.warning(f"{skipped['delivery_date']} {skipped['product']}: {skipped['reason']}")
+
+    # 5. Data status
     st.subheader(f"Data status for {tomorrow}")
     status = status_panel(db, version, tomorrow)
     if "table" not in status:

@@ -161,10 +161,11 @@ the past; it is not a probability forecast for tomorrow.
 **Updates.** A GitHub Actions workflow publishes the forecast on weekday mornings and scores it against the
 published prices every afternoon. Source code, method and backtest: the repository linked above.
 
-**Limitations.** The only comparison made is forecast error against the naive same-hour-previous-day baseline. The model is
-not benchmarked against traded market prices (EEX futures or OTC day-ahead quotes), so it makes no claim about beating the
-market, and a lower error than the baseline says nothing about whether a trade would have made money. The error band is the
-model's past error distribution, not a probability forecast. Errors are largest on days with regime changes (cold snaps,
+**Limitations.** Forecast error is measured against a naive baseline, the spot auction result of the same hour on the previous
+day; a lower error than the baseline says nothing about whether a trade would have made money. Trading value is measured
+separately, against EEX French day-ahead futures traded before the auction (the "Versus the market" panel), on the days for
+which traded prices were recorded by hand: a small sample so far, reported whatever it says. The error band is the model's
+past error distribution, not a probability forecast. Errors are largest on days with regime changes (cold snaps,
 price collapses, days after holidays), which is also where a forecast matters most. A known weakness is the top 5% price
 hours, typically cold, calm winter evenings when gas sets the price: the generation proxies improve the error elsewhere but
 made those hours slightly worse in the backtest (23.2 against 22.6 EUR/MWh without them). Weekend and holiday middays with
@@ -225,6 +226,21 @@ def main() -> None:
             st.dataframe(scores[["delivery_day", "issued_at_utc", "hours", "mae", "rmse", "naive_mae", "naive_rmse", "mae_below_baseline"]].round(2),
                          hide_index=True, use_container_width=True)
 
+    st.subheader("Versus the market")
+    market = status.get("market") or {}
+    if market.get("scored_days", 0) and "hit_rate" in market:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Days scored", int(market["scored_days"]))
+        c2.metric("Hit rate", f"{100 * market['hit_rate']:.0f}%")
+        c3.metric("Mean P&L per MWh", f"{market['mean_pnl_per_mwh']:+.2f} EUR")
+        c4.metric("Model vs market error", f"{market['model_mae']:.1f} vs {market['market_mae']:.1f} EUR/MWh")
+        st.caption("Trading value: the forecast issued before the EEX trading window against the traded VWAP of the French day-ahead "
+                   "future, long when above, short when below, settled at the auction result. Market prices come from EEX and are not "
+                   "republished here; only these aggregates are.")
+    else:
+        st.caption(f"Trading value is measured against EEX French day-ahead futures traded before the auction. Days scored so far: "
+                   f"{int(market.get('scored_days', 0))}. {market.get('note', '')} Market prices come from EEX and are not republished here.")
+
     st.subheader("How it works")
     st.markdown(HOW_IT_WORKS)
 
@@ -232,7 +248,8 @@ def main() -> None:
     for line in status.get("attributions", []):
         st.markdown(f"- {line}")
     st.caption("Forecasts and derived numbers are the author's own and carry no endorsement by the data providers. "
-               "They are not benchmarked against traded market prices and are not trading advice.")
+               "Fundamentals come from ENTSO-E, RTE and Open-Meteo; spot prices are the EPEX auction results as published by ENTSO-E; "
+               "traded prices are EEX day-ahead futures entered by hand and not republished. Nothing here is trading advice.")
 
 
 if __name__ == "__main__":

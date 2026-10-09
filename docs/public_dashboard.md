@@ -6,7 +6,7 @@ The public dashboard (`streamlit_app.py`) reads only the files under `published/
 
 | File | Content |
 |---|---|
-| `published/forecasts.csv` | every honest forecast version of the last 90 days: delivery day, issue time, hour, forecast, same-hour-previous-day benchmark |
+| `published/forecasts.csv` | every honest forecast version of the last 90 days: delivery day, issue time, hour, forecast, same-hour-previous-day baseline |
 | `published/actuals.csv` | actual day-ahead prices for the same window |
 | `published/scores.csv` | daily MAE and RMSE of each version against actuals and the naive same-hour-previous-day baseline, with `mae_below_baseline` per day |
 | `published/tomorrow.csv` | the latest forecast for the next delivery day |
@@ -15,7 +15,7 @@ The public dashboard (`streamlit_app.py`) reads only the files under `published/
 | `published/model/honest.json` | its training period, fit date, feature list and holdout metrics |
 | `published/model/wind_proxy.json` | weights of the wind generation proxy (MW per forecast point), refitted with the model on the trailing year of actual wind generation; the morning run applies them to the fresh point forecasts |
 | `published/model/solar_proxy.json` | the same for the solar generation proxy (radiation forecasts at 21 points against actual solar generation) |
-| `published/status.json` | when the dataset was written, the last run, the model summary, the attributions |
+| `published/status.json` | when the dataset was written, the last run, the model summary, the attributions, and under `market` the aggregates of the forecast against EEX traded prices (days scored, hit rate, mean P&L per MWh, model and market error); never a traded price, and only from `MIN_PUBLIC_DAYS` scored days |
 
 Only the honest feature set is published. The extended set, the data-status panel and the timing log remain in the local database and the local dashboard (`thermo-fr dashboard`).
 
