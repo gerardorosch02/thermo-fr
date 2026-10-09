@@ -112,11 +112,13 @@ The dashboard shows tomorrow's latest forecast with today's actual prices, the s
 
 ## Public dashboard and automated updates
 
-`streamlit_app.py` is a public version of the dashboard that reads only `published/` and runs on Streamlit Community Cloud. A GitHub Actions workflow keeps that folder current without any local machine: on weekday mornings it refits the honest model and publishes the next day's forecast, and every afternoon it fetches the auction results and scores the stored forecasts. The token lives in a repository secret and is never printed or committed. `published/` holds the last 90 days of forecasts (with issue times), actual prices, the benchmark, daily errors, tomorrow's latest forecast, the backtest error band and the hourly inputs history the model trains on.
+`streamlit_app.py` is a public version of the dashboard that reads only `published/` and runs on Streamlit Community Cloud. A GitHub Actions workflow keeps that folder current without any local machine: on weekday mornings it fetches the days around the next delivery day and publishes the forecast made with the stored model, every afternoon it fetches the auction results and scores the stored forecasts, and on the first weekday of each month it fetches the full history, refits the honest model and commits the model file with its metadata. The token lives in a repository secret and is never printed or committed. `published/` holds the last 90 days of forecasts (with issue times), actual prices, the benchmark, daily errors, tomorrow's latest forecast, the backtest error band and the model; no inputs history is kept in the repository.
 
 ```bash
 thermo-fr publish                   # export the public dataset from the local database
 thermo-fr import-published          # the reverse, used by the workflow to restore its state
+thermo-fr refit-model               # fetch the full history and save published/model/honest.txt plus metadata
+thermo-fr morning-run --model-file published/model/honest.txt --feature-sets honest   # predict with the stored model
 streamlit run streamlit_app.py      # the public app, locally
 ```
 
@@ -197,6 +199,7 @@ src/thermo_fr/
 scripts/schedule_tasks.ps1   install, show or remove the Task Scheduler entries
 scripts/screenshot_dashboard.py  full-page screenshot of the running dashboard
 forecast/publish.py      export and import of the public dataset under published/
+forecast/refit.py        monthly refit: model file and metadata under published/model/
 streamlit_app.py         public dashboard reading published/ only (Streamlit Community Cloud entry point)
 .github/workflows/forecast.yml  scheduled morning-run and settle, committing published/
   data/energy_charts.py  Energy-Charts load and prices (no key)
