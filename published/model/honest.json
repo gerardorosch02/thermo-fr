@@ -2,7 +2,7 @@
   "feature_set": "honest",
   "model": "lightgbm",
   "model_file": "honest.txt",
-  "fitted_at_utc": "2026-10-09T17:54:08Z",
+  "fitted_at_utc": "2026-10-09T20:36:27Z",
   "train_from": "2021-01-01",
   "train_to": "2026-10-01",
   "train_hours": 50376,
@@ -23,7 +23,16 @@
     "price_lag1_min",
     "price_lag1_max",
     "price_lag7_mean",
-    "wind_proxy_mw"
+    "wind_proxy_mw",
+    "solar_proxy_mw",
+    "day_type",
+    "bridge_day",
+    "pre_holiday",
+    "post_holiday",
+    "year_end_break",
+    "same_type_lag_days",
+    "price_lag_same_type",
+    "price_lag_same_type_mean"
   ],
   "params": {
     "n_estimators": 300,
@@ -40,8 +49,8 @@
     "holdout_from": "2026-09-02",
     "holdout_to": "2026-10-01",
     "holdout_hours": 698,
-    "mae": 27.83,
-    "rmse": 37.2,
+    "mae": 27.73,
+    "rmse": 36.45,
     "naive_mae": 36.8,
     "naive_rmse": 53.91
   },
@@ -56,5 +65,16 @@
     "bias_mw": -640.9,
     "r2": 0.7867,
     "mean_actual_mw": 5810.1
+  },
+  "solar_proxy": {
+    "file": "solar_proxy.json",
+    "from": "2025-10-01 00:00:00+00:00",
+    "to": "2026-09-30 23:00:00+00:00",
+    "hours": 8731,
+    "capacity_mw": 22403.0,
+    "mae_mw": 1050.6,
+    "bias_mw": -215.7,
+    "r2": 0.8986,
+    "mean_actual_mw": 4037.1
   }
 }

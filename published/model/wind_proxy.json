@@ -1,4 +1,5 @@
 {
+  "proxy": "wind",
   "hub_height_m": 100,
   "power_curve": {
     "cut_in_ms": 3.0,
