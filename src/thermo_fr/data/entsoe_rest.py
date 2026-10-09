@@ -13,6 +13,11 @@ Data items used (codes from the platform's RESTful API guide):
 - Wind and solar forecast documentType A69, processType A01, in_Domain,
                           one TimeSeries per psrType: B16 solar, B18 wind
                           offshore, B19 wind onshore
+- Actual generation per type documentType A75, processType A16, in_Domain,
+                          psrType B19 (wind onshore) or B18 (wind offshore);
+                          France reports it in 15-minute steps, averaged to
+                          hourly here. Used only to calibrate the pre-gate
+                          wind proxy (forecast/wind_proxy.py).
 
 Limits, as published by ENTSO-E: at most one year per request for these
 items, at most 400 requests per minute per token, and a ten minute ban after
@@ -224,6 +229,10 @@ class EntsoeApi:
             return {"documentType": "A65", "processType": "A16", "outBiddingZone_Domain": self.eic}
         if item == "wind_solar_forecast":
             return {"documentType": "A69", "processType": "A01", "in_Domain": self.eic}
+        if item == "wind_onshore_actual":
+            return {"documentType": "A75", "processType": "A16", "in_Domain": self.eic, "psrType": "B19"}
+        if item == "wind_offshore_actual":
+            return {"documentType": "A75", "processType": "A16", "in_Domain": self.eic, "psrType": "B18"}
         raise ValueError(f"Unknown data item {item!r}")
 
     def _download(self, params: dict) -> bytes:
@@ -287,4 +296,12 @@ class EntsoeApi:
         for psr, name in PSR_NAMES.items():
             series = combine_resolutions([p for p in parts if p.psr_type == psr])
             columns[f"{name}_fc_mw"] = clip(series, start, end)
+        return pd.DataFrame(columns)
+
+    def wind_generation_actual(self, start: str, end: str) -> pd.DataFrame:
+        """Columns wind_onshore_mw and wind_offshore_mw: actual generation, hourly means (NaN where not reported)."""
+        columns = {}
+        for item, name in (("wind_onshore_actual", "wind_onshore_mw"), ("wind_offshore_actual", "wind_offshore_mw")):
+            parts = self.query(item, start, end)
+            columns[name] = clip(combine_resolutions(parts), start, end)
         return pd.DataFrame(columns)

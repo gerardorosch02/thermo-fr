@@ -69,10 +69,10 @@ def test_performance_panel_rolls_scores(db):
     s = Store(db)
     c = curve_for(TODAY, 90)
     fid = s.save_forecast(1, TODAY, "honest", pd.Timestamp("2026-10-06T07:00Z"), "gbm", "scheduled", 50, True, c)
-    s.save_score(fid, TODAY, "honest", "2026-10-06T07:00:00Z", {"hours": 24, "mae": 5.0, "rmse": 6.0, "naive_mae": 7.0, "naive_rmse": 8.0, "model_won": True})
+    s.save_score(fid, TODAY, "honest", "2026-10-06T07:00:00Z", {"hours": 24, "mae": 5.0, "rmse": 6.0, "naive_mae": 7.0, "naive_rmse": 8.0, "mae_below_baseline": True})
     s.close()
     panel = q.performance_panel(db, "honest")
-    assert panel["share_won"] == 1.0 and panel["mae"] == 5.0 and panel["naive_mae"] == 7.0
+    assert panel["share_below_baseline"] == 1.0 and panel["mae"] == 5.0 and panel["naive_mae"] == 7.0
     assert panel["scores"]["rolling_mae"].iloc[0] == 5.0 and len(panel["hourly"]) == 24
     assert q.performance_panel(db, "extended")["scores"].empty
 

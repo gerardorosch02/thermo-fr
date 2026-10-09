@@ -2,7 +2,7 @@
   "feature_set": "honest",
   "model": "lightgbm",
   "model_file": "honest.txt",
-  "fitted_at_utc": "2026-10-09T15:43:07Z",
+  "fitted_at_utc": "2026-10-09T17:54:08Z",
   "train_from": "2021-01-01",
   "train_to": "2026-10-01",
   "train_hours": 50376,
@@ -22,7 +22,8 @@
     "price_lag1_mean",
     "price_lag1_min",
     "price_lag1_max",
-    "price_lag7_mean"
+    "price_lag7_mean",
+    "wind_proxy_mw"
   ],
   "params": {
     "n_estimators": 300,
@@ -39,10 +40,21 @@
     "holdout_from": "2026-09-02",
     "holdout_to": "2026-10-01",
     "holdout_hours": 698,
-    "mae": 29.33,
-    "rmse": 39.09,
+    "mae": 27.83,
+    "rmse": 37.2,
     "naive_mae": 36.8,
     "naive_rmse": 53.91
   },
-  "note": "Honest feature set: every input is published before 12:00 Paris on the day before delivery."
+  "note": "Honest feature set: every input is published before 12:00 Paris on the day before delivery.",
+  "wind_proxy": {
+    "file": "wind_proxy.json",
+    "from": "2025-10-01 00:00:00+00:00",
+    "to": "2026-09-30 23:00:00+00:00",
+    "hours": 8731,
+    "capacity_mw": 21011.2,
+    "mae_mw": 1435.5,
+    "bias_mw": -640.9,
+    "r2": 0.7867,
+    "mean_actual_mw": 5810.1
+  }
 }

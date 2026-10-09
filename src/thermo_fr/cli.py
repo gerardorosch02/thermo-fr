@@ -108,7 +108,7 @@ def cmd_forecast_backtest(args) -> None:
     sources = json.loads((data.parent / "sources.json").read_text()) if (data.parent / "sources.json").exists() else None
     comparison_path = data.parent / "price_comparison.json"
     comparison = json.loads(comparison_path.read_text()) if comparison_path.exists() else None
-    results = run_backtest(hourly, args.test_start, args.test_end)
+    results = run_backtest(hourly, args.test_start, args.test_end, feature_sets=tuple(args.feature_sets))
     path = write_report(results, out=Path(args.out), sample_week=args.sample_week, sources=sources, comparison=comparison)
     print(path.read_text(encoding="utf-8"))
 
@@ -119,7 +119,7 @@ def cmd_forecast(args) -> None:
     from .forecast.report import forecast_day_chart
 
     inputs = load_inputs(Path(args.data))
-    fresh = None if args.no_refresh else refresh_window(args.date, cache_dir=Path(args.cache_dir))
+    fresh = None if args.no_refresh else refresh_window(args.date, cache_dir=Path(args.cache_dir), wind_weights=Path(args.wind_weights))
     curve = forecast_day(args.date, inputs, fresh)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -148,7 +148,7 @@ def cmd_morning_run(args) -> None:
     try:
         summary = morning_run(store, args.date, kind=args.kind, inputs_path=Path(args.data), cache_dir=Path(args.cache_dir),
                               reports_dir=Path(args.reports_dir), feature_sets=tuple(args.feature_sets),
-                              model_file=Path(args.model_file) if args.model_file else None)
+                              model_file=Path(args.model_file) if args.model_file else None, wind_weights=Path(args.wind_weights))
     finally:
         store.close()
     print(f"morning-run {summary['status']}: delivery day {summary['delivery_day']}, "
@@ -262,6 +262,7 @@ def main(argv=None) -> None:
     fbt.add_argument("--test-start", default="2024-01-01", help="first month forecast out of sample")
     fbt.add_argument("--test-end", default="2026-01-01", help="exclusive")
     fbt.add_argument("--sample-week", default=None, help="Monday (YYYY-MM-DD) of the week to chart")
+    fbt.add_argument("--feature-sets", nargs="+", default=["honest", "honest_base", "extended"], choices=("honest", "honest_base", "extended"))
     fbt.set_defaults(func=cmd_forecast_backtest)
 
     fc = sub.add_parser("forecast", help="Hourly price forecast for one delivery day, as of 12:00 the day before")
@@ -270,6 +271,7 @@ def main(argv=None) -> None:
     fc.add_argument("--out", default="reports/forecast")
     fc.add_argument("--cache-dir", default="data/cache")
     fc.add_argument("--no-refresh", action="store_true", help="use the stored inputs only, no download")
+    fc.add_argument("--wind-weights", default="published/model/wind_proxy.json", help="wind proxy calibration written by refit-model")
     fc.set_defaults(func=cmd_forecast)
 
     probe = sub.add_parser("timing-probe", help="Log which ENTSO-E day-ahead items already exist for tomorrow")
@@ -288,6 +290,7 @@ def main(argv=None) -> None:
     morning.add_argument("--logs-dir", default="logs")
     morning.add_argument("--feature-sets", nargs="+", default=["honest", "extended"], choices=("honest", "extended"))
     morning.add_argument("--model-file", default=None, help="predict with this stored LightGBM model instead of refitting")
+    morning.add_argument("--wind-weights", default="published/model/wind_proxy.json", help="wind proxy calibration written by refit-model")
     morning.set_defaults(func=cmd_morning_run)
 
     stl = sub.add_parser("settle", help="Fetch actual prices and score the stored forecasts")

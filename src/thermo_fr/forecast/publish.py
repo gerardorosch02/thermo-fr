@@ -10,7 +10,7 @@ Files written by `export_published`:
     forecasts.csv      honest forecast versions of the last `days` days: delivery day,
                        issue time, hour, forecast and the same-hour-previous-day benchmark
     actuals.csv        actual day-ahead prices for the same window
-    scores.csv         daily MAE and RMSE of each version against actuals and benchmark
+    scores.csv         daily MAE and RMSE of each version against actuals and the naive baseline
     tomorrow.csv       the latest honest forecast for the next delivery day, hourly
     error_band.csv     backtest error percentiles by hour (the dashboard's shaded band)
     model/honest.txt   the LightGBM model refitted monthly by the workflow (see refit.py)
@@ -68,7 +68,7 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
     actuals.to_csv(out / "actuals.csv", index=False)
 
     scores = pd.read_sql_query(
-        "SELECT delivery_day, issued_at_utc, hours, mae, rmse, naive_mae, naive_rmse, model_won, settled_at_utc FROM scores"
+        "SELECT delivery_day, issued_at_utc, hours, mae, rmse, naive_mae, naive_rmse, mae_below_baseline, settled_at_utc FROM scores"
         " WHERE feature_set = ? AND delivery_day >= ? ORDER BY delivery_day, issued_at_utc",
         store.conn, params=(PUBLIC_FEATURE_SET, cutoff),
     )
@@ -108,6 +108,8 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
         "last_run": last_run or {},
         "attributions": ATTRIBUTIONS,
         "note": "Forecasts use only information available at 12:00 Paris time on the day before delivery. "
+                "Scores are forecast errors against a naive same-hour-previous-day baseline, not against traded market "
+                "prices (EEX futures or OTC day-ahead quotes); no claim is made about beating the market. "
                 "Historical errors are shown as context, not as a probability forecast.",
     }
     (out / "status.json").write_text(json.dumps(status, indent=2))
@@ -146,7 +148,7 @@ def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
         for _, r in merged.iterrows():
             store.save_score(int(r["forecast_id"]), r["delivery_day"], PUBLIC_FEATURE_SET, r["issued_at_utc"], {
                 "hours": r["hours"], "mae": r["mae"], "rmse": r["rmse"], "naive_mae": r["naive_mae"], "naive_rmse": r["naive_rmse"],
-                "model_won": None if pd.isna(r["model_won"]) else bool(r["model_won"]),
+                "mae_below_baseline": None if pd.isna(r["mae_below_baseline"]) else bool(r["mae_below_baseline"]),
             }, now=pd.Timestamp(r["settled_at_utc"]) if isinstance(r["settled_at_utc"], str) else None)
             summary["scores"] += 1
     band_path = src / "error_band.csv"

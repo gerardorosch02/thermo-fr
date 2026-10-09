@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS actuals (
     timestamp_utc TEXT PRIMARY KEY, delivery_day TEXT NOT NULL, hour INTEGER NOT NULL, price REAL NOT NULL, fetched_at_utc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scores (
     forecast_id INTEGER PRIMARY KEY, delivery_day TEXT NOT NULL, feature_set TEXT NOT NULL, issued_at_utc TEXT NOT NULL,
-    hours INTEGER NOT NULL, mae REAL NOT NULL, rmse REAL NOT NULL, naive_mae REAL, naive_rmse REAL, model_won INTEGER,
+    hours INTEGER NOT NULL, mae REAL NOT NULL, rmse REAL NOT NULL, naive_mae REAL, naive_rmse REAL, mae_below_baseline INTEGER,
     settled_at_utc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS error_band (
     feature_set TEXT NOT NULL, hour INTEGER NOT NULL, n INTEGER NOT NULL, mae REAL NOT NULL,
@@ -94,6 +94,14 @@ class Store:
         self.conn = sqlite3.connect(str(self.path))
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Rename the scores column of databases written before the wording change (model_won)."""
+        columns = [r[1] for r in self.conn.execute("PRAGMA table_info(scores)")]
+        if "model_won" in columns and "mae_below_baseline" not in columns:
+            self.conn.execute("ALTER TABLE scores RENAME COLUMN model_won TO mae_below_baseline")
+            self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -315,10 +323,10 @@ class Store:
     def save_score(self, forecast_id: int, delivery_day: str, feature_set: str, issued_at: str, score: dict, now=None) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO scores (forecast_id, delivery_day, feature_set, issued_at_utc, hours, mae, rmse,"
-            " naive_mae, naive_rmse, model_won, settled_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " naive_mae, naive_rmse, mae_below_baseline, settled_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (forecast_id, delivery_day, feature_set, issued_at, int(score["hours"]), float(score["mae"]), float(score["rmse"]),
              score.get("naive_mae"), score.get("naive_rmse"),
-             None if score.get("model_won") is None else int(score["model_won"]), iso(utc_now(now))),
+             None if score.get("mae_below_baseline") is None else int(score["mae_below_baseline"]), iso(utc_now(now))),
         )
         self.conn.commit()
 
@@ -407,7 +415,7 @@ def score_curve(curve: pd.DataFrame, actual: pd.Series) -> dict | None:
         nerr = naive["naive_day"] - naive["actual"]
         out["naive_mae"] = float(nerr.abs().mean())
         out["naive_rmse"] = float((nerr**2).mean() ** 0.5)
-        out["model_won"] = bool(out["mae"] < out["naive_mae"])
+        out["mae_below_baseline"] = bool(out["mae"] < out["naive_mae"])
     else:
-        out["naive_mae"] = out["naive_rmse"] = out["model_won"] = None
+        out["naive_mae"] = out["naive_rmse"] = out["mae_below_baseline"] = None
     return out

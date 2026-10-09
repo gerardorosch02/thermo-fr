@@ -31,6 +31,8 @@ All series are hourly UTC, 2021-01-01 to 2026-09-30, cached under `data/cache/` 
 | Solar, wind onshore, wind offshore forecasts | ENTSO-E A69 / A01, psrType B16, B19, B18 | 158 and 167 hours missing (mostly 2021); offshore starts 2023-08-06; the repeated autumn hour is absent |
 | Temperature, 100 m wind, radiation as issued | Open-Meteo previous-runs API, best_match, lead day 2 | temperature from 2021-03-25, radiation from 2024-01-20, wind from 2024-02-17 |
 | The same, proxy | Open-Meteo historical-forecast API, best_match | complete from 2021; training proxy only |
+| 100 m wind at 17 wind-region points, as issued | Open-Meteo previous-runs API, best_match, lead day 2 | from 2024-02-17; input of the wind proxy |
+| Actual wind onshore and offshore generation | ENTSO-E A75 / A16, psrType B19, B18 | 15-minute, averaged to hourly; calibration target of the wind proxy and definition of the windy-day slice, never a feature |
 
 Temperature is population weighted over the eight cities, as in the thermosensitivity model; wind and radiation are plain means, since they stand for renewable output rather than heating demand.
 
@@ -42,9 +44,11 @@ ENTSO-E curve type A03 omits a point when its value repeats the previous one; ea
 
 Target: the hourly French day-ahead price in Paris delivery hours (23 rows on the spring day, 25 on the autumn day).
 
-Features (honest set): hour, weekday, month, day of year, public holiday; ENTSO-E load forecast; temperature, 100 m wind and radiation as forecast two days ahead; price lags for the same local hour on D-1, D-2 and D-7, and the mean, minimum and maximum of D-1 and the mean of D-7. The lagged prices stand in for gas and carbon, which are not inputs here. Extended set: honest plus the ENTSO-E solar and wind forecasts and the residual load (load forecast minus solar minus wind).
+Features (honest set): hour, weekday, month, day of year, public holiday; ENTSO-E load forecast; temperature, 100 m wind and radiation as forecast two days ahead; the wind generation proxy (see below); price lags for the same local hour on D-1, D-2 and D-7, and the mean, minimum and maximum of D-1 and the mean of D-7. The lagged prices stand in for gas and carbon, which are not inputs here. Extended set: honest plus the ENTSO-E solar and wind forecasts and the residual load (load forecast minus solar minus wind).
 
 Weather for a row is the as-issued forecast when the archive has all three variables for that hour, else the proxy. Rows with proxy weather are kept for training but excluded from the strict metrics; in the 2024 to 2025 test window this affects 2024-01-01 to 2024-02-16.
+
+A third set, `honest_base`, is the honest set without the wind proxy; it exists only to measure what the proxy adds.
 
 Models: same hour on D-1 and same hour on D-7 as benchmarks; LightGBM (800 trees, learning rate 0.03, 63 leaves, bagging and feature subsampling); ridge regression on the same information with one-hot hour, weekday and month.
 
@@ -83,8 +87,8 @@ What the tables say:
 - The honest gradient boosting model cuts the error of the same-hour-yesterday benchmark by 18% and of the same-weekday-last-week benchmark by 43%. The linear model on the same features gets about half of that gain, so the boosting adds roughly 1.7 EUR/MWh of MAE on top of a linear fit.
 - The ENTSO-E wind and solar forecasts are worth another 1.1 EUR/MWh (16.98 to 15.89), most of it in off-peak and negative-price hours, which is where renewable output sets the price. Whether that gain is available at 12:00 depends on when RTE actually publishes the day-ahead renewables forecast, which the probe has not yet measured.
 - By hour, the models help most in the morning ramp (07:00 to 09:00), where the D-1 benchmark is worst, and least in the midday hours. The evening peak (18:00 to 20:00) remains the hardest for every method.
-- On the top 5% price hours the linear model beats the boosting (21.1 against 22.6), and in negative-price hours the honest boosting is worse than the naive benchmark (17.2 against 15.6). Both are symptoms of the same problem described under the worst days.
-- Month by month, the honest boosting beats the D-1 benchmark in 21 of 23 strict months; the exceptions are April 2024 (21.6 against 19.2) and January 2025 (32.6 against 29.4).
+- On the top 5% price hours the linear model has the lower MAE (21.1 against 22.6 for the boosting), and in negative-price hours the honest boosting is worse than the naive benchmark (17.2 against 15.6). Both are symptoms of the same problem described under the worst days.
+- Month by month, the honest boosting has a lower MAE than the D-1 benchmark in 21 of 23 strict months; the exceptions are April 2024 (21.6 against 19.2) and January 2025 (32.6 against 29.4).
 
 Charts: `reports/forecast/mae_by_hour_{honest,extended}.png`, `mae_by_month_{honest,extended}.png`, `sample_week.png` (week of 2025-01-27) and `day_2025-01-15.png` from `thermo-fr forecast --date 2025-01-15`.
 
@@ -118,12 +122,47 @@ The twenty days with the largest daily MAE of the honest gradient boosting model
 
 The practical conclusion for phase 2: forecast the price relative to a recent level (for example the D-1 daily mean) rather than its raw level, so that lag features carry shape and not regime, and add a fuel-cost proxy (gas and carbon) and nuclear availability so the model does not have to infer the regime from lagged prices alone.
 
+## Wind generation proxy (2026-10-09)
+
+The gas-trader review asked for a pre-gate wind input. ENTSO-E's day-ahead wind forecast may be published after the auction (the morning runs on 2026-10-08 and 10-09 saw it absent at every poll before 12:00 Paris and present after 18:00), so the honest set replaced it with a proxy built only from inputs that pass the gate:
+
+- 100 m wind speed as forecast two days ahead (Open-Meteo previous runs, lead day 2, the same timing rule as the other weather inputs) at 17 points: Somme, Aisne, Champagne, Lorraine, Beauce, Indre, Finistere, Vendee, Eure, Poitou, Aude, Lauragais, Bourgogne, Rhone valley, and the Saint-Nazaire, Fecamp and Saint-Brieuc offshore farms. 100 m is the closest archived level to the hub heights of the French fleet (the API also has 80 and 120 m, all from 2024-02-17).
+- A generic turbine power curve (cut-in 3 m/s, cubic ramp to rated output at 12 m/s, cut-out 25 m/s) turns each point's speed into a capacity factor.
+- Non-negative least squares fits one weight in MW per point against ENTSO-E actual wind generation (A75, onshore plus offshore). The weights are refitted at the start of every month on the trailing 365 days ending two days before the month, and applied to that month. Actual generation per type is published within an hour of the operating period, so the calibration data of a month is public before the gate of its first day; `timing.py` has the rule (`wind_proxy`) and the look-ahead test covers it. The first calibration needs 60 days of overlap, so the proxy exists from 2024-05.
+- The monthly refit saves the latest weights to `published/model/wind_proxy.json` (fitted 2025-10-01 to 2026-09-30: 21,011 MW of effective capacity, R2 0.79) and the morning run applies them to the fresh point forecasts.
+
+How good is the proxy itself, against actual generation, 2024-05 to 2026-09 (21,141 hours, mean 5,172 MW, standard deviation 3,808 MW):
+
+| Series | MAE | Bias | R2 | Correlation |
+|---|---|---|---|---|
+| Wind proxy (pre-gate, this work) | 1,387 MW | -815 MW | 0.777 | 0.918 |
+| ENTSO-E day-ahead wind forecast (post-gate, for reference) | 650 MW | +232 MW | 0.935 | 0.971 |
+
+The proxy under-reads by about 800 MW, mostly because a trailing-year fit lags the growth of the fleet; the boosting model learns the offset, so it was left as is. It carries about twice the error of the TSO's own forecast, which uses the actual fleet, shorter lead times and more weather models.
+
+Backtest with and without the proxy, same walk-forward as above (2026-10-09, inputs to 2026-09-30, `thermo-fr forecast-backtest`, test window 2024-01 to 2025-12). `honest_base` is the honest set without the proxy, which is what the tables above describe. Strict rows, 2024-02-17 to 2025-12-31, MAE in EUR/MWh:
+
+| Hours | Count | D-1 baseline | GBM without proxy | GBM with proxy | Change | Linear without | Linear with |
+|---|---|---|---|---|---|---|---|
+| all | 16,409 | 20.68 | 16.98 | 15.90 | -1.08 (-6.4%) | 18.70 | 18.59 |
+| peak (08 to 20, weekdays) | 5,856 | 22.03 | 18.80 | 17.37 | -1.43 (-7.6%) | 19.71 | 19.27 |
+| off peak | 10,553 | 19.94 | 15.97 | 15.09 | -0.88 (-5.5%) | 18.14 | 18.20 |
+| top 5% price hours | 821 | 25.94 | 22.55 | 24.11 | +1.56 (+6.9%) | 21.11 | 21.16 |
+| negative price hours | 857 | 15.61 | 17.17 | 15.79 | -1.38 (-8.0%) | 20.27 | 20.73 |
+| windiest 10% of days (actual generation at or above 10,210 MW, 69 days) | 1,656 | 27.46 | 23.63 | 18.98 | -4.65 (-19.7%) | 21.77 | 20.48 |
+
+The windiest days are the 10% of strict test days with the highest mean actual wind generation. On them the model without the proxy was barely better than the linear fit; with it the error falls by a fifth and 47 of the 69 days improve. On the calmest 10% of days nothing changes (14.10 against 14.41). The proxy only enters the training data from 2024-06, so the first months of the window are identical for both sets; from 2024-06 to 2025-12 the monthly MAE is lower with the proxy in 19 of 19 months, by 0.15 to 2.41 EUR/MWh. Over the strict rows from 2024-05, the comparison where the feature exists, the figures are 17.15 without and 15.95 with the proxy (baseline 21.26). The extended set, which uses the post-gate ENTSO-E forecasts, is at 15.36 on all strict rows and 16.39 on the windy days, so the proxy recovers about half of the gap between the honest and the extended set overall and most of it on windy days.
+
+The one slice that gets worse is the top 5% price hours (+1.56 EUR/MWh). Those are mostly cold, calm winter evenings where the proxy adds little information and a few more trees spent on wind cost some sharpness at the top; the linear model is unchanged there. The regime-jump problem of January 2025 is untouched (32.63 to 30.59).
+
+The published model was refitted with the proxy (`thermo-fr refit-model --from-file`): holdout September 2026 MAE 27.83 against 36.80 for the baseline, where the previous model had 29.33. The error band in the dashboards now comes from this backtest's predictions.
+
 ## Things to double-check
 
 1. **Open-Meteo lead time.** The honest set uses forecasts issued 48 to 53 hours before each hour (lead day 2), which is more conservative than what a desk has at 11:30 on D-1 (the 00 UTC run of D-1). Lead day 1 would be closer but uses the 12 and 18 UTC runs of D-1 for the afternoon and evening of D, after the gate. If you prefer the realistic mix (day 1 for hours before 12:00 UTC on D, day 2 after), say so and it is a small change in `weather_forecast.py` and `timing.py`.
 2. **Weather archive start.** As-issued wind and radiation forecasts exist only from 2024-02-17 (temperature from 2021-03-25). Training rows before that use the historical-forecast proxy, which is close to actual weather; the model therefore learns on cleaner weather than it is tested on. The strict metrics exclude 2024-01-01 to 2024-02-16 from the test window.
 3. **Load forecast revisions.** The ENTSO-E API serves the latest version of the day-ahead load forecast. The regulation requires publication two hours before gate closure, but updates "when significant changes occur" are allowed and the API does not say when the stored value was last changed. The honest set treats it as a 10:00 D-1 input.
-4. **Publication times are from the rules, not measured.** Run `thermo-fr timing-probe` a few times during a weekday morning (08:00, 10:30, 11:55, 13:15, 18:30 Paris). The log in `data/timing_probe.csv` will show when the load forecast, the wind and solar forecast and the prices for the next day first appear. If the wind and solar forecast turns out to be there before 12:00, the extended set becomes legitimate.
+4. **Publication times are from the rules, partly measured.** The scheduled morning runs (timing log in the dashboard) have so far seen the load forecast and the weather present at the 08:00 Paris poll and the ENTSO-E wind and solar forecast absent at every poll before the gate, so the extended set does use late information and the wind proxy above is the pre-gate substitute. Keep watching the log; if the wind and solar forecast ever appears before 12:00, the extended set becomes legitimate.
 5. **Regime jumps.** The gradient boosting model extrapolates badly after extreme days (21 January 2025); see the worst days. The headline MAE is still better than the benchmarks, but a desk would not accept a 480 EUR/MWh forecast for a 120 EUR/MWh hour. This is the first thing to fix in phase 2.
 6. **Price comparison.** API prices and the CSV exports are identical on 2021 to 2025, so either source can be used for the target; 2026 exists only through the API.
 7. **Nothing from the thermosensitivity pipeline changed** except the `entsoe` source, which now uses the direct REST client instead of entsoe-py (the `entsoe` extra is gone, `forecast` is new). The cached RTE load in `data/cache/rte` was not touched.

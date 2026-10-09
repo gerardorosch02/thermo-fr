@@ -29,6 +29,13 @@ query time). Sources:
 - Weather from the historical-forecast archive: stitched from the latest run
   before each hour, so it is taken as known one hour before valid time. It
   is a training proxy only and always fails the gate.
+- Wind generation proxy (forecast/wind_proxy.py): hub-height wind forecasts
+  with the same lead-day-2 timing as the weather above, turned into MW with
+  weights refitted at the start of each month on actual generation up to two
+  days before the month. Actual generation per type is published within an
+  hour of the operating period (Article 16(1)(a)), so the calibration data
+  is taken as known at 01:00 Paris on the day before the month starts. The
+  rule is the later of the two.
 - Calendar features are known in advance.
 """
 
@@ -105,6 +112,24 @@ def weather_proxy_issue(index) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(index).tz_convert("UTC") - pd.Timedelta(hours=1)
 
 
+WIND_PROXY_LAG_DAYS = 2
+GENERATION_PUBLICATION_LAG_HOURS = 1
+
+
+def wind_proxy_calibration_issue(index) -> pd.DatetimeIndex:
+    """Actual generation of (first day of the delivery month - 2) is public one hour after that day ends."""
+    days = delivery_days(index)
+    month_start = pd.DatetimeIndex(days.to_period("M").to_timestamp())
+    return _local_clock(month_start, -(WIND_PROXY_LAG_DAYS - 1), GENERATION_PUBLICATION_LAG_HOURS)
+
+
+def wind_proxy_issue(index) -> pd.DatetimeIndex:
+    """The later of the weather run (lead day 2) and the calibration data."""
+    weather = weather_issued_issue(index)
+    calibration = wind_proxy_calibration_issue(index)
+    return pd.DatetimeIndex(weather.where(weather >= calibration, calibration))
+
+
 def calendar_issue(index) -> pd.DatetimeIndex:
     return pd.DatetimeIndex([FAR_PAST] * len(index))
 
@@ -136,6 +161,10 @@ TIMINGS = {
     "weather_proxy": InputTiming(
         "weather_proxy", weather_proxy_issue,
         "Open-Meteo historical-forecast archive: latest run before each hour, not point in time.",
+    ),
+    "wind_proxy": InputTiming(
+        "wind_proxy", wind_proxy_issue,
+        "Wind generation proxy: lead-day-2 hub-height wind forecasts, weights fitted on actual generation to two days before the month.",
     ),
 }
 

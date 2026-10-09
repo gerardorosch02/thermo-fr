@@ -23,6 +23,7 @@ from .models import BENCHMARKS, MODELS, benchmark_predictions, fit_predict
 from .timing import LookaheadError, check_point_in_time
 
 TOP_SHARE = 0.05
+WINDY_SHARE = 0.10  # the windiest days by actual national wind generation (daily mean)
 
 
 @dataclass
@@ -99,12 +100,19 @@ def evaluate(predictions: pd.DataFrame, strict_only: bool = True) -> dict:
         f"top_{int(TOP_SHARE * 100)}pct_price_hours": frame[frame["actual"] >= top_cut],
         "negative_price_hours": frame[frame["actual"] < 0],
     }
+    windy_cut = None
+    if "wind_mw" in frame and frame["wind_mw"].notna().any():
+        daily_wind = frame.groupby("delivery_day")["wind_mw"].mean().dropna()
+        windy_cut = float(daily_wind.quantile(1 - WINDY_SHARE))
+        windy_days = daily_wind[daily_wind >= windy_cut].index
+        slices[f"windiest_{int(WINDY_SHARE * 100)}pct_days"] = frame[frame["delivery_day"].isin(windy_days)]
     result = {
         "rows": int(len(frame)),
         "strict_only": strict_only,
         "first_day": str(frame["delivery_day"].min().date()) if len(frame) else None,
         "last_day": str(frame["delivery_day"].max().date()) if len(frame) else None,
         "top_price_cut_eur_mwh": round(float(top_cut), 2) if len(frame) else None,
+        "windy_day_cut_mw": round(windy_cut, 1) if windy_cut is not None else None,
         "slices": {name: {col: errors(part, col) for col in columns} for name, part in slices.items()},
         "by_hour": {},
         "by_month": {},
@@ -191,7 +199,7 @@ def summarise_worst(worst: pd.DataFrame, predictions: pd.DataFrame, model: str =
     }
 
 
-def run_backtest(hourly: pd.DataFrame, test_start: str, test_end: str, feature_sets=("honest", "extended"), log=print) -> dict:
+def run_backtest(hourly: pd.DataFrame, test_start: str, test_end: str, feature_sets=("honest", "honest_base", "extended"), log=print) -> dict:
     """Both feature sets through the walk-forward, with metrics and worst days for each."""
     results = {}
     for feature_set in feature_sets:

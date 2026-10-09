@@ -43,3 +43,7 @@ class EntsoeSource:
     def wind_solar_forecast(self, start: str, end: str) -> pd.DataFrame:
         """Day-ahead solar, wind onshore and wind offshore forecasts in MW, hourly."""
         return self.api.wind_solar_forecast(start, end)
+
+    def wind_generation_actual(self, start: str, end: str) -> pd.DataFrame:
+        """Actual wind onshore and offshore generation in MW, hourly means."""
+        return self.api.wind_generation_actual(start, end)

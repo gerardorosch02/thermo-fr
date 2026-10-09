@@ -83,7 +83,7 @@ def tomorrow_chart(by_hour: pd.DataFrame, day: str, previous: str) -> go.Figure:
                                     ("band_p25", "band_p75", BAND[1], "Historical error, 25th to 75th pct")):
             fig.add_trace(go.Scatter(x=pd.concat([x, x[::-1]]), y=pd.concat([by_hour[hi], by_hour[lo][::-1]]), fill="toself",
                                      fillcolor=color, line=dict(width=0), name=name, hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=x, y=by_hour["naive_day"], name=f"Same hour on {previous} (benchmark)", mode="lines",
+    fig.add_trace(go.Scatter(x=x, y=by_hour["naive_day"], name=f"Same hour on {previous} (baseline)", mode="lines",
                              line=dict(color=COLORS["benchmark"], width=2, dash="dash")))
     if by_hour["actual_today"].notna().any():
         fig.add_trace(go.Scatter(x=x, y=by_hour["actual_today"], name=f"Actual price on {previous}", mode="lines",
@@ -107,9 +107,9 @@ def daily_scores(data: dict, days: int = 30) -> pd.DataFrame:
 
 def performance_chart(scores: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["naive_mae"], name="Benchmark daily MAE", marker_color=COLORS["benchmark"], opacity=0.5))
+    fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["naive_mae"], name="Baseline daily MAE", marker_color=COLORS["benchmark"], opacity=0.5))
     fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["mae"], name="Model daily MAE", marker_color=COLORS["forecast"]))
-    fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_naive_mae"], name="Benchmark, 7-day rolling", mode="lines",
+    fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_naive_mae"], name="Baseline, 7-day rolling", mode="lines",
                              line=dict(color=COLORS["benchmark"], width=2, dash="dash")))
     fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_mae"], name="Model, 7-day rolling", mode="lines",
                              line=dict(color=COLORS["ink"], width=2)))
@@ -134,7 +134,7 @@ def history_chart(data: dict, days: int = 30) -> go.Figure | None:
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=joined["t"], y=joined["price"], name="Actual price", mode="lines", line=dict(color=COLORS["actual"], width=2)))
     fig.add_trace(go.Scatter(x=joined["t"], y=joined["forecast"], name="Forecast (latest version)", mode="lines", line=dict(color=COLORS["forecast"], width=2)))
-    fig.add_trace(go.Scatter(x=joined["t"], y=joined["naive_day"], name="Benchmark", mode="lines", line=dict(color=COLORS["benchmark"], width=1, dash="dash")))
+    fig.add_trace(go.Scatter(x=joined["t"], y=joined["naive_day"], name="Baseline", mode="lines", line=dict(color=COLORS["benchmark"], width=1, dash="dash")))
     return layout(fig, "EUR/MWh", "Delivery hour (Paris time)")
 
 
@@ -144,19 +144,29 @@ HOW_IT_WORKS = """
 **Information gate.** The auction closes at 12:00 Paris time on the day before delivery. Every input is dated by when it is
 published and the forecast uses only inputs available before that moment: the ENTSO-E day-ahead load forecast (due two hours
 before gate closure), Open-Meteo weather forecasts issued two days ahead (temperature, 100 m wind, solar radiation for eight
-cities), the calendar, and the prices of the previous days (D-1, D-2, D-7), which also stand in for gas and carbon costs.
-ENTSO-E's own wind and solar forecasts are not used, because the platform allows them until 18:00 on D-1.
+cities), a wind generation proxy (100 m wind forecasts issued two days ahead at 17 points in the French wind regions, turned
+into MW with weights fitted monthly on past actual wind generation), the calendar, and the prices of the previous days (D-1,
+D-2, D-7), which also stand in for gas and carbon costs. ENTSO-E's own wind and solar forecasts are not used, because the
+platform allows them until 18:00 on D-1.
 
-**Model.** Gradient boosting (LightGBM) refitted on all history before the delivery day. The same-hour-previous-day price is
-the benchmark. In a walk-forward backtest over 2024 and 2025 the model's mean absolute error was about 17 EUR/MWh against
-21 for the benchmark.
+**Model.** Gradient boosting (LightGBM) fitted on all history before the delivery day. Results are reported as forecast
+error (mean absolute error, MAE, in EUR/MWh) against a naive baseline: the price of the same hour on the previous day. In a
+walk-forward backtest over 2024 and 2025 the model's MAE was about 16 EUR/MWh and the baseline's about 21.
 
 **Error band.** The shaded band around tomorrow's curve is the forecast plus the 10th to 90th (and 25th to 75th) percentile
 of the model's signed error at the same hour in that backtest. It describes how wrong the model has been at that hour in
 the past; it is not a probability forecast for tomorrow.
 
-**Updates.** A GitHub Actions workflow refits and publishes the forecast on weekday mornings and scores it against the
+**Updates.** A GitHub Actions workflow publishes the forecast on weekday mornings and scores it against the
 published prices every afternoon. Source code, method and backtest: the repository linked above.
+
+**Limitations.** The only comparison made is forecast error against the naive same-hour-previous-day baseline. The model is
+not benchmarked against traded market prices (EEX futures or OTC day-ahead quotes), so it makes no claim about beating the
+market, and a lower error than the baseline says nothing about whether a trade would have made money. The error band is the
+model's past error distribution, not a probability forecast. Errors are largest on days with regime changes (cold snaps,
+price collapses, days after holidays), which is also where a forecast matters most. A known weakness is the top 5% price
+hours, typically cold, calm winter evenings when gas sets the price: the wind generation proxy improves the error elsewhere
+but made those hours slightly worse in the backtest (24.1 against 22.6 EUR/MWh).
 """
 
 
@@ -193,9 +203,9 @@ def main() -> None:
             st.caption("Shaded band: historical error of this model at each hour in the 2024 to 2025 backtest, not a probability forecast.")
         with st.expander("Hourly values"):
             st.dataframe(by_hour[["hour", "forecast", "naive_day", "actual_today"]].round(2).rename(
-                columns={"naive_day": "benchmark", "actual_today": f"actual {previous}"}), hide_index=True, use_container_width=True)
+                columns={"naive_day": "baseline", "actual_today": f"actual {previous}"}), hide_index=True, use_container_width=True)
 
-    st.subheader("Last 30 days against the benchmark")
+    st.subheader("Forecast error, last 30 days")
     scores = daily_scores(data)
     if scores.empty:
         st.info("No settled days yet.")
@@ -203,14 +213,14 @@ def main() -> None:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Days settled", int(len(scores)))
         c2.metric("Model MAE", f"{scores['mae'].mean():.2f} EUR/MWh")
-        c3.metric("Benchmark MAE", f"{scores['naive_mae'].mean():.2f} EUR/MWh")
-        c4.metric("Share of days the model won", f"{100 * scores['model_won'].fillna(0).mean():.0f}%")
+        c3.metric("Baseline MAE (same hour D-1)", f"{scores['naive_mae'].mean():.2f} EUR/MWh")
+        c4.metric("Days with lower MAE than the baseline", f"{100 * scores['mae_below_baseline'].fillna(0).mean():.0f}%")
         st.plotly_chart(performance_chart(scores), use_container_width=True)
         hist = history_chart(data)
         if hist is not None:
             st.plotly_chart(hist, use_container_width=True)
         with st.expander("Daily scores"):
-            st.dataframe(scores[["delivery_day", "issued_at_utc", "hours", "mae", "rmse", "naive_mae", "naive_rmse", "model_won"]].round(2),
+            st.dataframe(scores[["delivery_day", "issued_at_utc", "hours", "mae", "rmse", "naive_mae", "naive_rmse", "mae_below_baseline"]].round(2),
                          hide_index=True, use_container_width=True)
 
     st.subheader("How it works")
@@ -219,7 +229,8 @@ def main() -> None:
     st.subheader("Data sources and attribution")
     for line in status.get("attributions", []):
         st.markdown(f"- {line}")
-    st.caption("Forecasts and derived numbers are the author's own and carry no endorsement by the data providers.")
+    st.caption("Forecasts and derived numbers are the author's own and carry no endorsement by the data providers. "
+               "They are not benchmarked against traded market prices and are not trading advice.")
 
 
 if __name__ == "__main__":

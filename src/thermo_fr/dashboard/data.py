@@ -118,7 +118,7 @@ def performance_panel(path, feature_set: str, days: int = 30) -> dict:
         scores["rolling_mae"] = scores["mae"].rolling(7, min_periods=1).mean()
         scores["rolling_naive_mae"] = scores["naive_mae"].rolling(7, min_periods=1).mean()
         out["scores"] = scores
-        out["share_won"] = float(scores["model_won"].fillna(0).mean())
+        out["share_below_baseline"] = float(scores["mae_below_baseline"].fillna(0).mean())
         out["mae"] = float(scores["mae"].mean())
         out["naive_mae"] = float(scores["naive_mae"].mean())
     return out

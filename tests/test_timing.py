@@ -68,6 +68,21 @@ def test_weather_issued_uses_runs_of_two_days_before():
     assert (day1[-6:] > gate_for(idx)[-6:]).all()
 
 
+def test_wind_proxy_is_the_later_of_weather_run_and_calibration_data():
+    mid = hours("2024-07-15")
+    assert (issue_times(mid, "wind_proxy") == issue_times(mid, "weather_issued")).all()
+    assert (lateness(mid, "wind_proxy") < pd.Timedelta(0)).all()
+    first = hours("2024-07-01")  # calibration data runs to 29 June, public at 01:00 Paris on 30 June
+    calibration = timing.wind_proxy_calibration_issue(first)
+    assert (calibration == pd.Timestamp("2024-06-29T23:00Z")).all()
+    issued = issue_times(first, "wind_proxy")
+    assert issued[0] == pd.Timestamp("2024-06-29T23:00Z") and issued[-1] == issue_times(first, "weather_issued")[-1]
+    assert (lateness(first, "wind_proxy") < pd.Timedelta(0)).all()
+    # Using generation up to the day before the month would be published after the gate of the 1st.
+    one_day = timing._local_clock(pd.DatetimeIndex([pd.Timestamp("2024-07-01")]), 0, 1)
+    assert one_day[0] > gate_for(first)[0]
+
+
 def test_weather_proxy_is_never_point_in_time():
     idx = hours("2024-07-15")
     assert (lateness(idx, "weather_proxy") > pd.Timedelta(0)).all()
