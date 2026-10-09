@@ -110,7 +110,7 @@ def performance_chart(scores: pd.DataFrame, feature_set: str) -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["naive_mae"], name="Baseline daily MAE", marker_color=COLORS["benchmark"], opacity=0.5))
     fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["mae"], name=f"Model daily MAE ({feature_set})", marker_color=COLORS[feature_set]))
-    fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_naive_mae"], name="Benchmark, 7-day rolling", mode="lines",
+    fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_naive_mae"], name="Baseline, 7-day rolling", mode="lines",
                              line=dict(color=COLORS["benchmark"], width=2, dash="dash")))
     fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_mae"], name="Model, 7-day rolling", mode="lines",
                              line=dict(color="#0b0b0b", width=2)))

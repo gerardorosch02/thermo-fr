@@ -151,7 +151,7 @@ platform allows them until 18:00 on D-1.
 
 **Model.** Gradient boosting (LightGBM) fitted on all history before the delivery day. Results are reported as forecast
 error (mean absolute error, MAE, in EUR/MWh) against a naive baseline: the price of the same hour on the previous day. In a
-walk-forward backtest over 2024 and 2025 the model's MAE was about 17 EUR/MWh and the baseline's about 21.
+walk-forward backtest over 2024 and 2025 the model's MAE was about 16 EUR/MWh and the baseline's about 21.
 
 **Error band.** The shaded band around tomorrow's curve is the forecast plus the 10th to 90th (and 25th to 75th) percentile
 of the model's signed error at the same hour in that backtest. It describes how wrong the model has been at that hour in

@@ -1,0 +1,37 @@
+{
+  "hub_height_m": 100,
+  "power_curve": {
+    "cut_in_ms": 3.0,
+    "rated_ms": 12.0,
+    "cut_out_ms": 25.0
+  },
+  "weights_mw": {
+    "wind_pt_Somme_ms": 1063.6,
+    "wind_pt_Aisne_ms": 2154.4,
+    "wind_pt_Champagne_ms": 1885.1,
+    "wind_pt_Lorraine_ms": 304.1,
+    "wind_pt_Beauce_ms": 1866.1,
+    "wind_pt_Indre_ms": 805.6,
+    "wind_pt_Finistere_ms": 558.3,
+    "wind_pt_Vendee_ms": 297.8,
+    "wind_pt_Eure_ms": 0.0,
+    "wind_pt_Poitou_ms": 2017.6,
+    "wind_pt_Aude_ms": 1069.2,
+    "wind_pt_Lauragais_ms": 896.4,
+    "wind_pt_Bourgogne_ms": 0.0,
+    "wind_pt_Rhone_ms": 1465.8,
+    "wind_pt_OffSaintNazaire_ms": 2497.6,
+    "wind_pt_OffFecamp_ms": 3151.4,
+    "wind_pt_OffSaintBrieuc_ms": 978.0
+  },
+  "fit": {
+    "from": "2025-10-01 00:00:00+00:00",
+    "to": "2026-09-30 23:00:00+00:00",
+    "hours": 8731,
+    "capacity_mw": 21011.2,
+    "mae_mw": 1435.5,
+    "bias_mw": -640.9,
+    "r2": 0.7867,
+    "mean_actual_mw": 5810.1
+  }
+}
