@@ -85,3 +85,14 @@ def test_import_tolerates_missing_or_empty_files(tmp_path):
     store = Store(tmp_path / "db.sqlite")
     assert import_published(store, empty) == {"forecast_versions": 0, "actual_rows": 0, "scores": 0, "error_band_rows": 0}
     store.close()
+
+
+def test_import_accepts_scores_written_before_the_flag_was_renamed(tmp_path):
+    out = tmp_path / "published"
+    export_published(filled_store(tmp_path / "src.sqlite"), out, days=90, now=NOW)
+    scores = out / "scores.csv"
+    scores.write_text(scores.read_text().replace("mae_below_baseline", "model_won"))
+    store = Store(tmp_path / "db.sqlite")
+    summary = import_published(store, out)
+    assert summary["scores"] > 0 and store.scores()["mae_below_baseline"].notna().all()
+    store.close()

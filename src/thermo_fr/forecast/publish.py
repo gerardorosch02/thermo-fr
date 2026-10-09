@@ -141,7 +141,7 @@ def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
             summary["actual_rows"] = store.save_actuals(prices, actuals["delivery_day"].reset_index(drop=True))
     scores_path = src / "scores.csv"
     if scores_path.exists() and scores_path.stat().st_size > 0:
-        scores = pd.read_csv(scores_path)
+        scores = pd.read_csv(scores_path).rename(columns={"model_won": "mae_below_baseline"})  # files written before the rename
         versions = pd.read_sql_query("SELECT forecast_id, delivery_day, issued_at_utc FROM forecasts WHERE feature_set = ?",
                                      store.conn, params=(PUBLIC_FEATURE_SET,))
         merged = scores.merge(versions, on=["delivery_day", "issued_at_utc"], how="inner")
