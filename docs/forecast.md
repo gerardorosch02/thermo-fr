@@ -83,8 +83,8 @@ What the tables say:
 - The honest gradient boosting model cuts the error of the same-hour-yesterday benchmark by 18% and of the same-weekday-last-week benchmark by 43%. The linear model on the same features gets about half of that gain, so the boosting adds roughly 1.7 EUR/MWh of MAE on top of a linear fit.
 - The ENTSO-E wind and solar forecasts are worth another 1.1 EUR/MWh (16.98 to 15.89), most of it in off-peak and negative-price hours, which is where renewable output sets the price. Whether that gain is available at 12:00 depends on when RTE actually publishes the day-ahead renewables forecast, which the probe has not yet measured.
 - By hour, the models help most in the morning ramp (07:00 to 09:00), where the D-1 benchmark is worst, and least in the midday hours. The evening peak (18:00 to 20:00) remains the hardest for every method.
-- On the top 5% price hours the linear model beats the boosting (21.1 against 22.6), and in negative-price hours the honest boosting is worse than the naive benchmark (17.2 against 15.6). Both are symptoms of the same problem described under the worst days.
-- Month by month, the honest boosting beats the D-1 benchmark in 21 of 23 strict months; the exceptions are April 2024 (21.6 against 19.2) and January 2025 (32.6 against 29.4).
+- On the top 5% price hours the linear model has the lower MAE (21.1 against 22.6 for the boosting), and in negative-price hours the honest boosting is worse than the naive benchmark (17.2 against 15.6). Both are symptoms of the same problem described under the worst days.
+- Month by month, the honest boosting has a lower MAE than the D-1 benchmark in 21 of 23 strict months; the exceptions are April 2024 (21.6 against 19.2) and January 2025 (32.6 against 29.4).
 
 Charts: `reports/forecast/mae_by_hour_{honest,extended}.png`, `mae_by_month_{honest,extended}.png`, `sample_week.png` (week of 2025-01-27) and `day_2025-01-15.png` from `thermo-fr forecast --date 2025-01-15`.
 

@@ -8,7 +8,7 @@ The public dashboard (`streamlit_app.py`) reads only the files under `published/
 |---|---|
 | `published/forecasts.csv` | every honest forecast version of the last 90 days: delivery day, issue time, hour, forecast, same-hour-previous-day benchmark |
 | `published/actuals.csv` | actual day-ahead prices for the same window |
-| `published/scores.csv` | daily MAE and RMSE of each version against actuals and benchmark |
+| `published/scores.csv` | daily MAE and RMSE of each version against actuals and the naive same-hour-previous-day baseline, with `mae_below_baseline` per day |
 | `published/tomorrow.csv` | the latest forecast for the next delivery day |
 | `published/error_band.csv` | backtest error percentiles by hour (the shaded band) |
 | `published/model/honest.txt` | the LightGBM model, refitted on the first weekday of each month (300 trees, 31 leaves, about 0.9 MB; chosen because its holdout MAE is within 0.2 EUR/MWh of the backtest settings) |

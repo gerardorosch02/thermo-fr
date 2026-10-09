@@ -24,7 +24,7 @@ def filled_store(path) -> Store:
             actual = pd.Series(103.0 + c["hour"].to_numpy(), index=c.index)
             s.save_actuals(actual, pd.Series([day] * 24), now=NOW)
             s.save_score(first, day, "honest", f"{DAYS[max(i - 1, 0)]}T06:00:00Z",
-                         {"hours": 24, "mae": 3.0, "rmse": 3.5, "naive_mae": 8.0, "naive_rmse": 9.0, "model_won": True}, now=NOW)
+                         {"hours": 24, "mae": 3.0, "rmse": 3.5, "naive_mae": 8.0, "naive_rmse": 9.0, "mae_below_baseline": True}, now=NOW)
     # a stale day outside the window
     old = curve_for("2026-06-01", 50)
     s.save_forecast(9, "2026-06-01", "honest", pd.Timestamp("2026-05-31T06:00Z"), "gbm", "scheduled", 50, True, old)

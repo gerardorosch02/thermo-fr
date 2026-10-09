@@ -77,7 +77,7 @@ def test_input_values_round_trip(store):
     assert store.latest_input_values("2026-10-09").empty
 
 
-def test_actuals_scores_and_model_won(store):
+def test_actuals_scores_and_mae_below_baseline(store):
     day = "2026-10-08"
     c = curve_for(day, 100)
     fid = store.save_forecast(1, day, "honest", pd.Timestamp("2026-10-07T07:00Z"), "gbm", "scheduled", 10, True, c)
@@ -85,12 +85,12 @@ def test_actuals_scores_and_model_won(store):
     store.save_actuals(actual, pd.Series([day] * 24), now=pd.Timestamp("2026-10-07T13:00Z"))
     assert store.actual_days() == [day] and len(store.actuals_for(day)) == 24
     score = score_curve(store.forecast_curve(fid), store.actuals_for(day))
-    assert score["mae"] == pytest.approx(2.0) and score["naive_mae"] == pytest.approx(7.0) and score["model_won"]
+    assert score["mae"] == pytest.approx(2.0) and score["naive_mae"] == pytest.approx(7.0) and score["mae_below_baseline"]
     assert score["rmse"] == pytest.approx(2.0)
     store.save_score(fid, day, "honest", "2026-10-07T07:00:00Z", score, now=pd.Timestamp("2026-10-07T13:00Z"))
     assert store.unscored_forecasts().empty
     latest = store.latest_scores("honest")
-    assert len(latest) == 1 and latest.iloc[0]["model_won"] == 1
+    assert len(latest) == 1 and latest.iloc[0]["mae_below_baseline"] == 1
     assert score_curve(store.forecast_curve(fid), pd.Series(dtype=float, index=pd.DatetimeIndex([], tz="UTC"))) is None
 
 

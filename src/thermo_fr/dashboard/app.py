@@ -77,7 +77,7 @@ def forecast_chart(by_hour: pd.DataFrame, feature_set: str, today: str, has_band
                                     ("band_p25", "band_p75", dark, "Historical error, 25th to 75th pct")):
             fig.add_trace(go.Scatter(x=pd.concat([x, x[::-1]]), y=pd.concat([by_hour[hi], by_hour[lo][::-1]]), fill="toself",
                                      fillcolor=color, line=dict(width=0), name=name, hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=x, y=by_hour["naive_day"], name="Same hour previous day (benchmark)", mode="lines",
+    fig.add_trace(go.Scatter(x=x, y=by_hour["naive_day"], name="Same hour previous day (baseline)", mode="lines",
                              line=dict(color=COLORS["benchmark"], width=2, dash="dash")))
     if by_hour["actual_other"].notna().any():
         fig.add_trace(go.Scatter(x=x, y=by_hour["actual_other"], name=f"Actual price today ({today})", mode="lines",
@@ -108,7 +108,7 @@ def temperature_chart(hourly: pd.DataFrame) -> go.Figure:
 
 def performance_chart(scores: pd.DataFrame, feature_set: str) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["naive_mae"], name="Benchmark daily MAE", marker_color=COLORS["benchmark"], opacity=0.5))
+    fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["naive_mae"], name="Baseline daily MAE", marker_color=COLORS["benchmark"], opacity=0.5))
     fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["mae"], name=f"Model daily MAE ({feature_set})", marker_color=COLORS[feature_set]))
     fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_naive_mae"], name="Benchmark, 7-day rolling", mode="lines",
                              line=dict(color=COLORS["benchmark"], width=2, dash="dash")))
@@ -125,7 +125,7 @@ def hourly_history_chart(hourly: pd.DataFrame, feature_set: str) -> go.Figure:
     x = hourly.index.tz_convert("Europe/Paris")
     fig.add_trace(go.Scatter(x=x, y=hourly["actual"], name="Actual price", mode="lines", line=dict(color=COLORS["actual"], width=2)))
     fig.add_trace(go.Scatter(x=x, y=hourly["forecast"], name=f"Forecast ({feature_set})", mode="lines", line=dict(color=COLORS[feature_set], width=2)))
-    fig.add_trace(go.Scatter(x=x, y=hourly["naive_day"], name="Benchmark", mode="lines", line=dict(color=COLORS["benchmark"], width=1, dash="dash")))
+    fig.add_trace(go.Scatter(x=x, y=hourly["naive_day"], name="Baseline", mode="lines", line=dict(color=COLORS["benchmark"], width=1, dash="dash")))
     fig = base_layout(fig, "EUR/MWh", "Delivery hour (Paris time)")
     fig.update_xaxes(dtick=None)
     return fig
@@ -192,7 +192,7 @@ def main() -> None:
             st.caption("No error band: run the backtest (thermo-fr forecast-backtest) so morning-run can derive it.")
         with st.expander("Hourly table"):
             show = panel["by_hour"][["hour", "forecast", "naive_day", "actual_other"]].rename(
-                columns={"naive_day": "benchmark (D-1)", "actual_other": f"actual {today}"})
+                columns={"naive_day": "baseline (D-1)", "actual_other": f"actual {today}"})
             st.dataframe(show.round(2), hide_index=True, use_container_width=True)
         if len(panel["versions"]) > 1:
             with st.expander("Earlier versions issued for this day"):
@@ -246,7 +246,7 @@ def main() -> None:
                      hide_index=True, use_container_width=True)
 
     # 3. Recent performance
-    st.subheader(f"Recent performance, last 30 settled days ({feature_set})")
+    st.subheader(f"Forecast error, last 30 settled days ({feature_set})")
     perf = performance_panel(db, version, feature_set)
     if perf["scores"].empty:
         st.info("No settled forecasts yet. The settle job runs at 14:00 London time after the auction results are out.")
@@ -254,13 +254,13 @@ def main() -> None:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Days settled", int(len(perf["scores"])))
         c2.metric("Model MAE", f"{perf['mae']:.2f} EUR/MWh")
-        c3.metric("Benchmark MAE", f"{perf['naive_mae']:.2f} EUR/MWh")
-        c4.metric("Share of days the model won", f"{100 * perf['share_won']:.0f}%")
+        c3.metric("Baseline MAE (same hour D-1)", f"{perf['naive_mae']:.2f} EUR/MWh")
+        c4.metric("Days with lower MAE than the baseline", f"{100 * perf['share_below_baseline']:.0f}%")
         st.plotly_chart(performance_chart(perf["scores"], feature_set), use_container_width=True)
         if not perf["hourly"].empty:
             st.plotly_chart(hourly_history_chart(perf["hourly"], feature_set), use_container_width=True)
         with st.expander("Daily scores"):
-            st.dataframe(perf["scores"][["delivery_day", "issued_at_utc", "hours", "mae", "rmse", "naive_mae", "naive_rmse", "model_won"]].round(2),
+            st.dataframe(perf["scores"][["delivery_day", "issued_at_utc", "hours", "mae", "rmse", "naive_mae", "naive_rmse", "mae_below_baseline"]].round(2),
                          hide_index=True, use_container_width=True)
 
     # 4. Data status
