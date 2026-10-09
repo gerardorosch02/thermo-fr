@@ -1,10 +1,10 @@
 {
-  "written_at_utc": "2026-10-09T17:55:24Z",
+  "written_at_utc": "2026-10-09T18:25:59Z",
   "feature_set": "honest",
   "window_days": 90,
   "from_day": "2026-07-11",
   "tomorrow": "2026-10-10",
-  "forecast_versions": 12,
+  "forecast_versions": 13,
   "actual_days": 4,
   "scored_versions": 10,
   "model": {
