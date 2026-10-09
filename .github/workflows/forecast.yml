@@ -13,16 +13,27 @@ name: Day-ahead forecast
 #   refit        first weekday of the month: fetches the full history since 2021,
 #                refits, commits only the model file and its metadata
 #
-# GitHub cron is UTC. London is UTC+1 from late March to late October and UTC
-# in winter, so the morning runs are 10:30 and 11:30 London in summer and
-# 09:30 and 10:30 in winter; settle is 14:15 London in summer, 13:15 in winter.
-# The refit cron fires on the 1st, 2nd and 3rd at 02:00 UTC and the job
-# continues only on the first weekday of the month.
+# Timing. GitHub cron is UTC; Paris is UTC+2 in summer and UTC+1 in winter. The
+# ENTSO-E load forecast is due at 10:00 Paris on the day before delivery and
+# the EEX day-ahead future trades from about 11:15 Paris, so a forecast that can
+# be scored against the market must be issued between 10:05 and 11:00 Paris.
+# Four pre-market crons fire (08:10, 08:35, 09:10, 09:35 UTC) and
+# `thermo-fr schedule-step` keeps only the ones that start inside that window
+# in the current season (08:10 and 08:35 UTC in summer, 09:10 and 09:35 UTC in
+# winter); the others are skipped. Two runs about 25 minutes apart cover the
+# late starts GitHub gives scheduled workflows. One later run at 10:30 UTC
+# (12:30 Paris in summer, 11:30 in winter) is kept for information only; the
+# dashboards label its version "issued after the market window, not
+# tradeable". Settle runs at 13:15 UTC daily; the refit cron fires on the 1st,
+# 2nd and 3rd at 02:00 UTC and proceeds only on the first weekday of the month.
 
 on:
   schedule:
-    - cron: "30 9 * * 1-5"    # morning-run
-    - cron: "30 10 * * 1-5"   # morning-run
+    - cron: "10 8 * * 1-5"    # pre-market run, summer (10:10 Paris); skipped in winter
+    - cron: "35 8 * * 1-5"    # pre-market run, summer (10:35 Paris); skipped in winter
+    - cron: "10 9 * * 1-5"    # pre-market run, winter (10:10 Paris); skipped in summer
+    - cron: "35 9 * * 1-5"    # pre-market run, winter (10:35 Paris); skipped in summer
+    - cron: "30 10 * * 1-5"   # later run, information only (after the market window)
     - cron: "15 13 * * *"     # settle
     - cron: "0 2 1-3 * *"     # refit, on the first weekday of the month only
   workflow_dispatch:
@@ -62,18 +73,8 @@ jobs:
       - name: Decide which step to run
         id: step
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            step="${{ github.event.inputs.step }}"
-          elif [ "${{ github.event.schedule }}" = "15 13 * * *" ]; then
-            step="settle"
-          elif [ "${{ github.event.schedule }}" = "0 2 1-3 * *" ]; then
-            # first weekday of the month: day 1 if it is Mon to Fri, else the Monday that follows
-            step=$(python -c "import datetime as d; t=d.date.today(); f=t.replace(day=1); f=f+d.timedelta(days=(7-f.weekday())%7) if f.weekday()>4 else f; print('refit' if t==f else 'skip')")
-          else
-            step="morning-run"
-          fi
-          echo "step=$step" >> "$GITHUB_OUTPUT"
-          echo "step: $step"
+          thermo-fr schedule-step --event "${{ github.event_name }}" --schedule "${{ github.event.schedule }}" \
+            --input "${{ github.event.inputs.step }}" | tee -a "$GITHUB_OUTPUT"
 
       - name: Restore the public dataset into a fresh store
         if: steps.step.outputs.step != 'skip'

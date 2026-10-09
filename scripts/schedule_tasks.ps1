@@ -9,9 +9,11 @@ task" turned on. Waking only works if Windows allows wake timers (Power Options,
 Sleep, Allow wake timers: Enable, for both plugged in and on battery) and the
 machine is asleep or hibernating rather than shut down:
 
-  thermo-fr morning-run   weekdays at 07:00, 08:00, 09:00, 10:00, 10:45 and 11:30
+  thermo-fr morning-run   weekdays at 07:00, 08:00, 09:15, 09:45, 10:30 and 11:30
                           (local machine time; the machine is expected to be on
-                          London time, which is 08:00 to 12:30 Paris)
+                          London time, so 08:00 to 12:30 Paris: the 09:15 and 09:45
+                          runs land at 10:15 and 10:45 Paris, after the 10:00 load
+                          forecast deadline and before the 11:15 market window)
   thermo-fr settle        every day at 14:00 local time
 
 Each task starts python -m thermo_fr <command> --kind scheduled in the repository
@@ -58,13 +60,13 @@ if ($Install) {
     $weekdays = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
 
     $morningTriggers = @()
-    foreach ($time in @("07:00", "08:00", "09:00", "10:00", "10:45", "11:30")) {
+    foreach ($time in @("07:00", "08:00", "09:15", "09:45", "10:30", "11:30")) {
         $morningTriggers += New-ScheduledTaskTrigger -Weekly -DaysOfWeek $weekdays -At $time
     }
     $morningAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr morning-run --kind scheduled" -WorkingDirectory $repo
     Register-ScheduledTask -TaskName $morningName -Action $morningAction -Trigger $morningTriggers -Settings $settings `
         -Description "thermo-fr: fetch tomorrow's day-ahead inputs, log their timing and store the price forecasts" | Out-Null
-    Write-Host "Installed task '$morningName' (weekdays 07:00, 08:00, 09:00, 10:00, 10:45, 11:30 local time)"
+    Write-Host "Installed task '$morningName' (weekdays 07:00, 08:00, 09:15, 09:45, 10:30, 11:30 local time)"
 
     $settleTrigger = New-ScheduledTaskTrigger -Daily -At "14:00"
     $settleAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr settle --kind scheduled" -WorkingDirectory $repo

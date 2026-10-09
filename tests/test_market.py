@@ -118,9 +118,9 @@ def test_evaluate_reports_days_totals_bands_and_skipped(store):
 
 def test_public_summary_hides_prices_until_enough_days(store):
     result = evaluate(store, pd.DataFrame([SEED.__dict__]))
-    hidden = public_summary(result, min_days=5)
-    assert hidden["scored_days"] == 1 and "note" in hidden and "mean_pnl_per_mwh" not in hidden
-    shown = public_summary(result)  # MIN_PUBLIC_DAYS is 1: aggregates from the first scored day, as asked
+    hidden = public_summary(result)  # MIN_PUBLIC_DAYS is 20: the public app collects data first
+    assert hidden["scored_days"] == 1 and hidden["note"] == "Versus the market: collecting data, 1 of 20 days." and "mean_pnl_per_mwh" not in hidden
+    shown = public_summary(result, min_days=1)
     assert shown["mean_pnl_per_mwh"] == pytest.approx(-9.34) and shown["hit_rate"] == 0.0
     assert not {"entry_vwap", "entry_close", "open", "high", "low", "close", "vwap"} & set(shown)
     assert not any(str(v) in ("60.6", "60.9", "60.1", "61.5", "59.2") for v in shown.values())

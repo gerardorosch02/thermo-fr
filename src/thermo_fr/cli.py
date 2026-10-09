@@ -256,6 +256,13 @@ def cmd_market_evaluate(args) -> None:
         print(f"skipped {skipped['delivery_date']} {skipped['product']}: {skipped['reason']}")
 
 
+def cmd_schedule_step(args) -> None:
+    from .forecast.schedule import main as schedule_main
+
+    argv = ["--event", args.event, "--schedule", args.schedule or "", "--input", args.input or ""] + (["--now", args.now] if args.now else [])
+    schedule_main(argv)
+
+
 def cmd_dashboard(args) -> None:
     import subprocess
     import sys
@@ -389,6 +396,13 @@ def main(argv=None) -> None:
     meval.add_argument("--feature-set", default="honest")
     meval.add_argument("--bands", nargs="+", type=float, default=[0.0, 1.0, 2.0, 5.0, 10.0], help="no-trade bands in EUR/MWh (in sample)")
     meval.set_defaults(func=cmd_market_evaluate)
+
+    sched = sub.add_parser("schedule-step", help="Which step a scheduled GitHub Actions run should perform, from the Paris clock")
+    sched.add_argument("--event", required=True)
+    sched.add_argument("--schedule", default="")
+    sched.add_argument("--input", default="")
+    sched.add_argument("--now", default=None, help="UTC time, ISO format (tests); default now")
+    sched.set_defaults(func=cmd_schedule_step)
 
     dash = sub.add_parser("dashboard", help="Open the local Streamlit dashboard")
     dash.add_argument("--db", default="data/forecast.db")

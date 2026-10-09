@@ -191,6 +191,12 @@ def main() -> None:
         meta = panel["meta"]
         issued = pd.Timestamp(meta["issued_at_utc"]).tz_convert("Europe/Paris")
         gate_badge = "passes the 12:00 gate" if meta["passes_gate"] else "may use information published after the 12:00 gate"
+        if meta.get("premarket"):
+            st.markdown(f"**Pre-market forecast**: the last version issued before the market window opened at 11:15 Paris "
+                        f"(issued {issued:%H:%M}).")
+        else:
+            st.warning("No version was issued before the 11:15 Paris market window. This one was issued after the market window and is "
+                       "not tradeable; it is shown for information.")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Issued at (Paris)", issued.strftime("%H:%M"), help=issued.strftime("%Y-%m-%d %H:%M Paris"))
         c2.metric("Versions today", int(len(panel["versions"])))
@@ -212,8 +218,17 @@ def main() -> None:
             show = panel["by_hour"][["hour", "forecast", "naive_day", "actual_other"]].rename(
                 columns={"naive_day": "baseline (D-1)", "actual_other": f"actual {today}"})
             st.dataframe(show.round(2), hide_index=True, use_container_width=True)
+        later = panel.get("later")
+        if later is not None and not later.empty and meta.get("premarket"):
+            st.markdown("**Issued after the market window, not tradeable**")
+            shown = later.copy()
+            shown["issued_paris"] = [pd.Timestamp(t).tz_convert("Europe/Paris").strftime("%Y-%m-%d %H:%M") for t in shown["issued_at_utc"]]
+            shown["daily_mean"] = shown["daily_mean"].round(2)
+            st.dataframe(shown[["issued_paris", "kind", "model", "daily_mean"]].rename(
+                columns={"issued_paris": "Issued (Paris)", "kind": "Run kind", "model": "Model", "daily_mean": "Daily mean forecast (EUR/MWh)"}),
+                hide_index=True, use_container_width=True)
         if len(panel["versions"]) > 1:
-            with st.expander("Earlier versions issued for this day"):
+            with st.expander("Every version issued for this day"):
                 st.dataframe(panel["versions"][["issued_at_utc", "kind", "train_hours", "passes_gate"]], hide_index=True)
 
     # 2. Inputs
@@ -264,7 +279,7 @@ def main() -> None:
                      hide_index=True, use_container_width=True)
 
     # 3. Recent performance
-    st.subheader(f"Forecast error, last 30 settled days ({feature_set})")
+    st.subheader(f"Forecast error, last 30 settled days ({feature_set}, pre-market version of each day)")
     perf = performance_panel(db, version, feature_set)
     if perf["scores"].empty:
         st.info("No settled forecasts yet. The settle job runs at 14:00 London time after the auction results are out.")

@@ -17,6 +17,39 @@ PUBLISHED = Path(__file__).parent / "published"
 COLORS = {"forecast": "#2a78d6", "actual": "#eb6834", "benchmark": "#52514e", "grid": "#e6e5e1", "ink": "#0b0b0b"}
 BAND = ("rgba(42,120,214,0.14)", "rgba(42,120,214,0.30)")
 PARIS = "Europe/Paris"
+MARKET_WINDOW_START = "11:15"  # Paris, on the day before delivery: when the EEX day-ahead future starts trading
+
+
+def premarket_flag(frame: pd.DataFrame) -> pd.Series:
+    """True where a version was issued before the market window of its delivery day opened (11:15 Paris on D-1)."""
+    if frame.empty:
+        return pd.Series(dtype=bool)
+    day_before = pd.to_datetime(frame["delivery_day"]) - pd.Timedelta(days=1)
+    cutoff = pd.to_datetime(day_before.dt.strftime("%Y-%m-%d") + " " + MARKET_WINDOW_START).dt.tz_localize(PARIS).dt.tz_convert("UTC")
+    issued = pd.to_datetime(frame["issued_at_utc"], utc=True)
+    return (issued < cutoff).rename("premarket")
+
+
+def headline_versions(frame: pd.DataFrame) -> pd.DataFrame:
+    """One (delivery_day, issued_at_utc, premarket) row per day: the last pre-market version, else the latest version."""
+    if frame.empty:
+        return pd.DataFrame(columns=["delivery_day", "issued_at_utc", "premarket"])
+    versions = frame[["delivery_day", "issued_at_utc"]].drop_duplicates().copy()
+    versions["premarket"] = premarket_flag(versions).to_numpy()
+    versions = versions.sort_values(["delivery_day", "issued_at_utc"])
+    picked = []
+    for _, group in versions.groupby("delivery_day", sort=True):
+        before = group[group["premarket"]]
+        picked.append(before.iloc[-1] if len(before) else group.iloc[-1])
+    return pd.DataFrame(picked).reset_index(drop=True)
+
+
+def headline_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """The rows of `frame` (forecasts or scores, with delivery_day and issued_at_utc) that belong to each day's headline version."""
+    heads = headline_versions(frame)
+    if heads.empty:
+        return frame.iloc[0:0]
+    return frame.merge(heads, on=["delivery_day", "issued_at_utc"], how="inner")
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -53,12 +86,34 @@ def layout(fig: go.Figure, ytitle: str, xtitle: str) -> go.Figure:
     return fig
 
 
+def tomorrow_versions(data: dict) -> dict:
+    """The next delivery day's versions: the headline (pre-market when one exists) and the later, not tradeable ones."""
+    forecasts = data["forecasts"]
+    if forecasts.empty:
+        tomorrow = data["tomorrow"]
+        if tomorrow.empty:
+            return {}
+        flag = bool(premarket_flag(tomorrow.iloc[:1]).iloc[0])
+        return {"day": tomorrow["delivery_day"].iloc[0], "headline": tomorrow, "premarket": flag, "later": pd.DataFrame()}
+    day = forecasts["delivery_day"].max()
+    rows = forecasts[forecasts["delivery_day"] == day].copy()
+    head = headline_versions(rows).iloc[0]
+    headline = rows[rows["issued_at_utc"] == head["issued_at_utc"]]
+    flags = premarket_flag(rows)
+    later_rows = rows[~flags.to_numpy()]
+    later = (later_rows.groupby("issued_at_utc").agg(daily_mean=("forecast", "mean"), kind=("kind", "first")).reset_index()
+             if not later_rows.empty else pd.DataFrame(columns=["issued_at_utc", "daily_mean", "kind"]))
+    later["issued_paris"] = [pd.Timestamp(t).tz_convert(PARIS).strftime("%Y-%m-%d %H:%M") for t in later["issued_at_utc"]]
+    return {"day": day, "headline": headline, "premarket": bool(head["premarket"]), "later": later}
+
+
 def tomorrow_table(data: dict) -> pd.DataFrame:
-    tomorrow = data["tomorrow"]
-    if tomorrow.empty:
+    versions = tomorrow_versions(data)
+    if not versions:
         return pd.DataFrame()
+    tomorrow = versions["headline"]
     by_hour = tomorrow.groupby("hour").agg(forecast=("forecast", "mean"), naive_day=("naive_day", "mean")).reset_index()
-    day = tomorrow["delivery_day"].iloc[0]
+    day = versions["day"]
     previous = (pd.Timestamp(day) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     actuals = data["actuals"]
     if not actuals.empty:
@@ -99,7 +154,7 @@ def daily_scores(data: dict, days: int = 30) -> pd.DataFrame:
     scores = data["scores"]
     if scores.empty:
         return scores
-    latest = scores.sort_values("issued_at_utc").groupby("delivery_day").tail(1).sort_values("delivery_day").tail(days).copy()
+    latest = headline_rows(scores).sort_values("delivery_day").tail(days).copy()  # each day's pre-market version where one exists
     latest["rolling_mae"] = latest["mae"].rolling(7, min_periods=1).mean()
     latest["rolling_naive_mae"] = latest["naive_mae"].rolling(7, min_periods=1).mean()
     return latest
@@ -123,7 +178,7 @@ def history_chart(data: dict, days: int = 30) -> go.Figure | None:
     forecasts, actuals = data["forecasts"], data["actuals"]
     if forecasts.empty or actuals.empty:
         return None
-    latest = forecasts.sort_values("issued_at_utc").groupby(["delivery_day", "timestamp_utc"]).tail(1)
+    latest = headline_rows(forecasts)  # each day's pre-market version where one exists
     joined = latest.merge(actuals[["timestamp_utc", "price"]], on="timestamp_utc", how="inner")
     if joined.empty:
         return None
@@ -188,13 +243,20 @@ def main() -> None:
 
     st.subheader("Tomorrow's forecast")
     by_hour = tomorrow_table(data)
+    versions = tomorrow_versions(data)
     if by_hour.empty:
         st.info("No forecast for the next delivery day yet.")
     else:
-        tomorrow = data["tomorrow"]
-        day = tomorrow["delivery_day"].iloc[0]
+        tomorrow = versions["headline"]
+        day = versions["day"]
         previous = (pd.Timestamp(day) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
         issued = pd.Timestamp(tomorrow["issued_at_utc"].iloc[0]).tz_convert(PARIS)
+        if versions["premarket"]:
+            st.markdown(f"**Pre-market forecast**: the last version issued before the market window opened at {MARKET_WINDOW_START} Paris "
+                        f"on {previous} (issued {issued:%H:%M}).")
+        else:
+            st.warning(f"No version was issued before the {MARKET_WINDOW_START} Paris market window on {previous}. This one was issued after "
+                       "the market window and is not tradeable; it is shown for information.")
         c1, c2, c3 = st.columns(3)
         c1.metric("Delivery day", day)
         c2.metric("Issued (Paris)", issued.strftime("%Y-%m-%d %H:%M"))
@@ -207,8 +269,14 @@ def main() -> None:
         with st.expander("Hourly values"):
             st.dataframe(by_hour[["hour", "forecast", "naive_day", "actual_today"]].round(2).rename(
                 columns={"naive_day": "baseline", "actual_today": f"actual {previous}"}), hide_index=True, use_container_width=True)
+        later = versions["later"]
+        if versions["premarket"] and not later.empty:
+            st.markdown("**Issued after the market window, not tradeable**")
+            st.dataframe(later[["issued_paris", "kind", "daily_mean"]].round(2).rename(
+                columns={"issued_paris": "Issued (Paris)", "kind": "Run kind", "daily_mean": "Daily mean forecast (EUR/MWh)"}),
+                hide_index=True, use_container_width=True)
 
-    st.subheader("Forecast error, last 30 days")
+    st.subheader("Forecast error, last 30 days (pre-market version of each day)")
     scores = daily_scores(data)
     if scores.empty:
         st.info("No settled days yet.")
@@ -238,8 +306,11 @@ def main() -> None:
                    "future, long when above, short when below, settled at the auction result. Market prices come from EEX and are not "
                    "republished here; only these aggregates are.")
     else:
-        st.caption(f"Trading value is measured against EEX French day-ahead futures traded before the auction. Days scored so far: "
-                   f"{int(market.get('scored_days', 0))}. {market.get('note', '')} Market prices come from EEX and are not republished here.")
+        needed = int(market.get("min_days_to_show", 20))
+        st.markdown(f"**Versus the market: collecting data, {int(market.get('scored_days', 0))} of {needed} days.**")
+        st.caption("Trading value is measured against EEX French day-ahead futures traded before the auction: the forecast issued before "
+                   "the trading window against the traded VWAP, settled at the auction result. Aggregates appear once enough days are "
+                   "scored. Market prices come from EEX and are not republished here.")
 
     st.subheader("How it works")
     st.markdown(HOW_IT_WORKS)

@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-10-09T21:34:52Z",
+  "written_at_utc": "2026-10-09T21:57:35Z",
   "feature_set": "honest",
   "window_days": 90,
   "from_day": "2026-07-11",
@@ -35,12 +35,8 @@
   "market": {
     "source": "EEX French Day-Ahead Base and Peak futures traded before the auction, entered by hand; traded prices are not republished.",
     "scored_days": 1,
-    "min_days_to_show": 1,
-    "hit_rate": 0.0,
-    "mean_pnl_per_mwh": -0.13,
-    "model_mae": 22.82,
-    "market_mae": 0.13,
-    "share_model_beats_market": 0.0
+    "min_days_to_show": 20,
+    "note": "Versus the market: collecting data, 1 of 20 days."
   },
   "attributions": [
     "Day-ahead prices, load forecast and wind and solar forecasts: ENTSO-E Transparency Platform, https://transparency.entsoe.eu, reused with the source cited as required by its terms.",

@@ -19,10 +19,17 @@ window, with the close reported as an alternative.
 Traded prices are entered by hand into data/market/eex_fr_da.csv, which is
 git-ignored (the whole data/ tree is). They are never committed, published or
 shown in the public app; the public dataset carries aggregates only (days
-scored, hit rate, mean P&L per MWh, model and market error). MIN_PUBLIC_DAYS
-is the number of scored days required before those aggregates appear: with
-one or two days the mean P&L and the public auction result let a reader back
-out the traded price, so raise it if that matters.
+scored, hit rate, mean P&L per MWh, model and market error), and only once
+MIN_PUBLIC_DAYS days are scored: with a handful of days the mean P&L and the
+public auction result would let a reader back out the traded prices. Until
+then the public app says "collecting data, n of 20 days".
+
+The market window also defines the headline forecast of every delivery day:
+the last version issued before MARKET_WINDOW_START Paris on the day before
+delivery is the "pre-market forecast", the one a trader could have acted on.
+Versions issued later are shown underneath as "issued after the market
+window, not tradeable". headline_version() applies the rule to any table of
+versions.
 
 The window lies on the day before delivery, in Paris time. For each market
 row the forecast used is the latest honest version issued before the window
@@ -46,7 +53,8 @@ COLUMNS = ["delivery_date", "product", "window_start", "window_end", "open", "hi
 PRODUCTS = ("base", "peak")
 PEAK_HOURS = range(8, 20)  # 08:00 to 20:00 Paris, the EEX / EPEX peak block
 DEFAULT_BANDS = (0.0, 1.0, 2.0, 5.0, 10.0)  # no-trade bands in EUR/MWh, tried in sample
-MIN_PUBLIC_DAYS = 1
+MIN_PUBLIC_DAYS = 20
+MARKET_WINDOW_START = "11:15"  # Paris, on the day before delivery: the EEX day-ahead future is liquid from about then
 
 
 class MarketDataError(ValueError):
@@ -140,6 +148,43 @@ def window_bounds(delivery_date: str, window_start: str, window_end: str) -> tup
     start = pd.Timestamp(f"{day_before:%Y-%m-%d} {window_start}", tz=LOCAL_TZ)
     end = pd.Timestamp(f"{day_before:%Y-%m-%d} {window_end}", tz=LOCAL_TZ)
     return start.tz_convert("UTC"), end.tz_convert("UTC")
+
+
+def premarket_cutoff(delivery_date) -> pd.Timestamp:
+    """The moment the market window opens for a delivery day: MARKET_WINDOW_START Paris on the day before, in UTC."""
+    day_before = pd.Timestamp(delivery_date) - pd.Timedelta(days=1)
+    return pd.Timestamp(f"{day_before:%Y-%m-%d} {MARKET_WINDOW_START}", tz=LOCAL_TZ).tz_convert("UTC")
+
+
+def premarket_flag(delivery_days, issued_at_utc) -> np.ndarray:
+    """True where a version was issued before its delivery day's market window opened."""
+    days = pd.DatetimeIndex(pd.to_datetime(list(delivery_days)))
+    issued = pd.DatetimeIndex(pd.to_datetime(list(issued_at_utc), utc=True))
+    if len(days) == 0:
+        return np.zeros(0, dtype=bool)
+    cutoffs = pd.DatetimeIndex([premarket_cutoff(d) for d in days])
+    return np.asarray(issued < cutoffs)
+
+
+def headline_version(versions: pd.DataFrame, day_column: str = "delivery_day", issued_column: str = "issued_at_utc") -> pd.DataFrame:
+    """One row per delivery day: the last version issued before the market window, else the latest version.
+
+    The returned frame carries a boolean `premarket` column saying which rule
+    applied, so a dashboard can label the row "pre-market forecast" or
+    "issued after the market window, not tradeable".
+    """
+    if versions.empty:
+        out = versions.copy()
+        out["premarket"] = pd.Series(dtype=bool)
+        return out
+    frame = versions.copy()
+    frame["premarket"] = premarket_flag(frame[day_column], frame[issued_column])
+    frame = frame.sort_values([day_column, issued_column])
+    picked = []
+    for _, group in frame.groupby(day_column, sort=True):
+        before = group[group["premarket"]]
+        picked.append(before.iloc[-1] if len(before) else group.iloc[-1])
+    return pd.DataFrame(picked).reset_index(drop=True)
 
 
 def product_mask(index: pd.DatetimeIndex, product: str) -> np.ndarray:
@@ -262,7 +307,7 @@ def public_summary(result: dict, min_days: int = MIN_PUBLIC_DAYS) -> dict:
     if s["scored_days"] >= min_days:
         out.update({k: s[k] for k in ("hit_rate", "mean_pnl_per_mwh", "model_mae", "market_mae", "share_model_beats_market")})
     else:
-        out["note"] = f"Aggregates are shown once at least {min_days} days are scored; with fewer, they would reveal the traded prices."
+        out["note"] = f"Versus the market: collecting data, {s['scored_days']} of {min_days} days."
     return out
 
 
