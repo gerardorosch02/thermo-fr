@@ -35,14 +35,17 @@ import pandas as pd
 from ..config import LOCAL_TZ
 from ..data.entsoe_client import EntsoeSource
 from ..data.weather_forecast import OpenMeteoForecastSource
+from ..data.wind_points import WindPointsSource
 from .day import HISTORY_DAYS, forecast_day, merge_inputs
 from .inputs import INPUT_COLUMNS, load_inputs
 from .store import Store, error_band_from_predictions, score_curve, value_hash
 from .timing import delivery_days
+from .wind_proxy import DEFAULT_WEIGHTS_PATH, apply_weights, load_weights
 
 log = logging.getLogger("thermo_fr.jobs")
 
-INPUT_SERIES = ["load_fc_mw", "solar_fc_mw", "wind_onshore_fc_mw", "wind_offshore_fc_mw", "temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2"]
+INPUT_SERIES = ["load_fc_mw", "solar_fc_mw", "wind_onshore_fc_mw", "wind_offshore_fc_mw", "temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2",
+                "wind_proxy_mw"]
 WEATHER_SERIES = ["temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2"]
 FEATURE_SETS = ("honest", "extended")
 
@@ -71,13 +74,20 @@ def presence(frame: pd.DataFrame | pd.Series, day: str) -> tuple[str, int, str |
     return "present", int(len(complete)), value_hash(values)
 
 
-def fetch_fresh(day: str, cache_dir: Path, store: Store, run_id: int, entsoe=None, weather=None, now=None) -> pd.DataFrame:
-    """Fetch every input around `day`, recording each one's status; failures are logged, not raised."""
+def fetch_fresh(day: str, cache_dir: Path, store: Store, run_id: int, entsoe=None, weather=None, now=None, wind_points=None,
+                wind_weights=DEFAULT_WEIGHTS_PATH) -> pd.DataFrame:
+    """Fetch every input around `day`, recording each one's status; failures are logged, not raised.
+
+    The wind proxy is derived from the point forecasts with the calibration
+    weights in `wind_weights`; a missing weights file is recorded as an
+    error for the item wind_proxy and the column stays NaN.
+    """
     target = pd.Timestamp(day)
     start = (target - pd.Timedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%d")
     end = (target + pd.Timedelta(days=2)).strftime("%Y-%m-%d")
     entsoe = entsoe or EntsoeSource(cache_dir=Path(cache_dir) / "entsoe")
     weather = weather or OpenMeteoForecastSource(cache_dir=Path(cache_dir) / "open-meteo")
+    wind_points = wind_points or WindPointsSource(cache_dir=Path(cache_dir) / "open-meteo")
     pieces = []
 
     def attempt(item: str, fetch, revision_of=lambda: None):
@@ -104,6 +114,18 @@ def fetch_fresh(day: str, cache_dir: Path, store: Store, run_id: int, entsoe=Non
     attempt("wind_solar_forecast", lambda: entsoe.wind_solar_forecast(start, end), entsoe_revision("wind_solar_forecast"))
     attempt("prices", lambda: entsoe.day_ahead_prices(start, end), entsoe_revision("prices"))
     attempt("weather_issued", lambda: weather.fetch(start, end, kinds=("issued",))[WEATHER_SERIES])
+    attempt("wind_points", lambda: wind_points.fetch_points(start, end))
+
+    def proxy():
+        points = next((p for p in pieces if isinstance(p, pd.DataFrame) and any(str(c).startswith("wind_pt_") for c in p.columns)), None)
+        if points is None:
+            raise ValueError("no wind point forecasts in this run")
+        weights = load_weights(wind_weights)
+        if weights is None:
+            raise FileNotFoundError(f"no wind proxy weights at {wind_weights} (written by refit-model)")
+        return apply_weights(points, weights)
+
+    attempt("wind_proxy", proxy)
     if not pieces:
         return pd.DataFrame(columns=INPUT_COLUMNS)
     fresh = pd.concat(pieces, axis=1).sort_index()
@@ -125,7 +147,7 @@ def refresh_error_band(store: Store, reports_dir=Path("reports/forecast"), now=N
 
 def morning_run(store: Store, delivery_day: str | None = None, kind: str = "scheduled", inputs_path=Path("data/forecast/inputs.csv"),
                 cache_dir=Path("data/cache"), reports_dir=Path("reports/forecast"), entsoe=None, weather=None, now=None,
-                feature_sets=FEATURE_SETS, model_file=None) -> dict:
+                feature_sets=FEATURE_SETS, model_file=None, wind_points=None, wind_weights=DEFAULT_WEIGHTS_PATH) -> dict:
     """One morning run. Returns a summary dict; never raises for a source failure.
 
     With `model_file` (a LightGBM file written by refit) the forecast is a
@@ -137,7 +159,8 @@ def morning_run(store: Store, delivery_day: str | None = None, kind: str = "sche
     log.info("morning-run %s for delivery day %s (run %d)", kind, day, run_id)
     summary = {"run_id": run_id, "delivery_day": day, "kind": kind, "forecasts": {}, "errors": []}
     try:
-        fresh = fetch_fresh(day, Path(cache_dir), store, run_id, entsoe=entsoe, weather=weather, now=now)
+        fresh = fetch_fresh(day, Path(cache_dir), store, run_id, entsoe=entsoe, weather=weather, now=now, wind_points=wind_points,
+                            wind_weights=wind_weights)
         history = load_inputs(inputs_path) if Path(inputs_path).exists() else pd.DataFrame(columns=INPUT_COLUMNS)
         merged = merge_inputs(history, fresh)
         hours = day_hours(day)

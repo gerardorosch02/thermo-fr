@@ -13,7 +13,7 @@ from .models import BENCHMARKS, MODELS  # noqa: E402
 
 COLUMN_LABELS = {"naive_day": "Same hour D-1", "naive_week": "Same hour D-7", "gbm": "Gradient boosting", "linear": "Linear"}
 DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-SET_LABELS = {"honest": "honest", "extended": "extended (may use late information)"}
+SET_LABELS = {"honest": "honest", "honest_base": "honest without the wind proxy", "extended": "extended (may use late information)"}
 
 
 def write_report(results: dict, out=Path("reports/forecast"), sample_week: str | None = None, sources: dict | None = None,
@@ -189,7 +189,7 @@ def worst_table(rows: list[dict]) -> str:
 
 
 def to_markdown(summary: dict) -> str:
-    sets = [k for k in summary if k in ("honest", "extended")]
+    sets = [k for k in summary if k in SET_LABELS]
     strict = {k: summary[k]["metrics_strict"] for k in sets}
     full = {k: summary[k]["metrics_all"] for k in sets}
     any_strict = next(iter(strict.values()))

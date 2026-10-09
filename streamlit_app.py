@@ -144,8 +144,10 @@ HOW_IT_WORKS = """
 **Information gate.** The auction closes at 12:00 Paris time on the day before delivery. Every input is dated by when it is
 published and the forecast uses only inputs available before that moment: the ENTSO-E day-ahead load forecast (due two hours
 before gate closure), Open-Meteo weather forecasts issued two days ahead (temperature, 100 m wind, solar radiation for eight
-cities), the calendar, and the prices of the previous days (D-1, D-2, D-7), which also stand in for gas and carbon costs.
-ENTSO-E's own wind and solar forecasts are not used, because the platform allows them until 18:00 on D-1.
+cities), a wind generation proxy (100 m wind forecasts issued two days ahead at 17 points in the French wind regions, turned
+into MW with weights fitted monthly on past actual wind generation), the calendar, and the prices of the previous days (D-1,
+D-2, D-7), which also stand in for gas and carbon costs. ENTSO-E's own wind and solar forecasts are not used, because the
+platform allows them until 18:00 on D-1.
 
 **Model.** Gradient boosting (LightGBM) fitted on all history before the delivery day. Results are reported as forecast
 error (mean absolute error, MAE, in EUR/MWh) against a naive baseline: the price of the same hour on the previous day. In a

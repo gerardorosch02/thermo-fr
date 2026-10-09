@@ -12,6 +12,10 @@ One hourly UTC table, data/forecast/inputs.csv, with these columns:
     radiation_fc_wm2      Open-Meteo shortwave radiation as forecast two days ahead, city mean
     temp_proxy_c, wind100_proxy_ms, radiation_proxy_wm2
                           the same from the historical-forecast archive (not point in time)
+    wind_onshore_mw       ENTSO-E actual wind onshore generation (calibration target, never a feature)
+    wind_offshore_mw      ENTSO-E actual wind offshore generation
+    wind_proxy_mw         pre-gate wind generation proxy (forecast/wind_proxy.py), weights refitted monthly
+    wind_pt_<point>_ms    Open-Meteo 100 m wind speed as forecast two days ahead at each wind-region point
 
 Next to it, sources.json records where each series came from, the ENTSO-E
 document metadata per year (revision numbers, resolutions) and the first
@@ -29,11 +33,14 @@ from ..data.csv_source import CsvSource
 from ..data.entsoe_client import EntsoeSource
 from ..data.sources import UnsupportedSeriesError
 from ..data.weather_forecast import OpenMeteoForecastSource
+from ..data.wind_points import POINT_COLUMNS, WindPointsSource
+from .wind_proxy import rolling_proxy
 
 INPUT_COLUMNS = [
     "price_eur_mwh", "load_fc_mw", "solar_fc_mw", "wind_onshore_fc_mw", "wind_offshore_fc_mw",
     "temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2", "temp_proxy_c", "wind100_proxy_ms", "radiation_proxy_wm2",
-]
+    "wind_onshore_mw", "wind_offshore_mw", "wind_proxy_mw",
+] + POINT_COLUMNS
 
 
 def compare_prices(api: pd.Series, csv: pd.Series, tolerance: float = 0.005) -> dict:
@@ -80,11 +87,19 @@ def fetch_inputs(start: str, end: str, cache_dir=Path("data/cache"), csv_dir=Pat
     log("Fetching ENTSO-E day-ahead wind and solar forecasts ...")
     wind_solar = entsoe.wind_solar_forecast(start, end)
 
+    log("Fetching ENTSO-E actual wind generation (onshore and offshore) ...")
+    wind_actual = entsoe.wind_generation_actual(start, end)
+
     weather = OpenMeteoForecastSource(cache_dir=cache_dir / "open-meteo")
     log("Fetching Open-Meteo forecasts as issued (previous runs) and the historical-forecast proxy ...")
     weather_frame = weather.fetch(start, end)
+    points_source = WindPointsSource(cache_dir=cache_dir / "open-meteo")
+    log("Fetching Open-Meteo 100 m wind forecasts as issued at the wind-region points ...")
+    points = points_source.fetch_points(start, end)
+    log("Calibrating the wind proxy month by month on actual generation ...")
+    proxy, fits = rolling_proxy(points, wind_actual.sum(axis=1, min_count=1), log=log)
 
-    hourly = pd.concat([price, load_fc, wind_solar, weather_frame], axis=1).sort_index()
+    hourly = pd.concat([price, load_fc, wind_solar, weather_frame, wind_actual, proxy, points], axis=1).sort_index()
     hourly = hourly.reindex(columns=INPUT_COLUMNS)
 
     comparison = {"note": "no CSV price export found"}
@@ -102,6 +117,8 @@ def fetch_inputs(start: str, end: str, cache_dir=Path("data/cache"), csv_dir=Pat
         "fetched_at": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ"),
         "entsoe": {"attribution": entsoe.attribution, "details": entsoe.details},
         "weather": {"source": weather.name, "attribution": weather.attribution, "details": weather.details},
+        "wind_points": {"source": points_source.name, "attribution": points_source.attribution, "details": points_source.details},
+        "wind_proxy": {"monthly_fits": fits},
         "coverage": {c: coverage(hourly[c]) for c in hourly.columns},
     }
     return hourly, sources, comparison
@@ -131,4 +148,4 @@ def save_inputs(hourly: pd.DataFrame, sources: dict, comparison: dict, out=Path(
 def load_inputs(path=Path("data/forecast/inputs.csv")) -> pd.DataFrame:
     hourly = pd.read_csv(path, index_col=0)
     hourly.index = pd.to_datetime(hourly.index, utc=True)
-    return hourly
+    return hourly.reindex(columns=INPUT_COLUMNS)  # tables saved before a column was added get NaN for it

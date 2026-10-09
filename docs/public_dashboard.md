@@ -13,6 +13,7 @@ The public dashboard (`streamlit_app.py`) reads only the files under `published/
 | `published/error_band.csv` | backtest error percentiles by hour (the shaded band) |
 | `published/model/honest.txt` | the LightGBM model, refitted on the first weekday of each month (300 trees, 31 leaves, about 0.9 MB; chosen because its holdout MAE is within 0.2 EUR/MWh of the backtest settings) |
 | `published/model/honest.json` | its training period, fit date, feature list and holdout metrics |
+| `published/model/wind_proxy.json` | weights of the wind generation proxy (MW per forecast point), refitted with the model on the trailing year of actual wind generation; the morning run applies them to the fresh point forecasts |
 | `published/status.json` | when the dataset was written, the last run, the model summary, the attributions |
 
 Only the honest feature set is published. The extended set, the data-status panel and the timing log remain in the local database and the local dashboard (`thermo-fr dashboard`).

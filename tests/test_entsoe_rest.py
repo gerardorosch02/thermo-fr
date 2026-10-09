@@ -125,6 +125,26 @@ def wind_solar_handler(url, params):
     return FakeResponse(200, content=gl_document(series))
 
 
+def test_actual_wind_generation_is_queried_per_type_and_averaged_to_hourly(tmp_path, client_factory):
+    def handler(url, params):
+        start = pd.Timestamp(params["periodStart"]).tz_localize("UTC").strftime("%Y-%m-%dT%H:%MZ")
+        end = pd.Timestamp(params["periodEnd"]).tz_localize("UTC").strftime("%Y-%m-%dT%H:%MZ")
+        assert params["documentType"] == "A75" and params["processType"] == "A16" and params["in_Domain"] == "10YFR-RTE------C"
+        assert params["psrType"] in ("B19", "B18")
+        if params["psrType"] == "B18":
+            return FakeResponse(200, content=ack_document("999", "No matching data found"))  # the platform answers 200 with an acknowledgement
+        quarter_hours = {1: 1000, 2: 2000, 3: 3000, 4: 4000}  # one hour of 15-minute values, forward filled after
+        return FakeResponse(200, content=gl_document([gl_timeseries([period_xml(start, end, "PT15M", quarter_hours)], psr="B19")]))
+
+    api, session = make_api(tmp_path, handler, client_factory)
+    frame = api.wind_generation_actual("2024-06-01", "2024-06-03")
+    assert list(frame.columns) == ["wind_onshore_mw", "wind_offshore_mw"] and len(frame) == 48
+    assert frame["wind_onshore_mw"].iloc[0] == 2500.0 and frame["wind_onshore_mw"].iloc[1] == 4000.0
+    assert frame["wind_offshore_mw"].isna().all()
+    assert sorted(p.name for p in (tmp_path / "entsoe").iterdir()) == [
+        "wind_offshore_actual_FR_202406010000_202406030000.xml", "wind_onshore_actual_FR_202406010000_202406030000.xml"]
+
+
 def test_requests_are_chunked_by_calendar_year_and_cached_without_the_token(tmp_path, client_factory):
     api, session = make_api(tmp_path, wind_solar_handler, client_factory)
     frame = api.wind_solar_forecast("2024-06-01", "2025-02-01")

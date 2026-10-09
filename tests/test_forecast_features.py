@@ -6,7 +6,8 @@ import pytest
 
 from thermo_fr.forecast import models
 from thermo_fr.forecast.backtest import evaluate, run_backtest, walk_forward, worst_days
-from thermo_fr.forecast.features import EXTENDED, HONEST, FEATURE_TIMINGS, build_features, feature_timings
+from thermo_fr.forecast.features import EXTENDED, HONEST, HONEST_BASE, FEATURE_TIMINGS, build_features, feature_timings
+from thermo_fr.data.wind_points import POINT_COLUMNS
 from thermo_fr.forecast.inputs import INPUT_COLUMNS
 from thermo_fr.forecast.models import benchmark_predictions, fit_predict
 from thermo_fr.forecast.timing import LookaheadError, check_point_in_time
@@ -37,6 +38,13 @@ def synthetic_inputs(start="2023-09-01", end="2024-05-01", issued_from="2024-01-
     frame.loc[issued, "temp_fc_c"] = temp[issued] + rng.normal(0, 1, issued.sum())
     frame.loc[issued, "wind100_fc_ms"] = wind[issued] / 1000 + rng.normal(0, 0.5, issued.sum())
     frame.loc[issued, "radiation_fc_wm2"] = solar[issued] / 10
+    # actual wind generation (calibration target), hub-height speeds at the points that imply it, and the proxy
+    frame["wind_onshore_mw"] = wind * 0.9
+    frame["wind_offshore_mw"] = wind * 0.1
+    speed = 3 + 9 * np.cbrt(wind / 15_000)  # inverse of the proxy's power curve at full capacity
+    for column in POINT_COLUMNS:
+        frame.loc[issued, column] = np.clip(speed[issued] + rng.normal(0, 0.8, issued.sum()), 0, None)
+    frame.loc[issued, "wind_proxy_mw"] = wind[issued] + rng.normal(0, 400, issued.sum())
     return frame
 
 
@@ -46,12 +54,27 @@ def inputs():
 
 
 def test_feature_lists_and_timings_are_consistent():
-    assert set(HONEST) <= set(EXTENDED)
+    assert set(HONEST_BASE) < set(HONEST) <= set(EXTENDED)
     assert all(f in FEATURE_TIMINGS for f in EXTENDED)
     assert {"solar_fc_mw", "wind_fc_mw", "residual_load_fc_mw"} == set(EXTENDED) - set(HONEST)
+    assert set(HONEST) - set(HONEST_BASE) == {"wind_proxy_mw"} and FEATURE_TIMINGS["wind_proxy_mw"] == "wind_proxy"
     honest = feature_timings("honest")
     assert "wind_solar_forecast" not in honest.values()
     assert "wind_solar_forecast" in feature_timings("extended").values()
+
+
+def test_honest_base_drops_the_wind_proxy_and_old_tables_get_nan(inputs):
+    table = build_features(inputs, "honest")
+    base = build_features(inputs, "honest_base")
+    assert "wind_proxy_mw" in table.X and "wind_proxy_mw" not in base.X
+    ts = pd.Timestamp("2024-02-14T17:00Z")
+    assert table.X.loc[ts, "wind_proxy_mw"] == inputs.loc[ts, "wind_proxy_mw"]
+    assert table.info.loc[ts, "wind_mw"] == pytest.approx(inputs.loc[ts, "wind_onshore_mw"] + inputs.loc[ts, "wind_offshore_mw"])
+    old = inputs.drop(columns=["wind_proxy_mw", "wind_onshore_mw", "wind_offshore_mw"] + POINT_COLUMNS)
+    legacy = build_features(old, "honest")
+    assert legacy.X["wind_proxy_mw"].isna().all() and legacy.info["wind_mw"].isna().all()
+    with pytest.raises(ValueError, match="feature_set must be"):
+        build_features(inputs, "secret")
 
 
 def test_honest_features_pass_the_gate_and_extended_do_not(inputs):
@@ -157,7 +180,9 @@ def test_evaluate_reports_slices_hours_and_improvements(inputs, fast_gbm):
     table = build_features(inputs, "honest")
     bt = walk_forward(table, "2024-02-01", "2024-04-01", log=lambda *_: None)
     metrics = evaluate(bt.predictions)
-    assert set(metrics["slices"]) == {"all", "peak", "off_peak", "top_5pct_price_hours", "negative_price_hours"}
+    assert set(metrics["slices"]) == {"all", "peak", "off_peak", "top_5pct_price_hours", "negative_price_hours", "windiest_10pct_days"}
+    windy = metrics["slices"]["windiest_10pct_days"]["gbm"]["hours"]
+    assert 0 < windy <= 0.11 * metrics["rows"] + 48 and metrics["windy_day_cut_mw"] > 0
     assert metrics["slices"]["all"]["gbm"]["hours"] == len(bt.predictions)
     assert metrics["slices"]["peak"]["gbm"]["hours"] + metrics["slices"]["off_peak"]["gbm"]["hours"] == len(bt.predictions)
     assert metrics["slices"]["negative_price_hours"]["gbm"]["mae"] is None  # synthetic prices stay positive
@@ -171,7 +196,7 @@ def test_evaluate_reports_slices_hours_and_improvements(inputs, fast_gbm):
 
 def test_run_backtest_covers_both_feature_sets(inputs, fast_gbm):
     results = run_backtest(inputs, "2024-03-01", "2024-04-01", log=lambda *_: None)
-    assert set(results) == {"honest", "extended"}
+    assert set(results) == {"honest", "honest_base", "extended"}
     assert results["honest"]["metrics_strict"]["rows"] > 0
     assert results["extended"]["metrics_strict"]["rows"] == results["honest"]["metrics_strict"]["rows"]
     assert results["honest"]["backtest"].point_in_time and not results["extended"]["backtest"].point_in_time

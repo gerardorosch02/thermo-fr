@@ -17,16 +17,23 @@ import pandas as pd
 
 from ..data.entsoe_client import EntsoeSource
 from ..data.weather_forecast import OpenMeteoForecastSource
+from ..data.wind_points import WindPointsSource
 from .features import build_features, feature_timings
 from .inputs import INPUT_COLUMNS
 from .models import fit_predict, predict_with
 from .timing import check_point_in_time
+from .wind_proxy import DEFAULT_WEIGHTS_PATH, apply_weights, load_weights
 
 HISTORY_DAYS = 10  # refreshed around the target day so that lags and the day itself are current
 
 
-def refresh_window(date: str, cache_dir=Path("data/cache"), log=print) -> pd.DataFrame:
-    """Inputs for [D - HISTORY_DAYS, D + 1) straight from the sources (honest inputs only)."""
+def refresh_window(date: str, cache_dir=Path("data/cache"), log=print, wind_weights=DEFAULT_WEIGHTS_PATH) -> pd.DataFrame:
+    """Inputs for [D - HISTORY_DAYS, D + 1) straight from the sources (honest inputs only).
+
+    The wind proxy for the window is computed from the stored calibration
+    weights (`wind_weights`, written by refit-model); without that file the
+    proxy column stays NaN and a warning is logged.
+    """
     day = pd.Timestamp(date).normalize()
     start = (day - pd.Timedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%d")
     end = (day + pd.Timedelta(days=2)).strftime("%Y-%m-%d")  # UTC window covers the whole Paris day
@@ -36,7 +43,15 @@ def refresh_window(date: str, cache_dir=Path("data/cache"), log=print) -> pd.Dat
     load_fc = entsoe.load_forecast(start, end)
     log("Refreshing Open-Meteo forecasts as issued two days ahead ...")
     weather = OpenMeteoForecastSource(cache_dir=Path(cache_dir) / "open-meteo").fetch(start, end, kinds=("issued",))
-    fresh = pd.concat([price, load_fc, weather], axis=1).sort_index()
+    log("Refreshing Open-Meteo 100 m wind forecasts at the wind-region points ...")
+    points = WindPointsSource(cache_dir=Path(cache_dir) / "open-meteo").fetch_points(start, end)
+    pieces = [price, load_fc, weather, points]
+    weights = load_weights(wind_weights)
+    if weights is None:
+        log(f"Warning: no wind proxy weights at {wind_weights}; the wind proxy feature will be missing.")
+    else:
+        pieces.append(apply_weights(points, weights))
+    fresh = pd.concat(pieces, axis=1).sort_index()
     return fresh.reindex(columns=INPUT_COLUMNS)
 
 

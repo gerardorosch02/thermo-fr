@@ -7,8 +7,12 @@ inputs:
 
 - "honest": only inputs known at 12:00 Paris on D-1. Calendar, the ENTSO-E
   load forecast, the Open-Meteo forecasts issued two days ahead (temperature,
-  100 m wind, radiation, which stand in for renewable output), and lagged
-  prices (D-1, D-2, D-7 same hour, plus daily summaries of D-1 and D-7).
+  100 m wind, radiation, which stand in for renewable output), the wind
+  generation proxy of wind_proxy.py (hub-height wind forecasts at the wind
+  regions, calibrated on actual generation), and lagged prices (D-1, D-2,
+  D-7 same hour, plus daily summaries of D-1 and D-7).
+- "honest_base": the honest set without the wind proxy, kept so the
+  backtest can measure what the proxy adds.
 - "extended": the honest set plus the ENTSO-E day-ahead wind and solar
   forecasts and the residual load forecast built from them. ENTSO-E allows
   these until 18:00 on D-1, after the auction, so this set may use late
@@ -38,14 +42,16 @@ PRICE_LAGS = (1, 2, 7)
 CALENDAR = ["hour", "dow", "month", "holiday", "day_of_year"]
 WEATHER = ["temp_c", "wind100_ms", "radiation_wm2"]
 LAGS = ["price_lag1", "price_lag2", "price_lag7", "price_lag1_mean", "price_lag1_min", "price_lag1_max", "price_lag7_mean"]
-HONEST = CALENDAR + ["load_fc_mw"] + WEATHER + LAGS
+HONEST_BASE = CALENDAR + ["load_fc_mw"] + WEATHER + LAGS
+HONEST = HONEST_BASE + ["wind_proxy_mw"]
 EXTENDED = HONEST + ["solar_fc_mw", "wind_fc_mw", "residual_load_fc_mw"]
-FEATURES = {"honest": HONEST, "extended": EXTENDED}
+FEATURES = {"honest": HONEST, "honest_base": HONEST_BASE, "extended": EXTENDED}
 
 FEATURE_TIMINGS = {
     **{c: "calendar" for c in CALENDAR},
     "load_fc_mw": "load_forecast",
     **{c: "weather_issued" for c in WEATHER},
+    "wind_proxy_mw": "wind_proxy",
     "price_lag1": "price_lag1",
     "price_lag1_mean": "price_lag1",
     "price_lag1_min": "price_lag1",
@@ -113,8 +119,8 @@ def price_lags(price: pd.Series, calendar: pd.DataFrame) -> pd.DataFrame:
 
 def build_features(hourly: pd.DataFrame, feature_set: str = "honest") -> FeatureTable:
     """Feature table for one feature set from the inputs table of forecast/inputs.py."""
-    if feature_set not in FEATURE_SETS:
-        raise ValueError(f"feature_set must be one of {FEATURE_SETS}")
+    if feature_set not in FEATURES:
+        raise ValueError(f"feature_set must be one of {tuple(FEATURES)}")
     hourly = hourly.sort_index()
     calendar = calendar_frame(hourly.index)
     X = calendar[CALENDAR].copy()
@@ -127,6 +133,7 @@ def build_features(hourly: pd.DataFrame, feature_set: str = "honest") -> Feature
         X[name] = hourly[fc].where(point_in_time, hourly[px])
 
     X = X.join(price_lags(hourly["price_eur_mwh"], calendar))
+    X["wind_proxy_mw"] = hourly["wind_proxy_mw"] if "wind_proxy_mw" in hourly else np.nan
 
     if feature_set == "extended":
         wind = hourly["wind_onshore_fc_mw"].add(hourly["wind_offshore_fc_mw"].fillna(0.0))
@@ -136,5 +143,8 @@ def build_features(hourly: pd.DataFrame, feature_set: str = "honest") -> Feature
 
     info = calendar[["delivery_day", "hour", "is_peak"]].copy()
     info["weather_point_in_time"] = point_in_time.to_numpy()
+    # actual wind generation, never a feature: it defines the windy-day slice of the backtest
+    actual_wind = [c for c in ("wind_onshore_mw", "wind_offshore_mw") if c in hourly]
+    info["wind_mw"] = hourly[actual_wind].sum(axis=1, min_count=1) if actual_wind else np.nan
     X = X[FEATURES[feature_set]].astype(float)
     return FeatureTable(X=X, y=hourly["price_eur_mwh"].rename("price_eur_mwh"), info=info, feature_set=feature_set)

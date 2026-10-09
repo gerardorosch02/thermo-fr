@@ -6,6 +6,7 @@ published/model/:
 
     honest.txt    the LightGBM model in its native text format
     honest.json   training period, fit date, rows, feature list, holdout metrics
+    wind_proxy.json  weights of the wind generation proxy, fitted on the trailing year
 
 The daily morning runs then predict with that file and only fetch the ten
 days of inputs around the next delivery day; no history table has to live in
@@ -23,6 +24,7 @@ import pandas as pd
 from .features import FEATURES, build_features
 from .inputs import fetch_inputs, load_inputs
 from .models import GBM_PARAMS, fit_predict, make_model, save_model
+from .wind_proxy import latest_weights, save_weights
 
 DEFAULT_MODEL_DIR = Path("published/model")
 # Overrides applied to GBM_PARAMS for the published model. 300 trees with 31 leaves gave a
@@ -81,6 +83,15 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
         "holdout": metrics,
         "note": "Honest feature set: every input is published before 12:00 Paris on the day before delivery.",
     }
+    actual_wind = hourly[[c for c in ("wind_onshore_mw", "wind_offshore_mw") if c in hourly]].sum(axis=1, min_count=1)
+    weights = latest_weights(hourly, actual_wind)
+    if weights is not None:
+        save_weights(weights, out / "wind_proxy.json")
+        meta["wind_proxy"] = {"file": "wind_proxy.json", **weights["fit"]}
+        log(f"Wind proxy weights refitted on {weights['fit']['hours']:,} hours to {weights['fit']['to']}: "
+            f"capacity {weights['fit']['capacity_mw']:,.0f} MW, MAE {weights['fit']['mae_mw']:,.0f} MW, R2 {weights['fit']['r2']}")
+    else:
+        log("Wind proxy weights not refitted: no point forecasts with actual generation in the inputs table.")
     (out / f"{feature_set}.json").write_text(json.dumps(meta, indent=2))
     return meta
 

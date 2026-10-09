@@ -31,6 +31,8 @@ All series are hourly UTC, 2021-01-01 to 2026-09-30, cached under `data/cache/` 
 | Solar, wind onshore, wind offshore forecasts | ENTSO-E A69 / A01, psrType B16, B19, B18 | 158 and 167 hours missing (mostly 2021); offshore starts 2023-08-06; the repeated autumn hour is absent |
 | Temperature, 100 m wind, radiation as issued | Open-Meteo previous-runs API, best_match, lead day 2 | temperature from 2021-03-25, radiation from 2024-01-20, wind from 2024-02-17 |
 | The same, proxy | Open-Meteo historical-forecast API, best_match | complete from 2021; training proxy only |
+| 100 m wind at 17 wind-region points, as issued | Open-Meteo previous-runs API, best_match, lead day 2 | from 2024-02-17; input of the wind proxy |
+| Actual wind onshore and offshore generation | ENTSO-E A75 / A16, psrType B19, B18 | 15-minute, averaged to hourly; calibration target of the wind proxy and definition of the windy-day slice, never a feature |
 
 Temperature is population weighted over the eight cities, as in the thermosensitivity model; wind and radiation are plain means, since they stand for renewable output rather than heating demand.
 
@@ -42,9 +44,11 @@ ENTSO-E curve type A03 omits a point when its value repeats the previous one; ea
 
 Target: the hourly French day-ahead price in Paris delivery hours (23 rows on the spring day, 25 on the autumn day).
 
-Features (honest set): hour, weekday, month, day of year, public holiday; ENTSO-E load forecast; temperature, 100 m wind and radiation as forecast two days ahead; price lags for the same local hour on D-1, D-2 and D-7, and the mean, minimum and maximum of D-1 and the mean of D-7. The lagged prices stand in for gas and carbon, which are not inputs here. Extended set: honest plus the ENTSO-E solar and wind forecasts and the residual load (load forecast minus solar minus wind).
+Features (honest set): hour, weekday, month, day of year, public holiday; ENTSO-E load forecast; temperature, 100 m wind and radiation as forecast two days ahead; the wind generation proxy (see below); price lags for the same local hour on D-1, D-2 and D-7, and the mean, minimum and maximum of D-1 and the mean of D-7. The lagged prices stand in for gas and carbon, which are not inputs here. Extended set: honest plus the ENTSO-E solar and wind forecasts and the residual load (load forecast minus solar minus wind).
 
 Weather for a row is the as-issued forecast when the archive has all three variables for that hour, else the proxy. Rows with proxy weather are kept for training but excluded from the strict metrics; in the 2024 to 2025 test window this affects 2024-01-01 to 2024-02-16.
+
+A third set, `honest_base`, is the honest set without the wind proxy; it exists only to measure what the proxy adds.
 
 Models: same hour on D-1 and same hour on D-7 as benchmarks; LightGBM (800 trees, learning rate 0.03, 63 leaves, bagging and feature subsampling); ridge regression on the same information with one-hot hour, weekday and month.
 

@@ -83,7 +83,7 @@ thermo-fr timing-probe                             # log which ENTSO-E items alr
 
 Results are reported as forecast error (MAE and RMSE) against a naive baseline, the price of the same hour on the previous day. Limitations: the model is not benchmarked against traded market prices (EEX futures or OTC day-ahead quotes), so it makes no claim about beating the market, and the error band on the dashboards is the model's past error, not a probability forecast.
 
-Inputs: ENTSO-E day-ahead prices, day-ahead total load forecast and day-ahead wind and solar forecasts (RESTful API, cached under `data/cache/entsoe/`), and Open-Meteo weather forecasts for the eight cities as they were issued two days ahead (previous-runs archive, cached under `data/cache/open-meteo/`). Two feature sets are evaluated: an honest one whose every input is published before the gate, and an extended one that adds the ENTSO-E wind and solar forecasts, which the platform allows until 18:00 on D-1. A test fails if any feature for delivery day D is timestamped after 12:00 Paris on D-1.
+Inputs: ENTSO-E day-ahead prices, day-ahead total load forecast and day-ahead wind and solar forecasts (RESTful API, cached under `data/cache/entsoe/`), Open-Meteo weather forecasts for the eight cities as they were issued two days ahead (previous-runs archive, cached under `data/cache/open-meteo/`), and a pre-gate wind generation proxy: 100 m wind forecasts issued two days ahead at 17 points covering the French wind regions, passed through a turbine power curve and weighted by non-negative least squares against ENTSO-E actual wind generation, with the weights refitted at the start of each month on the trailing year (`forecast/wind_proxy.py`). Two feature sets are evaluated: an honest one whose every input is published before the gate, and an extended one that adds the ENTSO-E wind and solar forecasts, which the platform allows until 18:00 on D-1. A test fails if any feature for delivery day D is timestamped after 12:00 Paris on D-1.
 
 ## Scheduled jobs and dashboard
 
@@ -119,7 +119,7 @@ The dashboard shows tomorrow's latest forecast with today's actual prices, the s
 ```bash
 thermo-fr publish                   # export the public dataset from the local database
 thermo-fr import-published          # the reverse, used by the workflow to restore its state
-thermo-fr refit-model               # fetch the full history and save published/model/honest.txt plus metadata
+thermo-fr refit-model               # fetch the full history and save published/model/honest.txt, metadata and wind_proxy.json
 thermo-fr morning-run --model-file published/model/honest.txt --feature-sets honest   # predict with the stored model
 streamlit run streamlit_app.py      # the public app, locally
 ```
@@ -186,9 +186,11 @@ src/thermo_fr/
   data/entsoe_rest.py    ENTSO-E RESTful API client: prices, load, day-ahead forecasts (needs a key)
   data/entsoe_client.py  the entsoe source built on it
   data/weather_forecast.py Open-Meteo forecasts as issued (previous runs) and the historical-forecast proxy
+  data/wind_points.py    100 m wind forecasts as issued at 17 points in the wind regions
   forecast/timing.py     the 12:00 Paris gate, issue-time rules, look-ahead check
   forecast/inputs.py     one hourly table of every forecast input, plus the API-versus-CSV price comparison
   forecast/features.py   honest and extended feature sets in Paris delivery hours
+  forecast/wind_proxy.py pre-gate wind generation proxy: power curve, monthly calibration on actual generation
   forecast/models.py     benchmarks, LightGBM, ridge
   forecast/backtest.py   monthly walk-forward, metrics by slice, worst days
   forecast/report.py     reports/forecast/ tables and charts
