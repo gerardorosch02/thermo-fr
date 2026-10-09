@@ -164,7 +164,9 @@ published prices every afternoon. Source code, method and backtest: the reposito
 not benchmarked against traded market prices (EEX futures or OTC day-ahead quotes), so it makes no claim about beating the
 market, and a lower error than the baseline says nothing about whether a trade would have made money. The error band is the
 model's past error distribution, not a probability forecast. Errors are largest on days with regime changes (cold snaps,
-price collapses, days after holidays), which is also where a forecast matters most.
+price collapses, days after holidays), which is also where a forecast matters most. A known weakness is the top 5% price
+hours, typically cold, calm winter evenings when gas sets the price: the wind generation proxy improves the error elsewhere
+but made those hours slightly worse in the backtest (24.1 against 22.6 EUR/MWh).
 """
 
 
