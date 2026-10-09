@@ -11,6 +11,9 @@ import pandas as pd
 
 from ..config import LOCAL_TZ
 from ..forecast.jobs import next_delivery_day
+from ..forecast.market import DEFAULT_PATH as MARKET_PATH
+from ..forecast.market import evaluate as evaluate_market
+from ..forecast.market import load_market
 from ..forecast.store import Store
 
 INPUT_LABELS = {
@@ -45,12 +48,18 @@ def forecast_panel(path, delivery_day: str, feature_set: str, actual_day: str) -
     """Latest forecast version for a day, its benchmark, the actual of another day by hour, and the band."""
 
     def read(store: Store):
-        meta, curve = store.latest_forecast(delivery_day, feature_set)
+        meta, curve, later = store.headline_forecast(delivery_day, feature_set)
         versions = store.forecast_versions(delivery_day, feature_set)
         band = store.error_band(feature_set)
         actual = store.actuals_for(actual_day)
         own_actual = store.actuals_for(delivery_day)
-        return {"meta": meta, "curve": curve, "versions": versions, "band": band, "actual_other": actual, "actual_own": own_actual}
+        later_rows = []
+        for _, v in later.iterrows():
+            c = store.forecast_curve(int(v["forecast_id"]))
+            later_rows.append({"issued_at_utc": v["issued_at_utc"], "kind": v["kind"], "model": v["model"],
+                               "daily_mean": float(c["forecast"].mean()), "forecast_id": int(v["forecast_id"])})
+        return {"meta": meta, "curve": curve, "versions": versions, "band": band, "actual_other": actual, "actual_own": own_actual,
+                "later": pd.DataFrame(later_rows)}
 
     out = _with_store(path, read)
     curve = out["curve"]
@@ -100,7 +109,7 @@ def inputs_panel(path, delivery_day: str, previous_day: str) -> dict:
 
 def performance_panel(path, feature_set: str, days: int = 30) -> dict:
     def read(store: Store):
-        scores = store.latest_scores(feature_set, days=days)
+        scores = store.headline_scores(feature_set, days=days)
         hourly = []
         for _, row in scores.iterrows():
             curve = store.forecast_curve(int(row["forecast_id"]))
@@ -154,6 +163,17 @@ def flag_for(row) -> str:
     if row.get("hours") is not None and row["hours"] < 23:
         return "incomplete"
     return "ok"
+
+
+def market_panel(path, feature_set: str = "honest", market_path=MARKET_PATH) -> dict:
+    """The forecast against EEX traded prices, day by day, from the hand-entered local file (never published)."""
+    rows = load_market(market_path)
+    if rows.empty:
+        return {"rows": 0, "path": str(market_path)}
+    out = _with_store(path, lambda store: evaluate_market(store, rows, feature_set=feature_set))
+    out["rows"] = int(len(rows))
+    out["path"] = str(market_path)
+    return out
 
 
 REVISION_ROWS = [("load_fc_mw", "Load forecast (MW)"), ("wind_fc_mw", "Wind forecast (MW)"), ("solar_fc_mw", "Solar forecast (MW)"),

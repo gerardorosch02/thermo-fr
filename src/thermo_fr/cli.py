@@ -216,6 +216,53 @@ def cmd_import_published(args) -> None:
     print(f"Imported {summary} from {args.src}")
 
 
+def cmd_market_add(args) -> None:
+    from .forecast.market import MarketDataError, MarketRow, add_row, parse_window
+
+    try:
+        start, end = parse_window(args.window)
+        row = MarketRow(args.date, args.product, start, end, args.open, args.high, args.low, args.close, args.vwap, args.source, args.note or "")
+        frame = add_row(row, Path(args.path))
+    except MarketDataError as exc:
+        raise SystemExit(f"market add: {exc}")
+    print(f"Stored {args.product} row for {args.date}, window {start}-{end} Paris, VWAP {args.vwap}; {len(frame)} row(s) in {args.path} "
+          "(git-ignored, never published)")
+
+
+def cmd_market_evaluate(args) -> None:
+    from .forecast.market import evaluate, format_table, load_market
+    from .forecast.store import Store
+
+    rows = load_market(Path(args.path))
+    if rows.empty:
+        print(f"No market rows in {args.path}; add one with: thermo-fr market add ...")
+        return
+    store = Store(Path(args.db))
+    try:
+        result = evaluate(store, rows, feature_set=args.feature_set, bands=tuple(args.bands))
+    finally:
+        store.close()
+    s = result["summary"]
+    print(f"Forecast ({args.feature_set}) against EEX traded prices, {s['days']} day(s) with a forecast before the window, "
+          f"{s['scored_days']} with an auction result:")
+    print(format_table(result["table"]))
+    if s["scored_days"]:
+        print(f"\nHit rate {100 * s['hit_rate']:.0f}%, total P&L {s['total_pnl_per_mwh']:+.2f} EUR/MWh, mean {s['mean_pnl_per_mwh']:+.2f} per day "
+              f"(entry at the close instead of the VWAP: mean {s['mean_pnl_per_mwh_close']:+.2f}); model MAE vs auction {s['model_mae']:.2f}, "
+              f"market MAE vs auction {s['market_mae']:.2f}, model error below the market's on {100 * s['share_model_beats_market']:.0f}% of days.")
+        print("\nNo-trade bands (in sample):")
+        print(result["bands"].to_string(index=False, na_rep=""))
+    for skipped in s["skipped"]:
+        print(f"skipped {skipped['delivery_date']} {skipped['product']}: {skipped['reason']}")
+
+
+def cmd_schedule_step(args) -> None:
+    from .forecast.schedule import main as schedule_main
+
+    argv = ["--event", args.event, "--schedule", args.schedule or "", "--input", args.input or ""] + (["--now", args.now] if args.now else [])
+    schedule_main(argv)
+
+
 def cmd_dashboard(args) -> None:
     import subprocess
     import sys
@@ -330,6 +377,32 @@ def main(argv=None) -> None:
     imp.add_argument("--from", dest="src", default="published")
     imp.add_argument("--db", default="data/forecast.db")
     imp.set_defaults(func=cmd_import_published)
+
+    mkt = sub.add_parser("market", help="EEX traded prices entered by hand, and the forecast scored against them")
+    mkt_sub = mkt.add_subparsers(dest="market_command", required=True)
+    madd = mkt_sub.add_parser("add", help="append one traded-price row to data/market/eex_fr_da.csv (git-ignored)")
+    madd.add_argument("--date", required=True, help="delivery date, YYYY-MM-DD")
+    madd.add_argument("--product", required=True, choices=("base", "peak"))
+    madd.add_argument("--window", required=True, help="trading window on the day before delivery, Paris time, e.g. 11:15-12:00")
+    for name in ("open", "high", "low", "close", "vwap"):
+        madd.add_argument(f"--{name}", required=True, type=float)
+    madd.add_argument("--source", required=True, help='where the prices came from, e.g. "EEX via trader"')
+    madd.add_argument("--note", default="")
+    madd.add_argument("--path", default="data/market/eex_fr_da.csv")
+    madd.set_defaults(func=cmd_market_add)
+    meval = mkt_sub.add_parser("evaluate", help="score every stored market row with the forecast that was live before its window")
+    meval.add_argument("--path", default="data/market/eex_fr_da.csv")
+    meval.add_argument("--db", default="data/forecast.db")
+    meval.add_argument("--feature-set", default="honest")
+    meval.add_argument("--bands", nargs="+", type=float, default=[0.0, 1.0, 2.0, 5.0, 10.0], help="no-trade bands in EUR/MWh (in sample)")
+    meval.set_defaults(func=cmd_market_evaluate)
+
+    sched = sub.add_parser("schedule-step", help="Which step a scheduled GitHub Actions run should perform, from the Paris clock")
+    sched.add_argument("--event", required=True)
+    sched.add_argument("--schedule", default="")
+    sched.add_argument("--input", default="")
+    sched.add_argument("--now", default=None, help="UTC time, ISO format (tests); default now")
+    sched.set_defaults(func=cmd_schedule_step)
 
     dash = sub.add_parser("dashboard", help="Open the local Streamlit dashboard")
     dash.add_argument("--db", default="data/forecast.db")

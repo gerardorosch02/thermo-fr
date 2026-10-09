@@ -291,6 +291,23 @@ class Store:
         meta = versions.iloc[-1].to_dict()
         return meta, self.forecast_curve(int(meta["forecast_id"]))
 
+    def headline_forecast(self, delivery_day: str, feature_set: str) -> tuple[dict | None, pd.DataFrame, pd.DataFrame]:
+        """The pre-market version (last issued before the market window), else the latest; plus the later versions.
+
+        Returns (meta with a `premarket` flag, curve, later versions issued
+        after the market window).
+        """
+        from .market import headline_version, premarket_flag
+
+        versions = self.forecast_versions(delivery_day, feature_set)
+        if versions.empty:
+            return None, pd.DataFrame(), pd.DataFrame()
+        versions = versions.copy()
+        versions["premarket"] = premarket_flag(versions["delivery_day"], versions["issued_at_utc"])
+        meta = headline_version(versions).iloc[0].to_dict()
+        later = versions[~versions["premarket"]]
+        return meta, self.forecast_curve(int(meta["forecast_id"])), later
+
     def forecast_days(self) -> list[str]:
         return [r[0] for r in self.conn.execute("SELECT DISTINCT delivery_day FROM forecasts ORDER BY delivery_day")]
 
@@ -352,6 +369,16 @@ class Store:
             return frame
         last = frame.sort_values("issued_at_utc").groupby("delivery_day").tail(1).sort_values("delivery_day")
         return last.tail(days)
+
+    def headline_scores(self, feature_set: str, days: int = 30) -> pd.DataFrame:
+        """The score of each day's headline version: the pre-market one when it exists, else the latest."""
+        from .market import headline_version
+
+        frame = self.scores()
+        frame = frame[frame["feature_set"] == feature_set]
+        if frame.empty:
+            return frame
+        return headline_version(frame).sort_values("delivery_day").tail(days)
 
     # Error band
 
