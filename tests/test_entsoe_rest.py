@@ -207,3 +207,15 @@ def test_gateway_timeouts_are_retried(tmp_path, sleeps):
     api = EntsoeApi(api_key="SECRET-TOKEN", cache_dir=tmp_path, client=client, now=pd.Timestamp("2026-10-05T12:00Z"))
     s = api.day_ahead_prices("2024-03-01", "2024-03-02")
     assert len(session.calls) == 2 and len(s) == 24 and s.eq(5).all()
+
+
+def test_http_400_acknowledgement_is_reduced_to_its_reason(tmp_path, client_factory):
+    body = (b'<?xml version="1.0"?><Acknowledgement_MarketDocument xmlns="urn:x"><mRID>a</mRID>'
+            b"<Reason><code>999</code><text>Unexpected error occurred, please try again later</text></Reason>"
+            b"</Acknowledgement_MarketDocument>")
+    api, _ = make_api(tmp_path, lambda url, params: FakeResponse(400, content=body), client_factory)
+    with pytest.raises(EntsoeApiError) as excinfo:
+        api.load_forecast("2026-10-06", "2026-10-09")
+    text = str(excinfo.value)
+    assert "HTTP 400" in text and "Unexpected error occurred" in text and "<Reason>" not in text
+    assert entsoe_rest.ack_reason("HTTP 599 from x: plain text") == "HTTP 599 from x: plain text"

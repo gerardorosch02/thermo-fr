@@ -35,6 +35,7 @@ everything is averaged to hourly UTC.
 """
 
 import os
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -160,6 +161,20 @@ def combine_resolutions(parts: list[TimeSeriesData]) -> pd.Series:
     return hourly.dropna()
 
 
+def ack_reason(message: str) -> str:
+    """Shorten an HTTP error whose body is an Acknowledgement document to its status and reason text.
+
+    A 400 from the platform carries the reason inside XML; keeping the whole
+    document in logs and status rows hides the one line that matters.
+    """
+    if "Acknowledgement_MarketDocument" not in message:
+        return message
+    status = re.match(r"(HTTP \d+ from \S+)", message)
+    reasons = re.findall(r"<code>([^<]*)</code>\s*<text>([^<]*)</text>", message, re.S)
+    reason = "; ".join(f"{c.strip()} {t.strip()}" for c, t in reasons) if reasons else "acknowledgement without reason text"
+    return f"{status.group(1) if status else 'HTTP error'}: {reason}"
+
+
 def year_boundaries(start: pd.Timestamp, end: pd.Timestamp):
     """Split [start, end) at calendar-year boundaries, so cache files line up with years."""
     cursor = start
@@ -215,7 +230,7 @@ class EntsoeApi:
         try:
             response = self.client.get(BASE_URL, params={**params, "securityToken": self._key})
         except HttpError as exc:
-            raise EntsoeApiError(self._scrub(str(exc))) from None
+            raise EntsoeApiError(self._scrub(ack_reason(str(exc)))) from None
         return response.content
 
     def fetch_chunk(self, item: str, start: pd.Timestamp, end: pd.Timestamp) -> bytes:
