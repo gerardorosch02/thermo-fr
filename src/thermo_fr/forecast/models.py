@@ -83,3 +83,30 @@ def fit_predict(name: str, X_train: pd.DataFrame, y_train: pd.Series, X_test: pd
     model = make_model(name)
     model.fit(X_train[keep], y_train[keep])
     return np.asarray(model.predict(X_test), dtype=float)
+
+
+def save_model(model, path) -> "Path":
+    """Write a fitted LightGBM model in its native text format."""
+    from pathlib import Path
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    model.booster_.save_model(str(path))
+    return path
+
+
+def load_model(path):
+    """A LightGBM Booster from a file written by save_model."""
+    from lightgbm import Booster
+
+    return Booster(model_file=str(path))
+
+
+def predict_with(path, X: pd.DataFrame) -> np.ndarray:
+    """Predict with a stored model, aligning the feature columns to the model's own order."""
+    booster = load_model(path)
+    columns = booster.feature_name()
+    missing = [c for c in columns if c not in X.columns]
+    if missing:
+        raise ValueError(f"Stored model needs features that are not in the table: {missing}")
+    return np.asarray(booster.predict(X[columns]), dtype=float)

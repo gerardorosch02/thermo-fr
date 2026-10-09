@@ -13,12 +13,12 @@ Files written by `export_published`:
     scores.csv         daily MAE and RMSE of each version against actuals and benchmark
     tomorrow.csv       the latest honest forecast for the next delivery day, hourly
     error_band.csv     backtest error percentiles by hour (the dashboard's shaded band)
-    history.csv        the hourly inputs table the model is trained on (prices, load and
-                       renewables forecasts, weather), needed to refit in the workflow
+    model/honest.txt   the LightGBM model refitted monthly by the workflow (see refit.py)
+    model/honest.json  its training period, fit date and holdout metrics
     status.json        when the dataset was written, the last run and the attributions
 
-Only the honest feature set is published. The data status and timing log stay
-in the local database.
+Only the honest feature set is published, and at most `days` days of actual
+prices. The inputs history, the data status and the timing log stay local.
 """
 
 import json
@@ -26,7 +26,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from .inputs import INPUT_COLUMNS, load_inputs
 from .store import Store, iso, utc_now
 
 PUBLIC_FEATURE_SET = "honest"
@@ -41,8 +40,7 @@ ATTRIBUTIONS = [
 ]
 
 
-def export_published(store: Store, out_dir=DEFAULT_DIR, inputs_path=Path("data/forecast/inputs.csv"), days: int = 90,
-                     now=None, last_run: dict | None = None) -> dict:
+def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None, last_run: dict | None = None) -> dict:
     """Write the public files. Returns a summary with row counts."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -92,11 +90,10 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, inputs_path=Path("data/f
     )
     band.to_csv(out / "error_band.csv", index=False)
 
-    history_rows = 0
-    if Path(inputs_path).exists():
-        history = load_inputs(inputs_path).reindex(columns=INPUT_COLUMNS)
-        history.round(3).to_csv(out / "history.csv", index_label="timestamp_utc")
-        history_rows = int(len(history))
+    model_meta = {}
+    meta_path = out / "model" / f"{PUBLIC_FEATURE_SET}.json"
+    if meta_path.exists():
+        model_meta = json.loads(meta_path.read_text())
 
     status = {
         "written_at_utc": iso(utc_now(now)),
@@ -107,7 +104,7 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, inputs_path=Path("data/f
         "forecast_versions": int(len(versions)),
         "actual_days": int(actuals["delivery_day"].nunique()) if len(actuals) else 0,
         "scored_versions": int(len(scores)),
-        "history_rows": history_rows,
+        "model": {k: model_meta.get(k) for k in ("fitted_at_utc", "train_from", "train_to", "train_hours", "holdout")} if model_meta else {},
         "last_run": last_run or {},
         "attributions": ATTRIBUTIONS,
         "note": "Forecasts use only information available at 12:00 Paris time on the day before delivery. "
@@ -117,10 +114,10 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, inputs_path=Path("data/f
     return status
 
 
-def import_published(store: Store, in_dir=DEFAULT_DIR, inputs_path=Path("data/forecast/inputs.csv")) -> dict:
-    """Load the published files into a (usually empty) store and restore the inputs history."""
+def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
+    """Load the published files into a (usually empty) store."""
     src = Path(in_dir)
-    summary = {"forecast_versions": 0, "actual_rows": 0, "scores": 0, "history_rows": 0, "error_band_rows": 0}
+    summary = {"forecast_versions": 0, "actual_rows": 0, "scores": 0, "error_band_rows": 0}
     forecasts_path = src / "forecasts.csv"
     if forecasts_path.exists() and forecasts_path.stat().st_size > 0:
         forecasts = pd.read_csv(forecasts_path)
@@ -158,42 +155,5 @@ def import_published(store: Store, in_dir=DEFAULT_DIR, inputs_path=Path("data/fo
         if not band.empty:
             store.save_error_band(band, source=str(band_path))
             summary["error_band_rows"] = int(len(band))
-    history_path = src / "history.csv"
-    if history_path.exists() and inputs_path is not None:
-        inputs_path = Path(inputs_path)
-        if not inputs_path.exists():
-            inputs_path.parent.mkdir(parents=True, exist_ok=True)
-            history = load_inputs(history_path)
-            history.to_csv(inputs_path, index_label="timestamp_utc")
-            summary["history_rows"] = int(len(history))
     return summary
 
-
-def extend_history(inputs_path=Path("data/forecast/inputs.csv"), store: Store | None = None, delivery_day: str | None = None) -> int:
-    """Append the latest stored inputs and actual prices for a delivery day to the history table.
-
-    The morning run fetches the days around the target day but writes them to
-    the store only; this folds the honest inputs of `delivery_day` (and any actual
-    prices the store has) into the CSV history so the next refit sees them.
-    """
-    if store is None or delivery_day is None or not Path(inputs_path).exists():
-        return 0
-    history = load_inputs(inputs_path).reindex(columns=INPUT_COLUMNS)
-    fresh = store.latest_input_values(delivery_day)
-    added = 0
-    if not fresh.empty:
-        fresh = fresh.reindex(columns=[c for c in INPUT_COLUMNS if c in fresh.columns])
-        history = fresh.combine_first(history)
-        added += int(len(fresh))
-    actual_rows = pd.read_sql_query("SELECT timestamp_utc, price FROM actuals", store.conn)
-    if not actual_rows.empty:
-        prices = pd.Series(actual_rows["price"].to_numpy(), index=pd.to_datetime(actual_rows["timestamp_utc"], utc=True), name="price_eur_mwh")
-        history["price_eur_mwh"] = history["price_eur_mwh"].combine_first(prices) if "price_eur_mwh" in history else prices
-        missing = prices.index.difference(history.index)
-        if len(missing):
-            history = history.reindex(history.index.union(missing))
-            history.loc[missing, "price_eur_mwh"] = prices.loc[missing]
-            added += int(len(missing))
-    history = history.reindex(columns=INPUT_COLUMNS).sort_index()
-    history.to_csv(inputs_path, index_label="timestamp_utc")
-    return added

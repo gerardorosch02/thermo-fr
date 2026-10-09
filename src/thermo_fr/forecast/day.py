@@ -19,7 +19,7 @@ from ..data.entsoe_client import EntsoeSource
 from ..data.weather_forecast import OpenMeteoForecastSource
 from .features import build_features, feature_timings
 from .inputs import INPUT_COLUMNS
-from .models import fit_predict
+from .models import fit_predict, predict_with
 from .timing import check_point_in_time
 
 HISTORY_DAYS = 10  # refreshed around the target day so that lags and the day itself are current
@@ -44,14 +44,16 @@ def merge_inputs(inputs: pd.DataFrame, fresh: pd.DataFrame | None) -> pd.DataFra
     merged = inputs.copy()
     if fresh is not None and not fresh.empty:
         merged = fresh.combine_first(merged).sort_index()
-    return merged.reindex(columns=INPUT_COLUMNS)
+    return merged.reindex(columns=INPUT_COLUMNS).astype(float)
 
 
 def forecast_day(date: str, inputs: pd.DataFrame, fresh: pd.DataFrame | None = None, model: str = "gbm", log=print,
-                 feature_set: str = "honest") -> pd.DataFrame:
+                 feature_set: str = "honest", model_file=None) -> pd.DataFrame:
     """Hourly forecast curve for delivery day `date` (Paris) with one feature set.
 
-    The returned frame carries `train_hours` and `passes_gate` in its attrs.
+    With `model_file` the stored LightGBM model is used instead of refitting, so
+    only the days around `date` are needed in `inputs` (the lags reach back a
+    week). The returned frame carries `train_hours` and `passes_gate` in attrs.
     """
     day = pd.Timestamp(date).normalize()
     merged = merge_inputs(inputs, fresh)
@@ -70,8 +72,13 @@ def forecast_day(date: str, inputs: pd.DataFrame, fresh: pd.DataFrame | None = N
         raise ValueError(f"ENTSO-E wind and solar forecasts for {date} are not available yet.")
     train = table.info["delivery_day"] < day
     train_hours = int(table.y[train].notna().sum())
-    log(f"Fitting {model} ({feature_set}) on {train_hours:,} hours before {date} ...")
-    prediction = fit_predict(model, table.X[train], table.y[train], table.X[rows])
+    if model_file is not None:
+        log(f"Predicting {feature_set} with the stored model {model_file} ...")
+        prediction = predict_with(model_file, table.X[rows])
+        train_hours = 0
+    else:
+        log(f"Fitting {model} ({feature_set}) on {train_hours:,} hours before {date} ...")
+        prediction = fit_predict(model, table.X[train], table.y[train], table.X[rows])
     curve = pd.DataFrame(
         {
             "hour": table.info.loc[rows, "hour"].to_numpy(),

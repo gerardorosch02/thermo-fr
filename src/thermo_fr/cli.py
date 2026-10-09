@@ -147,12 +147,8 @@ def cmd_morning_run(args) -> None:
     store = Store(Path(args.db))
     try:
         summary = morning_run(store, args.date, kind=args.kind, inputs_path=Path(args.data), cache_dir=Path(args.cache_dir),
-                              reports_dir=Path(args.reports_dir), feature_sets=tuple(args.feature_sets))
-        if args.extend_history:
-            from .forecast.publish import extend_history
-
-            added = extend_history(Path(args.extend_history), store, summary["delivery_day"])
-            print(f"history extended by {added} rows")
+                              reports_dir=Path(args.reports_dir), feature_sets=tuple(args.feature_sets),
+                              model_file=Path(args.model_file) if args.model_file else None)
     finally:
         store.close()
     print(f"morning-run {summary['status']}: delivery day {summary['delivery_day']}, "
@@ -167,11 +163,6 @@ def cmd_settle(args) -> None:
     store = Store(Path(args.db))
     try:
         summary = settle(store, cache_dir=Path(args.cache_dir), kind=args.kind)
-        if args.extend_history:
-            from .forecast.publish import extend_history
-
-            for day in summary["actual_days"]:
-                extend_history(Path(args.extend_history), store, day)
     finally:
         store.close()
     print(f"settle {summary['status']}: actual prices for {summary['actual_days'] or 'no new days'}, "
@@ -186,11 +177,27 @@ def cmd_publish(args) -> None:
     try:
         last = store.runs(limit=1)
         last_run = last.iloc[0].to_dict() if len(last) else None
-        status = export_published(store, Path(args.out), inputs_path=Path(args.data), days=args.days, last_run=last_run)
+        status = export_published(store, Path(args.out), days=args.days, last_run=last_run)
     finally:
         store.close()
-    print(f"Published {status['forecast_versions']} forecast versions, {status['actual_days']} actual days, "
-          f"{status['scored_versions']} scores and {status['history_rows']:,} history rows to {args.out}")
+    print(f"Published {status['forecast_versions']} forecast versions, {status['actual_days']} actual days and "
+          f"{status['scored_versions']} scores to {args.out}")
+
+
+def cmd_refit_model(args) -> None:
+    from .forecast.jobs import setup_logging
+    from .forecast.refit import fetch_and_refit, refit_from_file
+
+    setup_logging("refit-model", logs_dir=Path(args.logs_dir))
+    if args.from_file:
+        meta = refit_from_file(Path(args.data), out_dir=Path(args.out))
+    else:
+        end = args.end or first_of_this_month()
+        meta = fetch_and_refit(args.start, end, out_dir=Path(args.out), cache_dir=Path(args.cache_dir), csv_dir=Path(args.csv_dir),
+                               inputs_path=Path(args.data))
+    holdout = meta.get("holdout") or {}
+    print(f"Model fitted on {meta['train_hours']:,} hours ({meta['train_from']} to {meta['train_to']}), saved under {args.out}; "
+          f"holdout MAE {holdout.get('mae')} against benchmark {holdout.get('naive_mae')}")
 
 
 def cmd_import_published(args) -> None:
@@ -199,7 +206,7 @@ def cmd_import_published(args) -> None:
 
     store = Store(Path(args.db))
     try:
-        summary = import_published(store, Path(args.src), inputs_path=Path(args.data))
+        summary = import_published(store, Path(args.src))
     finally:
         store.close()
     print(f"Imported {summary} from {args.src}")
@@ -280,8 +287,7 @@ def main(argv=None) -> None:
     morning.add_argument("--reports-dir", default="reports/forecast", help="backtest predictions for the error band")
     morning.add_argument("--logs-dir", default="logs")
     morning.add_argument("--feature-sets", nargs="+", default=["honest", "extended"], choices=("honest", "extended"))
-    morning.add_argument("--extend-history", default=None, metavar="INPUTS_CSV",
-                         help="append the day's stored inputs to this history table after the run (used by the workflow)")
+    morning.add_argument("--model-file", default=None, help="predict with this stored LightGBM model instead of refitting")
     morning.set_defaults(func=cmd_morning_run)
 
     stl = sub.add_parser("settle", help="Fetch actual prices and score the stored forecasts")
@@ -289,20 +295,28 @@ def main(argv=None) -> None:
     stl.add_argument("--db", default="data/forecast.db")
     stl.add_argument("--cache-dir", default="data/cache")
     stl.add_argument("--logs-dir", default="logs")
-    stl.add_argument("--extend-history", default=None, metavar="INPUTS_CSV", help="fold the settled prices into this history table")
     stl.set_defaults(func=cmd_settle)
+
+    refit = sub.add_parser("refit-model", help="Fetch the full history, fit the honest model, save model file and metadata")
+    refit.add_argument("--start", default="2021-01-01")
+    refit.add_argument("--end", default=None, help="exclusive; default first day of the current month")
+    refit.add_argument("--out", default="published/model")
+    refit.add_argument("--data", default="data/forecast/inputs.csv", help="where the fetched history is saved (local only)")
+    refit.add_argument("--from-file", action="store_true", help="refit from --data without fetching")
+    refit.add_argument("--cache-dir", default="data/cache")
+    refit.add_argument("--csv-dir", default="data/csv")
+    refit.add_argument("--logs-dir", default="logs")
+    refit.set_defaults(func=cmd_refit_model)
 
     pub = sub.add_parser("publish", help="Export the public dataset (honest forecasts, actuals, scores) to published/")
     pub.add_argument("--out", default="published")
     pub.add_argument("--db", default="data/forecast.db")
-    pub.add_argument("--data", default="data/forecast/inputs.csv")
     pub.add_argument("--days", type=int, default=90)
     pub.set_defaults(func=cmd_publish)
 
     imp = sub.add_parser("import-published", help="Load published/ into a store (used by the GitHub Actions workflow)")
     imp.add_argument("--from", dest="src", default="published")
     imp.add_argument("--db", default="data/forecast.db")
-    imp.add_argument("--data", default="data/forecast/inputs.csv")
     imp.set_defaults(func=cmd_import_published)
 
     dash = sub.add_parser("dashboard", help="Open the local Streamlit dashboard")

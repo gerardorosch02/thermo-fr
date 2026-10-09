@@ -125,8 +125,13 @@ def refresh_error_band(store: Store, reports_dir=Path("reports/forecast"), now=N
 
 def morning_run(store: Store, delivery_day: str | None = None, kind: str = "scheduled", inputs_path=Path("data/forecast/inputs.csv"),
                 cache_dir=Path("data/cache"), reports_dir=Path("reports/forecast"), entsoe=None, weather=None, now=None,
-                feature_sets=FEATURE_SETS) -> dict:
-    """One morning run. Returns a summary dict; never raises for a source failure."""
+                feature_sets=FEATURE_SETS, model_file=None) -> dict:
+    """One morning run. Returns a summary dict; never raises for a source failure.
+
+    With `model_file` (a LightGBM file written by refit) the forecast is a
+    prediction with that model instead of a refit, and no inputs history is
+    needed beyond the days fetched around the delivery day.
+    """
     day = delivery_day or next_delivery_day(now)
     run_id = store.start_run("morning-run", kind, day, now=now)
     log.info("morning-run %s for delivery day %s (run %d)", kind, day, run_id)
@@ -141,9 +146,10 @@ def morning_run(store: Store, delivery_day: str | None = None, kind: str = "sche
         issued_at = pd.Timestamp(now).tz_convert("UTC") if now is not None else pd.Timestamp.now(tz="UTC")
         for feature_set in feature_sets:
             try:
-                curve = forecast_day(day, merged, None, log=log.info, feature_set=feature_set)
+                curve = forecast_day(day, merged, None, log=log.info, feature_set=feature_set, model_file=model_file)
+                model_name = "gbm" if model_file is None else f"gbm:{Path(model_file).name}"
                 forecast_id = store.save_forecast(
-                    run_id, day, feature_set, issued_at, "gbm", kind, curve.attrs["train_hours"], curve.attrs["passes_gate"], curve
+                    run_id, day, feature_set, issued_at, model_name, kind, curve.attrs["train_hours"], curve.attrs["passes_gate"], curve
                 )
                 summary["forecasts"][feature_set] = forecast_id
                 log.info("%s forecast for %s stored as version %d (issued %s)", feature_set, day, forecast_id, issued_at)
