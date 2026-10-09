@@ -14,10 +14,11 @@ Data items used (codes from the platform's RESTful API guide):
                           one TimeSeries per psrType: B16 solar, B18 wind
                           offshore, B19 wind onshore
 - Actual generation per type documentType A75, processType A16, in_Domain,
-                          psrType B19 (wind onshore) or B18 (wind offshore);
-                          France reports it in 15-minute steps, averaged to
-                          hourly here. Used only to calibrate the pre-gate
-                          wind proxy (forecast/wind_proxy.py).
+                          psrType B19 (wind onshore), B18 (wind offshore) or
+                          B16 (solar); France reports it in 15-minute steps,
+                          averaged to hourly here. Used only to calibrate the
+                          pre-gate wind and solar proxies
+                          (forecast/wind_proxy.py, forecast/solar_proxy.py).
 
 Limits, as published by ENTSO-E: at most one year per request for these
 items, at most 400 requests per minute per token, and a ten minute ban after
@@ -233,6 +234,8 @@ class EntsoeApi:
             return {"documentType": "A75", "processType": "A16", "in_Domain": self.eic, "psrType": "B19"}
         if item == "wind_offshore_actual":
             return {"documentType": "A75", "processType": "A16", "in_Domain": self.eic, "psrType": "B18"}
+        if item == "solar_actual":
+            return {"documentType": "A75", "processType": "A16", "in_Domain": self.eic, "psrType": "B16"}
         raise ValueError(f"Unknown data item {item!r}")
 
     def _download(self, params: dict) -> bytes:
@@ -305,3 +308,8 @@ class EntsoeApi:
             parts = self.query(item, start, end)
             columns[name] = clip(combine_resolutions(parts), start, end)
         return pd.DataFrame(columns)
+
+    def solar_generation_actual(self, start: str, end: str) -> pd.Series:
+        """Actual solar generation in MW, hourly means (NaN where not reported)."""
+        parts = self.query("solar_actual", start, end)
+        return clip(combine_resolutions(parts), start, end).rename("solar_mw")

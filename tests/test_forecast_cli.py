@@ -66,6 +66,29 @@ def test_forecast_refuses_days_without_issued_weather_or_load_forecast(inputs_fi
         forecast_day("2024-09-01", inputs, log=lambda *_: None)
 
 
+def test_morning_run_defaults_to_the_published_model_and_refit_opts_out(monkeypatch, tmp_path):
+    from pathlib import Path
+
+    from thermo_fr.forecast import jobs
+
+    calls = []
+
+    def fake_run(store, date, **kw):
+        calls.append(kw)
+        return {"status": "ok", "delivery_day": "2026-10-10", "forecasts": {"honest": 1}, "errors": []}
+
+    monkeypatch.setattr(jobs, "morning_run", fake_run)
+    monkeypatch.setattr(jobs, "setup_logging", lambda *a, **k: None)
+    db = str(tmp_path / "db.sqlite")
+    cli.main(["morning-run", "--db", db, "--logs-dir", str(tmp_path)])
+    cli.main(["morning-run", "--db", db, "--logs-dir", str(tmp_path), "--refit"])
+    cli.main(["morning-run", "--db", db, "--logs-dir", str(tmp_path), "--model-file", "elsewhere/model.txt"])
+    assert calls[0]["model_file"] == Path("published/model/honest.txt")  # the file the GitHub workflow predicts with
+    assert calls[0]["solar_weights"] == Path("published/model/solar_proxy.json") and calls[0]["wind_weights"] == Path("published/model/wind_proxy.json")
+    assert calls[1]["model_file"] is None
+    assert calls[2]["model_file"] == Path("elsewhere/model.txt")
+
+
 def test_forecast_merges_a_fresh_window_over_the_stored_table(inputs_file):
     inputs = pd.read_csv(inputs_file, index_col=0)
     inputs.index = pd.to_datetime(inputs.index, utc=True)

@@ -33,6 +33,8 @@ All series are hourly UTC, 2021-01-01 to 2026-09-30, cached under `data/cache/` 
 | The same, proxy | Open-Meteo historical-forecast API, best_match | complete from 2021; training proxy only |
 | 100 m wind at 17 wind-region points, as issued | Open-Meteo previous-runs API, best_match, lead day 2 | from 2024-02-17; input of the wind proxy |
 | Actual wind onshore and offshore generation | ENTSO-E A75 / A16, psrType B19, B18 | 15-minute, averaged to hourly; calibration target of the wind proxy and definition of the windy-day slice, never a feature |
+| Shortwave radiation at 21 solar-region points, as issued | Open-Meteo previous-runs API, best_match, lead day 2 | from 2024-01-20; input of the solar proxy |
+| Actual solar generation | ENTSO-E A75 / A16, psrType B16 | 15-minute, averaged to hourly; 29 hours missing since 2024; calibration target of the solar proxy and definition of the sunny-day slice, never a feature |
 
 Temperature is population weighted over the eight cities, as in the thermosensitivity model; wind and radiation are plain means, since they stand for renewable output rather than heating demand.
 
@@ -44,11 +46,11 @@ ENTSO-E curve type A03 omits a point when its value repeats the previous one; ea
 
 Target: the hourly French day-ahead price in Paris delivery hours (23 rows on the spring day, 25 on the autumn day).
 
-Features (honest set): hour, weekday, month, day of year, public holiday; ENTSO-E load forecast; temperature, 100 m wind and radiation as forecast two days ahead; the wind generation proxy (see below); price lags for the same local hour on D-1, D-2 and D-7, and the mean, minimum and maximum of D-1 and the mean of D-7. The lagged prices stand in for gas and carbon, which are not inputs here. Extended set: honest plus the ENTSO-E solar and wind forecasts and the residual load (load forecast minus solar minus wind).
+Features (honest set): hour, weekday, month, day of year, public holiday, and the calendar structure of `daytypes.py` (day type: working day, Saturday, Sunday or holiday; bridge day; eve of a holiday; day after a holiday; the 24 December to 2 January break; the number of days back to the most recent day of the same type); ENTSO-E load forecast; temperature, 100 m wind and radiation as forecast two days ahead; the wind and solar generation proxies (see below); price lags for the same local hour on D-1, D-2 and D-7, the mean, minimum and maximum of D-1 and the mean of D-7, and the same hour and the daily mean of the most recent earlier day of the same type (the previous Friday for a Monday, the previous Saturday for a Saturday, the previous Sunday or holiday for a holiday). The lagged prices stand in for gas and carbon, which are not inputs here. Extended set: honest plus the ENTSO-E solar and wind forecasts and the residual load (load forecast minus solar minus wind).
 
 Weather for a row is the as-issued forecast when the archive has all three variables for that hour, else the proxy. Rows with proxy weather are kept for training but excluded from the strict metrics; in the 2024 to 2025 test window this affects 2024-01-01 to 2024-02-16.
 
-A third set, `honest_base`, is the honest set without the wind proxy; it exists only to measure what the proxy adds.
+Reduced sets exist only to measure what each addition is worth: `honest_base` has neither proxy and only the plain calendar (the original honest set of 2026-10-05), `honest_wind` adds the wind proxy (the honest set of 2026-10-09), `honest_solar` and `honest_calendar` add to `honest_wind` only the solar proxy or only the calendar structure with the same-type lag.
 
 Models: same hour on D-1 and same hour on D-7 as benchmarks; LightGBM (800 trees, learning rate 0.03, 63 leaves, bagging and feature subsampling); ridge regression on the same information with one-hot hour, weekday and month.
 
@@ -156,6 +158,39 @@ The windiest days are the 10% of strict test days with the highest mean actual w
 The one slice that gets worse is the top 5% price hours (+1.56 EUR/MWh). Those are mostly cold, calm winter evenings where the proxy adds little information and a few more trees spent on wind cost some sharpness at the top; the linear model is unchanged there. The regime-jump problem of January 2025 is untouched (32.63 to 30.59).
 
 The published model was refitted with the proxy (`thermo-fr refit-model --from-file`): holdout September 2026 MAE 27.83 against 36.80 for the baseline, where the previous model had 29.33. The error band in the dashboards now comes from this backtest's predictions.
+
+## Solar generation proxy and calendar structure (2026-10-09, later)
+
+Two more additions to the honest set, measured the same way. The reissue check for Saturday 2026-10-10 (below) had shown every variant far above an auction that went to zero at midday, so a pre-gate solar input and a better reading of the working calendar were the obvious next steps.
+
+**Solar proxy** (`forecast/solar_proxy.py`, sharing the method of the wind proxy in `forecast/gen_proxy.py`): shortwave radiation as forecast two days ahead (Open-Meteo previous runs, lead day 2, archived from 2024-01-20) at 21 points in the solar regions (Landes, Gironde, Lot-et-Garonne, Charente, Toulouse, Herault, Gard, Roussillon, Provence, Var, Alpes-de-Haute-Provence, Drome, Lyon, Nantes, Orleans, Champagne, Alsace, Bourgogne, Paris, Lille, Rennes). Each point's irradiance divided by 1,000 W/m2 is its capacity factor; non-negative least squares against ENTSO-E actual solar generation (A75, psrType B16) gives one weight in MW per point, refitted at the start of each month on the trailing 365 days ending two days before the month (`timing.py` rule `solar_proxy`, the same as the wind rule). Tilted panels and module temperature make the ratio of generation to horizontal irradiance drift through the year, and the fleet grows by about a fifth a year, so shorter windows were tried: on the proxy's own error against actual generation (2024-05 to 2026-09, 21,163 hours) windows of 60, 90, 120, 180, 240 and 365 days were all within 3 percent of each other in MAE (1,039 to 1,075 MW), the 365-day window lowest, so it keeps the wind proxy's window. The weights fitted 2025-10-01 to 2026-09-30 sum to 22,403 MW with R2 0.90 and are saved to `published/model/solar_proxy.json`.
+
+| Series | MAE | Bias | R2 |
+|---|---|---|---|
+| Solar proxy (pre-gate, this work) | 1,039 MW | -471 MW | 0.878 |
+| ENTSO-E day-ahead solar forecast (post-gate, for reference) | 652 MW | +49 MW | 0.932 |
+
+**Calendar structure** (`forecast/daytypes.py`): weekday and public holiday were already features, and the D-7 lag is already the same weekday of the previous week; what was missing is how the French calendar behaves around holidays. Added: the day type (working day, Saturday, Sunday or holiday), bridge days (a working day between two non-working days, such as the Friday after Ascension), the eve and the day after a public holiday, the 24 December to 2 January break, the number of days back to the most recent day of the same type, and the same hour and the daily mean of that comparable day as price lags (the previous Friday for a Monday, the previous Saturday for a Saturday, the previous Sunday or holiday for a holiday). The comparable day is D-1 or earlier, so its price was published at the latest at 13:00 Paris on D-2 (`timing.py` rule `price_lag_same_type`).
+
+Backtest, same walk-forward (inputs to 2026-09-30, test window 2024-01 to 2025-12, LightGBM 800 trees). `honest_wind` is the honest set of the previous section; `honest_solar` and `honest_calendar` add one of the two to it; `honest` adds both. Strict rows, 2024-02-17 to 2025-12-31, GBM MAE in EUR/MWh:
+
+| Hours | Count | D-1 baseline | honest_wind | + solar proxy | + calendar | honest (both) | Change vs honest_wind | extended |
+|---|---|---|---|---|---|---|---|---|
+| all | 16,409 | 20.68 | 15.90 | 15.65 | 15.61 | 15.51 | -0.39 (-2.5%) | 14.93 |
+| peak (08 to 20, weekdays) | 5,856 | 22.03 | 17.37 | 16.94 | 16.89 | 16.77 | -0.60 (-3.5%) | 15.97 |
+| off peak | 10,553 | 19.94 | 15.09 | 14.93 | 14.90 | 14.82 | -0.27 (-1.8%) | 14.36 |
+| weekends | 4,697 | 19.85 | 14.20 | 14.12 | 14.12 | 13.92 | -0.28 (-2.0%) | 13.76 |
+| public holidays (21 days) | 504 | 24.70 | 18.89 | 18.39 | 18.14 | 16.91 | -1.98 (-10.5%) | 15.25 |
+| sunniest 10% of days (actual solar at or above 5,184 MW daily mean, 69 days) | 1,656 | 19.41 | 15.94 | 15.59 | 15.64 | 15.71 | -0.23 (-1.4%) | 15.75 |
+| windiest 10% of days | 1,656 | 27.46 | 18.98 | 18.11 | 18.54 | 17.87 | -1.11 (-5.8%) | 15.87 |
+| top 5% price hours | 821 | 25.94 | 24.11 | 24.30 | 22.07 | 23.21 | -0.90 (-3.7%) | 22.09 |
+| negative price hours | 857 | 15.61 | 15.79 | 15.07 | 15.15 | 14.39 | -1.40 (-8.9%) | 13.16 |
+
+The two additions are worth about the same on their own (0.25 and 0.29 EUR/MWh overall) and add up almost fully. Holidays gain most (16.91 against 18.89, 13 of 21 days improved) and the midday hours of the sunniest days go from 13.71 to 12.95 (414 hours, mean price 15.1); the sunniest days as a whole move little because their error sits in the evening ramp, not at noon. The top 5% price hours recover part of what the wind proxy had cost (23.21 against 24.11, still above the 22.55 of the set with neither proxy), so that known weakness stays in the Limitations text. Month by month the new set beats `honest_wind` in 16 of 23 months; the largest gain is January 2025 (27.27 against 30.59) and the largest loss December 2024 (21.49 against 20.64). On the strict rows from 2024-05, where both proxies exist, the figures are 15.95 (`honest_wind`), 15.46 (`honest`) and 14.91 (`extended`, post-gate ENTSO-E forecasts), so the honest set now closes about half of the remaining gap to the extended one.
+
+The published model (`published/model/honest.txt`, 300 trees, 31 leaves) was refitted with the new set: holdout September 2026 MAE 27.73 against 36.80 for the baseline (27.83 with `honest_wind`). Because the reissue check below showed the 300-tree model far from the 800-tree refit on one day, the published settings were walked forward over 2025 as well: honest 15.47 against 15.19 for the backtest settings, `honest_wind` 15.73 against 15.76, so the smaller file costs at most 0.3 EUR/MWh on average and the single-day gap was not systematic.
+
+**Reissue check, delivery 2026-10-10** (a Saturday; inputs as stored by the 11:00 Paris run of 2026-10-09, prices of the day blanked, proxies from point forecasts of 10-08 and weights fitted to 2026-09-30). The auction's base was 51.26 EUR/MWh with 0 from 13:00 to 16:00 and 124 to 173 in the evening; the same-hour-previous-day baseline was 75.56. Base (24-hour mean) by variant, live refits with 800 trees: 74.08 without proxies (the version actually issued), 69.13 with the wind proxy, 63.14 with wind and solar proxies, 72.71 with the wind proxy and the calendar structure, 72.83 with everything. Stored 300-tree models: 83.05 without proxies, 74.01 with the wind proxy (the model published on 10-09), 88.28 with the new set. Every variant stayed well above the auction; the new published model's evening (135 to 148 against 137 to 173) was the closest of any run, its night and midday were too high. One day decides nothing, which is why the backtest above is the evidence.
 
 ## Things to double-check
 

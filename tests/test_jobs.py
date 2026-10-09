@@ -6,8 +6,9 @@ import pandas as pd
 import pytest
 
 from test_forecast_features import synthetic_inputs
+from thermo_fr.data.solar_points import POINT_COLUMNS as SOLAR_POINT_COLUMNS
 from thermo_fr.data.wind_points import POINT_COLUMNS
-from thermo_fr.forecast import models
+from thermo_fr.forecast import models, solar_proxy, wind_proxy
 from thermo_fr.forecast.jobs import day_hours, morning_run, next_delivery_day, presence, settle, setup_logging
 from thermo_fr.forecast.store import Store
 from thermo_fr.forecast.wind_proxy import calibrate, save_weights
@@ -55,14 +56,20 @@ class FakeWeather:
 
 
 class FakeWindPoints:
+    columns = POINT_COLUMNS
+
     def __init__(self, table, down=False):
         self.table, self.down = table, down
 
     def fetch_points(self, start, end):
         if self.down:
             raise TimeoutError("open-meteo timed out")
-        part = self.table.loc[start:end, POINT_COLUMNS]
+        part = self.table.loc[start:end, self.columns]
         return part[part.index < pd.Timestamp(end, tz="UTC")]
+
+
+class FakeSolarPoints(FakeWindPoints):
+    columns = SOLAR_POINT_COLUMNS
 
 
 @pytest.fixture
@@ -79,10 +86,17 @@ def weights(table, tmp_path):
     return save_weights(calibrate(before, actual), tmp_path / "model" / "wind_proxy.json")
 
 
+@pytest.fixture
+def solar_weights(table, tmp_path):
+    before = table[table.index < "2024-04-01"]
+    return save_weights(solar_proxy.calibrate(before, before["solar_mw"]), tmp_path / "model" / "solar_proxy.json")
+
+
 def run(store, table, history, tmp_path, weights, entsoe=None, weather=None, now=NOW, **kw):
+    solar = kw.pop("solar_weights", tmp_path / "model" / "solar_proxy.json")
     return morning_run(store, DAY, kind="test", inputs_path=history, entsoe=entsoe or FakeEntsoe(table), weather=weather or FakeWeather(table),
                        now=now, reports_dir=tmp_path / "none", wind_points=kw.pop("wind_points", None) or FakeWindPoints(table),
-                       wind_weights=weights, **kw)
+                       wind_weights=weights, solar_points=kw.pop("solar_points", None) or FakeSolarPoints(table), solar_weights=solar, **kw)
 
 
 @pytest.fixture
@@ -114,14 +128,16 @@ def test_presence_counts_complete_hours_only():
     assert presence(pd.Series(float("nan"), index=hours), DAY) == ("absent", 0, None)
 
 
-def test_morning_run_stores_both_feature_sets_and_the_timing_log(store, table, history, tmp_path, weights):
+def test_morning_run_stores_both_feature_sets_and_the_timing_log(store, table, history, tmp_path, weights, solar_weights):
     entsoe = FakeEntsoe(table, revision="3")
     summary = run(store, table, history, tmp_path, weights, entsoe=entsoe)
     assert summary["status"] == "ok" and set(summary["forecasts"]) == {"honest", "extended"} and summary["errors"] == []
     assert summary["error_band"] == []
     status = store.latest_status(DAY)
-    assert set(status.index) == {"load_forecast", "wind_solar_forecast", "prices", "weather_issued", "wind_points", "wind_proxy"}
+    assert set(status.index) == {"load_forecast", "wind_solar_forecast", "prices", "weather_issued", "wind_points", "wind_proxy",
+                                 "solar_points", "solar_proxy"}
     assert status.loc["wind_proxy", "status"] == "present" and status.loc["wind_proxy", "hours"] == 24
+    assert status.loc["solar_proxy", "status"] == "present" and status.loc["solar_proxy", "hours"] == 24
     assert status.loc["load_forecast", "status"] == "present" and status.loc["load_forecast", "hours"] == 24
     assert status.loc["load_forecast", "revision"] == "3"
     log = store.timing_log().set_index("item")
@@ -133,14 +149,15 @@ def test_morning_run_stores_both_feature_sets_and_the_timing_log(store, table, h
     assert honest_meta["issued_at_utc"] == "2024-04-09T07:30:00Z" and honest_meta["kind"] == "test"
     inputs = store.latest_input_values(DAY)
     assert len(inputs) == 24 and inputs["load_fc_mw"].notna().all() and inputs["wind_proxy_mw"].notna().all()
-    # the proxy applied to the fresh point forecasts tracks the synthetic generation
+    # the proxies applied to the fresh point forecasts track the synthetic generation
     actual = (table.loc[inputs.index, "wind_onshore_mw"] + table.loc[inputs.index, "wind_offshore_mw"])
     assert (inputs["wind_proxy_mw"] - actual).abs().mean() < 1500
+    assert inputs["solar_proxy_mw"].notna().all() and (inputs["solar_proxy_mw"] - table.loc[inputs.index, "solar_mw"]).abs().mean() < 400
     runs = store.runs()
     assert runs.iloc[0]["status"] == "ok" and runs.iloc[0]["delivery_day"] == DAY
 
 
-def test_second_run_adds_a_version_and_counts_changes(store, table, history, tmp_path, weights):
+def test_second_run_adds_a_version_and_counts_changes(store, table, history, tmp_path, weights, solar_weights):
     run(store, table, history, tmp_path, weights)
     bumped = table.copy()
     bumped.loc[day_hours(DAY), "load_fc_mw"] += 1000.0
@@ -153,7 +170,7 @@ def test_second_run_adds_a_version_and_counts_changes(store, table, history, tmp
     assert log.loc["prices", "changes"] == 0 and log.loc["load_forecast", "checks"] == 2
 
 
-def test_wind_solar_down_gives_partial_run_with_honest_forecast_only(store, table, history, tmp_path, weights):
+def test_wind_solar_down_gives_partial_run_with_honest_forecast_only(store, table, history, tmp_path, weights, solar_weights):
     summary = run(store, table, history, tmp_path, weights, entsoe=FakeEntsoe(table, down=("wind_solar_forecast",)))
     assert summary["status"] == "partial" and list(summary["forecasts"]) == ["honest"]
     status = store.latest_status(DAY)
@@ -163,26 +180,37 @@ def test_wind_solar_down_gives_partial_run_with_honest_forecast_only(store, tabl
     assert "wind_solar_forecast" in store.runs().iloc[0]["message"]
 
 
-def test_everything_down_is_a_failed_run_not_a_crash(store, table, history, tmp_path, weights):
+def test_everything_down_is_a_failed_run_not_a_crash(store, table, history, tmp_path, weights, solar_weights):
     entsoe = FakeEntsoe(table, down=("load_forecast", "wind_solar_forecast", "prices"))
     summary = run(store, table, history, tmp_path, weights, entsoe=entsoe, weather=FakeWeather(table, down=True),
-                  wind_points=FakeWindPoints(table, down=True))
+                  wind_points=FakeWindPoints(table, down=True), solar_points=FakeSolarPoints(table, down=True))
     assert summary["status"] == "failed" and summary["forecasts"] == {}
     assert store.runs().iloc[0]["status"] == "failed"
     assert (store.latest_status(DAY)["status"] == "error").all()
     assert "no wind point forecasts" in store.latest_status(DAY).loc["wind_proxy", "message"]
+    assert "no solar point forecasts" in store.latest_status(DAY).loc["solar_proxy", "message"]
 
 
-def test_missing_wind_weights_is_recorded_and_the_forecast_still_runs(store, table, history, tmp_path):
+def test_missing_proxy_weights_are_recorded_and_the_forecast_still_runs(store, table, history, tmp_path, solar_weights):
     summary = run(store, table, history, tmp_path, tmp_path / "absent.json", feature_sets=("honest",))
     assert summary["status"] == "partial" and list(summary["forecasts"]) == ["honest"]
     status = store.latest_status(DAY)
-    assert status.loc["wind_points", "status"] == "present"
+    assert status.loc["wind_points", "status"] == "present" and status.loc["solar_proxy", "status"] == "present"
     assert status.loc["wind_proxy", "status"] == "error" and "refit-model" in status.loc["wind_proxy", "message"]
-    assert store.latest_input_values(DAY)["wind_proxy_mw"].isna().all()
+    inputs = store.latest_input_values(DAY)
+    assert inputs["wind_proxy_mw"].isna().all() and inputs["solar_proxy_mw"].notna().all()
 
 
-def test_missing_load_forecast_for_the_day_is_recorded_as_absent(store, table, history, tmp_path, weights):
+def test_a_missing_model_file_is_recorded_and_the_forecast_is_fitted_live(store, table, history, tmp_path, weights, solar_weights):
+    summary = run(store, table, history, tmp_path, weights, feature_sets=("honest",), model_file=tmp_path / "model" / "absent.txt")
+    assert summary["status"] == "partial" and list(summary["forecasts"]) == ["honest"]
+    status = store.latest_status(DAY)
+    assert status.loc["model", "status"] == "error" and "refit-model" in status.loc["model", "message"]
+    meta, _ = store.latest_forecast(DAY, "honest")
+    assert meta["model"] == "gbm" and meta["train_hours"] > 0
+
+
+def test_missing_load_forecast_for_the_day_is_recorded_as_absent(store, table, history, tmp_path, weights, solar_weights):
     summary = run(store, table, history, tmp_path, weights, entsoe=FakeEntsoe(table, hide=DAY))
     assert summary["status"] == "failed"
     status = store.latest_status(DAY)
@@ -190,19 +218,20 @@ def test_missing_load_forecast_for_the_day_is_recorded_as_absent(store, table, h
     assert "not available" in status.loc["forecast_honest", "message"]
 
 
-def test_error_band_is_refreshed_from_backtest_predictions(store, table, history, tmp_path, weights):
+def test_error_band_is_refreshed_from_backtest_predictions(store, table, history, tmp_path, weights, solar_weights):
     reports = tmp_path / "reports"
     reports.mkdir()
     hours = list(range(24)) * 20
     pd.DataFrame({"hour": hours, "actual": 50.0, "gbm": [50.0 + (h - 12) / 4 for h in hours], "strict": True}).to_csv(reports / "predictions_honest.csv")
     summary = morning_run(store, DAY, kind="test", inputs_path=history, entsoe=FakeEntsoe(table), weather=FakeWeather(table), now=NOW,
-                          reports_dir=reports, wind_points=FakeWindPoints(table), wind_weights=weights)
+                          reports_dir=reports, wind_points=FakeWindPoints(table), wind_weights=weights, solar_points=FakeSolarPoints(table),
+                          solar_weights=solar_weights)
     assert summary["error_band"] == ["honest"]
     band = store.error_band("honest")
     assert len(band) == 24 and band.loc[0, "p50"] == pytest.approx(-3.0) and store.error_band("extended").empty
 
 
-def test_settle_scores_every_version_against_actuals_and_benchmark(store, table, history, tmp_path, weights):
+def test_settle_scores_every_version_against_actuals_and_benchmark(store, table, history, tmp_path, weights, solar_weights):
     entsoe = FakeEntsoe(table)
     run(store, table, history, tmp_path, weights, entsoe=entsoe)
     run(store, table, history, tmp_path, weights, entsoe=entsoe, now=NOW + pd.Timedelta(hours=2))
@@ -219,7 +248,7 @@ def test_settle_scores_every_version_against_actuals_and_benchmark(store, table,
     assert status.loc["prices", "status"] == "present"
 
 
-def test_settle_with_prices_down_is_partial_or_failed(store, table, history, tmp_path, weights):
+def test_settle_with_prices_down_is_partial_or_failed(store, table, history, tmp_path, weights, solar_weights):
     run(store, table, history, tmp_path, weights)
     settled = settle(store, entsoe=FakeEntsoe(table, down=("prices",)), now=pd.Timestamp("2024-04-09T13:00Z"), kind="test")
     assert settled["status"] == "failed" and settled["scored"] == 0 and settled["errors"]

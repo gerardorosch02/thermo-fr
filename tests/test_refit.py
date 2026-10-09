@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from test_forecast_features import synthetic_inputs
-from test_jobs import DAY, NOW, FakeEntsoe, FakeWeather, FakeWindPoints
+from test_jobs import DAY, NOW, FakeEntsoe, FakeSolarPoints, FakeWeather, FakeWindPoints
 from thermo_fr.forecast import models
 from thermo_fr.forecast.day import forecast_day
 from thermo_fr.forecast.jobs import morning_run
@@ -30,7 +30,10 @@ def test_refit_writes_model_and_metadata_with_holdout_metrics(tmp_path, table):
     weights = json.loads((tmp_path / "model" / "wind_proxy.json").read_text())
     assert meta["wind_proxy"]["file"] == "wind_proxy.json" and meta["wind_proxy"]["capacity_mw"] == weights["fit"]["capacity_mw"]
     assert weights["fit"]["to"] == "2024-03-31 21:00:00+00:00" and weights["fit"]["mae_mw"] < 1000
-    assert "wind_proxy_mw" in meta["features"]
+    solar = json.loads((tmp_path / "model" / "solar_proxy.json").read_text())
+    assert solar["proxy"] == "solar" and meta["solar_proxy"]["file"] == "solar_proxy.json" and solar["fit"]["mae_mw"] < 400
+    assert solar["fit"]["from"] == "2024-01-10 00:00:00+00:00"  # the first hour with point forecasts
+    assert {"wind_proxy_mw", "solar_proxy_mw", "day_type", "price_lag_same_type"} <= set(meta["features"])
     assert meta["train_from"] == "2023-09-01" and meta["train_to"] == "2024-03-31" and meta["fitted_at_utc"] == "2024-04-01T03:00:00Z"
     assert meta["train_hours"] == int(history["price_eur_mwh"].notna().sum())
     assert meta["features"][0] == "hour" and "load_fc_mw" in meta["features"] and "wind_fc_mw" not in meta["features"]
@@ -59,8 +62,26 @@ def test_morning_run_with_a_model_file_needs_no_history(tmp_path, table):
     store = Store(tmp_path / "db.sqlite")
     summary = morning_run(store, DAY, kind="test", inputs_path=tmp_path / "absent.csv", entsoe=FakeEntsoe(table), weather=FakeWeather(table),
                           now=NOW, reports_dir=tmp_path / "none", feature_sets=("honest",), model_file=tmp_path / "model" / "honest.txt",
-                          wind_points=FakeWindPoints(table), wind_weights=tmp_path / "model" / "wind_proxy.json")
+                          wind_points=FakeWindPoints(table), wind_weights=tmp_path / "model" / "wind_proxy.json",
+                          solar_points=FakeSolarPoints(table), solar_weights=tmp_path / "model" / "solar_proxy.json")
     assert summary["status"] == "ok" and list(summary["forecasts"]) == ["honest"]
     meta, curve = store.latest_forecast(DAY, "honest")
     assert meta["model"] == "gbm:honest.txt" and meta["train_hours"] == 0 and len(curve) == 24
+    store.close()
+
+
+def test_the_stored_model_serves_its_own_feature_set_and_the_others_are_fitted_live(tmp_path, table):
+    refit_model(table[table.index < "2024-04-01"], out_dir=tmp_path / "model", holdout_days=0, log=lambda *_: None)
+    history = tmp_path / "inputs.csv"
+    table[table.index < "2024-04-08"].to_csv(history, index_label="timestamp_utc")
+    store = Store(tmp_path / "db.sqlite")
+    summary = morning_run(store, DAY, kind="test", inputs_path=history, entsoe=FakeEntsoe(table), weather=FakeWeather(table), now=NOW,
+                          reports_dir=tmp_path / "none", feature_sets=("honest", "extended"), model_file=tmp_path / "model" / "honest.txt",
+                          wind_points=FakeWindPoints(table), wind_weights=tmp_path / "model" / "wind_proxy.json",
+                          solar_points=FakeSolarPoints(table), solar_weights=tmp_path / "model" / "solar_proxy.json")
+    assert summary["status"] == "ok" and set(summary["forecasts"]) == {"honest", "extended"}
+    honest, _ = store.latest_forecast(DAY, "honest")
+    extended, _ = store.latest_forecast(DAY, "extended")
+    assert honest["model"] == "gbm:honest.txt" and honest["train_hours"] == 0
+    assert extended["model"] == "gbm" and extended["train_hours"] > 0
     store.close()

@@ -81,9 +81,9 @@ thermo-fr forecast --date 2026-10-06               # one day's curve and chart, 
 thermo-fr timing-probe                             # log which ENTSO-E items already exist for tomorrow
 ```
 
-Results are reported as forecast error (MAE and RMSE) against a naive baseline, the price of the same hour on the previous day. Limitations: the model is not benchmarked against traded market prices (EEX futures or OTC day-ahead quotes), so it makes no claim about beating the market, and the error band on the dashboards is the model's past error, not a probability forecast. A known weakness is the top 5% price hours, typically cold, calm winter evenings when gas sets the price, where the wind proxy made the backtest error slightly worse (24.1 against 22.6 EUR/MWh) while improving every other slice.
+Results are reported as forecast error (MAE and RMSE) against a naive baseline, the price of the same hour on the previous day. Limitations: the model is not benchmarked against traded market prices (EEX futures or OTC day-ahead quotes), so it makes no claim about beating the market, and the error band on the dashboards is the model's past error, not a probability forecast. A known weakness is the top 5% price hours, typically cold, calm winter evenings when gas sets the price, where the generation proxies make the backtest error slightly worse (23.2 against 22.6 EUR/MWh without them) while improving every other slice. Backtest, strict rows 2024-02-17 to 2025-12-31: honest set MAE 15.5 EUR/MWh against 20.7 for the baseline; the wind proxy, the solar proxy and the calendar structure contributed 1.1, 0.25 and 0.3 of that.
 
-Inputs: ENTSO-E day-ahead prices, day-ahead total load forecast and day-ahead wind and solar forecasts (RESTful API, cached under `data/cache/entsoe/`), Open-Meteo weather forecasts for the eight cities as they were issued two days ahead (previous-runs archive, cached under `data/cache/open-meteo/`), and a pre-gate wind generation proxy: 100 m wind forecasts issued two days ahead at 17 points covering the French wind regions, passed through a turbine power curve and weighted by non-negative least squares against ENTSO-E actual wind generation, with the weights refitted at the start of each month on the trailing year (`forecast/wind_proxy.py`). Two feature sets are evaluated: an honest one whose every input is published before the gate, and an extended one that adds the ENTSO-E wind and solar forecasts, which the platform allows until 18:00 on D-1. A test fails if any feature for delivery day D is timestamped after 12:00 Paris on D-1.
+Inputs: ENTSO-E day-ahead prices, day-ahead total load forecast and day-ahead wind and solar forecasts (RESTful API, cached under `data/cache/entsoe/`), Open-Meteo weather forecasts for the eight cities as they were issued two days ahead (previous-runs archive, cached under `data/cache/open-meteo/`), and two pre-gate generation proxies built the same way (`forecast/gen_proxy.py`): 100 m wind forecasts issued two days ahead at 17 points covering the French wind regions, passed through a turbine power curve (`forecast/wind_proxy.py`), and radiation forecasts issued two days ahead at 21 points covering the solar regions, as a ratio to 1,000 W/m2 (`forecast/solar_proxy.py`), each weighted in MW by non-negative least squares against ENTSO-E actual generation of that type, with the weights refitted at the start of each month on the trailing year. The calendar goes beyond hour, weekday and month: public holidays, the day type (working day, Saturday, Sunday or holiday), bridge days, the eve and the day after a holiday, the Christmas to New Year break, and the price of the most recent earlier day of the same type as an extra lag (`forecast/daytypes.py`). The honest feature set uses only inputs published before the gate; the `honest_wind` and `honest_base` variants drop the later additions so the backtest can measure them, and an extended set adds the ENTSO-E wind and solar forecasts, which the platform allows until 18:00 on D-1. A test fails if any feature for delivery day D is timestamped after 12:00 Paris on D-1.
 
 ## Scheduled jobs and dashboard
 
@@ -91,12 +91,12 @@ Two jobs keep a local SQLite database (`data/forecast.db`) up to date, and a Str
 
 ```bash
 pip install -e ".[dev,forecast,dashboard]"       # adds streamlit and plotly
-thermo-fr morning-run                             # tomorrow's inputs, timing log, both forecasts (new version each run)
+thermo-fr morning-run                             # tomorrow's inputs, timing log, both forecasts (new version each run); --refit fits live
 thermo-fr settle                                  # actual prices, then every unscored forecast version is scored
 thermo-fr dashboard                               # http://localhost:8501
 ```
 
-`morning-run` fetches the ENTSO-E day-ahead load forecast, wind and solar forecasts and prices around the next delivery day, and the Open-Meteo weather forecasts issued two days ahead. For each input it records whether it is present for the delivery day, its hour count, revision number and a hash of its values, so the timing log (table `timing_log`) shows when each input first appeared relative to the 12:00 Paris gate and whether it changed between runs. It then stores the hourly inputs and a forecast for the honest feature set and, when the wind and solar forecasts exist, for the extended set. Every forecast is a new version stamped with its issue time; nothing is overwritten. A source that is down is logged in `data_status` and the run finishes as `partial` or `failed` instead of crashing. `settle` fetches the actual prices for today, tomorrow and every forecast day, stores them, and scores each version against them and against the same-hour-previous-day baseline. Both commands log to `logs/<command>_<date>.log`.
+`morning-run` fetches the ENTSO-E day-ahead load forecast, wind and solar forecasts and prices around the next delivery day, and the Open-Meteo weather forecasts issued two days ahead. For each input it records whether it is present for the delivery day, its hour count, revision number and a hash of its values, so the timing log (table `timing_log`) shows when each input first appeared relative to the 12:00 Paris gate and whether it changed between runs. It then stores the hourly inputs and a forecast for the honest feature set, predicted with the stored model `published/model/honest.txt` (the same file the GitHub Actions workflow predicts with, so a local run and the workflow give the same curve for the same inputs; `--refit` fits the model live on the inputs history instead, and a missing model file is recorded and falls back to a live fit), and, when the wind and solar forecasts exist, for the extended set, which has no stored model and is always fitted live. Every forecast is a new version stamped with its issue time; nothing is overwritten. A source that is down is logged in `data_status` and the run finishes as `partial` or `failed` instead of crashing. `settle` fetches the actual prices for today, tomorrow and every forecast day, stores them, and scores each version against them and against the same-hour-previous-day baseline. Both commands log to `logs/<command>_<date>.log`.
 
 Windows Task Scheduler entries (the jobs run as the current user and read `ENTSOE_API_KEY` from the user environment, so set it with `setx ENTSOE_API_KEY ...` once):
 
@@ -119,8 +119,8 @@ The dashboard shows tomorrow's latest forecast with today's actual prices, the s
 ```bash
 thermo-fr publish                   # export the public dataset from the local database
 thermo-fr import-published          # the reverse, used by the workflow to restore its state
-thermo-fr refit-model               # fetch the full history and save published/model/honest.txt, metadata and wind_proxy.json
-thermo-fr morning-run --model-file published/model/honest.txt --feature-sets honest   # predict with the stored model
+thermo-fr refit-model               # fetch the full history and save published/model/honest.txt, metadata, wind_proxy.json and solar_proxy.json
+thermo-fr morning-run --feature-sets honest   # what the workflow runs: predict with the stored model (the default locally too)
 streamlit run streamlit_app.py      # the public app, locally
 ```
 
@@ -187,10 +187,14 @@ src/thermo_fr/
   data/entsoe_client.py  the entsoe source built on it
   data/weather_forecast.py Open-Meteo forecasts as issued (previous runs) and the historical-forecast proxy
   data/wind_points.py    100 m wind forecasts as issued at 17 points in the wind regions
+  data/solar_points.py   radiation forecasts as issued at 21 points in the solar regions
   forecast/timing.py     the 12:00 Paris gate, issue-time rules, look-ahead check
   forecast/inputs.py     one hourly table of every forecast input, plus the API-versus-CSV price comparison
+  forecast/daytypes.py   day types, bridge days, holiday neighbours, the comparable day of the same type
   forecast/features.py   honest and extended feature sets in Paris delivery hours
-  forecast/wind_proxy.py pre-gate wind generation proxy: power curve, monthly calibration on actual generation
+  forecast/gen_proxy.py  shared method of the generation proxies: NNLS weights per point, monthly point-in-time refits
+  forecast/wind_proxy.py pre-gate wind generation proxy: turbine power curve on 100 m wind forecasts
+  forecast/solar_proxy.py pre-gate solar generation proxy: irradiance ratio on radiation forecasts
   forecast/models.py     benchmarks, LightGBM, ridge
   forecast/backtest.py   monthly walk-forward, metrics by slice, worst days
   forecast/report.py     reports/forecast/ tables and charts

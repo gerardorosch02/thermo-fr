@@ -29,14 +29,20 @@ query time). Sources:
 - Weather from the historical-forecast archive: stitched from the latest run
   before each hour, so it is taken as known one hour before valid time. It
   is a training proxy only and always fails the gate.
-- Wind generation proxy (forecast/wind_proxy.py): hub-height wind forecasts
-  with the same lead-day-2 timing as the weather above, turned into MW with
-  weights refitted at the start of each month on actual generation up to two
-  days before the month. Actual generation per type is published within an
-  hour of the operating period (Article 16(1)(a)), so the calibration data
-  is taken as known at 01:00 Paris on the day before the month starts. The
-  rule is the later of the two.
-- Calendar features are known in advance.
+- Wind and solar generation proxies (forecast/wind_proxy.py,
+  forecast/solar_proxy.py): hub-height wind or radiation forecasts with the
+  same lead-day-2 timing as the weather above, turned into MW with weights
+  refitted at the start of each month on actual generation up to two days
+  before the month. Actual generation per type is published within an hour
+  of the operating period (Article 16(1)(a)), so the calibration data is
+  taken as known at 01:00 Paris on the day before the month starts. The rule
+  is the later of the two.
+- The same-type price lag (the same hour of the most recent earlier day of
+  the same type, see daytypes.py) is the price of a day no later than D-1,
+  published at 13:00 Paris on the day before that day: at the latest 13:00
+  on D-2.
+- Calendar features, including day types, bridge days and the holiday
+  neighbours, are known in advance.
 """
 
 from dataclasses import dataclass
@@ -112,22 +118,36 @@ def weather_proxy_issue(index) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(index).tz_convert("UTC") - pd.Timedelta(hours=1)
 
 
-WIND_PROXY_LAG_DAYS = 2
+PROXY_LAG_DAYS = 2  # the generation proxies are calibrated on actual generation to two days before the month
 GENERATION_PUBLICATION_LAG_HOURS = 1
 
 
-def wind_proxy_calibration_issue(index) -> pd.DatetimeIndex:
+def proxy_calibration_issue(index) -> pd.DatetimeIndex:
     """Actual generation of (first day of the delivery month - 2) is public one hour after that day ends."""
     days = delivery_days(index)
     month_start = pd.DatetimeIndex(days.to_period("M").to_timestamp())
-    return _local_clock(month_start, -(WIND_PROXY_LAG_DAYS - 1), GENERATION_PUBLICATION_LAG_HOURS)
+    return _local_clock(month_start, -(PROXY_LAG_DAYS - 1), GENERATION_PUBLICATION_LAG_HOURS)
 
 
-def wind_proxy_issue(index) -> pd.DatetimeIndex:
-    """The later of the weather run (lead day 2) and the calibration data."""
+def generation_proxy_issue(index) -> pd.DatetimeIndex:
+    """The later of the weather run (lead day 2) and the calibration data; shared by the wind and solar proxies."""
     weather = weather_issued_issue(index)
-    calibration = wind_proxy_calibration_issue(index)
+    calibration = proxy_calibration_issue(index)
     return pd.DatetimeIndex(weather.where(weather >= calibration, calibration))
+
+
+# kept under their old names for the wind proxy
+WIND_PROXY_LAG_DAYS = PROXY_LAG_DAYS
+wind_proxy_calibration_issue = proxy_calibration_issue
+wind_proxy_issue = generation_proxy_issue
+
+
+def price_lag_same_type_issue(index) -> pd.DatetimeIndex:
+    """Price of the most recent earlier day of the same type, published at 13:00 Paris on the day before that day."""
+    from .daytypes import same_type_day
+
+    comparable = same_type_day(delivery_days(index))
+    return _local_clock(comparable, -1, PRICE_PUBLICATION_HOUR)
 
 
 def calendar_issue(index) -> pd.DatetimeIndex:
@@ -142,7 +162,7 @@ class InputTiming:
 
 
 TIMINGS = {
-    "calendar": InputTiming("calendar", calendar_issue, "Hour, weekday, month and public holidays are known in advance."),
+    "calendar": InputTiming("calendar", calendar_issue, "Hour, weekday, month, public holidays, day types and bridge days are known in advance."),
     "price_lag1": InputTiming("price_lag1", price_lag_issue(1), "Day-ahead price of D-1, published about 13:00 Paris on D-2."),
     "price_lag2": InputTiming("price_lag2", price_lag_issue(2), "Day-ahead price of D-2, published about 13:00 Paris on D-3."),
     "price_lag7": InputTiming("price_lag7", price_lag_issue(7), "Day-ahead price of D-7, published about 13:00 Paris on D-8."),
@@ -163,8 +183,16 @@ TIMINGS = {
         "Open-Meteo historical-forecast archive: latest run before each hour, not point in time.",
     ),
     "wind_proxy": InputTiming(
-        "wind_proxy", wind_proxy_issue,
+        "wind_proxy", generation_proxy_issue,
         "Wind generation proxy: lead-day-2 hub-height wind forecasts, weights fitted on actual generation to two days before the month.",
+    ),
+    "solar_proxy": InputTiming(
+        "solar_proxy", generation_proxy_issue,
+        "Solar generation proxy: lead-day-2 radiation forecasts, weights fitted on actual generation to two days before the month.",
+    ),
+    "price_lag_same_type": InputTiming(
+        "price_lag_same_type", price_lag_same_type_issue,
+        "Day-ahead price of the most recent earlier day of the same type (D-1 or earlier), published about 13:00 Paris the day before it.",
     ),
 }
 

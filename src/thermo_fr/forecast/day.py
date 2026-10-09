@@ -16,23 +16,29 @@ from pathlib import Path
 import pandas as pd
 
 from ..data.entsoe_client import EntsoeSource
+from ..data.solar_points import SolarPointsSource
 from ..data.weather_forecast import OpenMeteoForecastSource
 from ..data.wind_points import WindPointsSource
-from .features import build_features, feature_timings
+from .features import GATED_SETS, build_features, feature_timings
+from .gen_proxy import apply_weights, load_weights
 from .inputs import INPUT_COLUMNS
 from .models import fit_predict, predict_with
+from .solar_proxy import SOLAR
 from .timing import check_point_in_time
-from .wind_proxy import DEFAULT_WEIGHTS_PATH, apply_weights, load_weights
+from .wind_proxy import WIND
 
 HISTORY_DAYS = 10  # refreshed around the target day so that lags and the day itself are current
+DEFAULT_WEIGHTS_PATH = WIND.default_path
 
 
-def refresh_window(date: str, cache_dir=Path("data/cache"), log=print, wind_weights=DEFAULT_WEIGHTS_PATH) -> pd.DataFrame:
+def refresh_window(date: str, cache_dir=Path("data/cache"), log=print, wind_weights=WIND.default_path,
+                   solar_weights=SOLAR.default_path) -> pd.DataFrame:
     """Inputs for [D - HISTORY_DAYS, D + 1) straight from the sources (honest inputs only).
 
-    The wind proxy for the window is computed from the stored calibration
-    weights (`wind_weights`, written by refit-model); without that file the
-    proxy column stays NaN and a warning is logged.
+    The wind and solar proxies for the window are computed from the stored
+    calibration weights (`wind_weights`, `solar_weights`, written by
+    refit-model); without a weights file that proxy column stays NaN and a
+    warning is logged.
     """
     day = pd.Timestamp(date).normalize()
     start = (day - pd.Timedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%d")
@@ -45,12 +51,15 @@ def refresh_window(date: str, cache_dir=Path("data/cache"), log=print, wind_weig
     weather = OpenMeteoForecastSource(cache_dir=Path(cache_dir) / "open-meteo").fetch(start, end, kinds=("issued",))
     log("Refreshing Open-Meteo 100 m wind forecasts at the wind-region points ...")
     points = WindPointsSource(cache_dir=Path(cache_dir) / "open-meteo").fetch_points(start, end)
-    pieces = [price, load_fc, weather, points]
-    weights = load_weights(wind_weights)
-    if weights is None:
-        log(f"Warning: no wind proxy weights at {wind_weights}; the wind proxy feature will be missing.")
-    else:
-        pieces.append(apply_weights(points, weights))
+    log("Refreshing Open-Meteo radiation forecasts at the solar-region points ...")
+    solar_points = SolarPointsSource(cache_dir=Path(cache_dir) / "open-meteo").fetch_points(start, end)
+    pieces = [price, load_fc, weather, points, solar_points]
+    for spec, frame, path in ((WIND, points, wind_weights), (SOLAR, solar_points, solar_weights)):
+        weights = load_weights(path)
+        if weights is None:
+            log(f"Warning: no {spec.name} proxy weights at {path}; the {spec.name} proxy feature will be missing.")
+        else:
+            pieces.append(apply_weights(frame, weights, spec))
     fresh = pd.concat(pieces, axis=1).sort_index()
     return fresh.reindex(columns=INPUT_COLUMNS)
 
@@ -76,7 +85,7 @@ def forecast_day(date: str, inputs: pd.DataFrame, fresh: pd.DataFrame | None = N
     rows = table.info["delivery_day"] == day
     if not rows.any():
         raise ValueError(f"No input hours found for {date}; the inputs table ends at {merged.index.max()}.")
-    passes_gate = feature_set == "honest"
+    passes_gate = feature_set in GATED_SETS
     if passes_gate:
         check_point_in_time(table.X.index[rows], feature_timings(feature_set))
     if not table.info.loc[rows, "weather_point_in_time"].all():

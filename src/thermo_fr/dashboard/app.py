@@ -179,8 +179,9 @@ def main() -> None:
         c2.metric("Versions today", int(len(panel["versions"])))
         c3.metric("Daily mean forecast", f"{panel['by_hour']['forecast'].mean():.1f} EUR/MWh")
         c4.metric("Run kind", str(meta["kind"]))
-        st.caption(f"Issued {issued:%Y-%m-%d %H:%M} Paris. Model: {meta['model']} fitted on {int(meta['train_hours']):,} hours; "
-                   f"this feature set {gate_badge}.")
+        fitted = (f"the stored model {str(meta['model']).split(':', 1)[-1]} (the file the GitHub workflow predicts with)"
+                  if int(meta["train_hours"]) == 0 else f"{meta['model']} fitted live on {int(meta['train_hours']):,} hours")
+        st.caption(f"Issued {issued:%Y-%m-%d %H:%M} Paris. Model: {fitted}; this feature set {gate_badge}.")
         has_band = "band_p10" in panel["by_hour"]
         st.plotly_chart(forecast_chart(panel["by_hour"], feature_set, today, has_band), use_container_width=True)
         if has_band:
