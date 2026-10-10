@@ -37,9 +37,11 @@ def test_refit_writes_model_and_metadata_with_holdout_metrics(tmp_path, table):
     assert meta["train_from"] == "2023-09-01" and meta["train_to"] == "2024-03-31" and meta["fitted_at_utc"] == "2024-04-01T03:00:00Z"
     assert meta["train_hours"] == int(history["price_eur_mwh"].notna().sum())
     assert meta["features"][0] == "hour" and "load_fc_mw" in meta["features"] and "wind_fc_mw" not in meta["features"]
-    holdout = meta["holdout"]
-    assert holdout["holdout_from"] == "2024-03-02" and holdout["holdout_to"] == "2024-03-31" and holdout["holdout_hours"] == 30 * 24 - 1
-    assert holdout["mae"] < holdout["naive_mae"]  # the synthetic price is learnable
+    check = meta["recent_check"]
+    assert check["from"] == "2024-03-02" and check["to"] == "2024-03-31" and check["hours"] == 30 * 24 - 1
+    assert check["mae"] < check["naive_mae"]  # the synthetic price is learnable
+    assert check["excluded_from_stored_fit"] is False and "not the frozen holdout" in check["note"]
+    assert meta["frozen_holdout"]["mae"] == 26.23 and "docs/experiments.md" in meta["frozen_holdout"]["source"]  # honest, copied from the log
     assert "params" in meta and meta["params"]["n_estimators"] == 40
     small = refit_model(history, out_dir=tmp_path / "small", holdout_days=0, log=lambda *_: None)
     assert small["params"]["n_estimators"] == 300 and small["params"]["num_leaves"] == 31  # REFIT_PARAMS by default

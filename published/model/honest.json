@@ -45,15 +45,6 @@
     "reg_lambda": 1.0,
     "random_state": 7
   },
-  "holdout": {
-    "holdout_from": "2026-09-02",
-    "holdout_to": "2026-10-01",
-    "holdout_hours": 698,
-    "mae": 27.73,
-    "rmse": 36.45,
-    "naive_mae": 36.8,
-    "naive_rmse": 53.91
-  },
   "note": "Honest feature set: every input is published before 12:00 Paris on the day before delivery.",
   "wind_proxy": {
     "file": "wind_proxy.json",
@@ -76,5 +67,25 @@
     "bias_mw": -215.7,
     "r2": 0.8986,
     "mean_actual_mw": 4037.1
+  },
+  "recent_check": {
+    "from": "2026-09-02",
+    "to": "2026-10-01",
+    "hours": 698,
+    "excluded_from_stored_fit": false,
+    "note": "a check on the last days before the fit, scored by a model fitted without them; the stored file was then fitted on all rows including these days, so this is not an out-of-sample result for the stored file and not the frozen holdout of docs/experiments.md",
+    "mae": 27.73,
+    "rmse": 36.45,
+    "naive_mae": 36.8,
+    "naive_rmse": 53.91
+  },
+  "frozen_holdout": {
+    "window": "2026-07-01 to 2026-10-10",
+    "strict_hours": 2448,
+    "mae": 26.23,
+    "naive_mae": 29.37,
+    "crash_2026_10_01_to_10_10_mae": 33.76,
+    "source": "docs/experiments.md, holdout row of 2026-10-10",
+    "method": "monthly walk-forward, backtest settings, not this file"
   }
 }

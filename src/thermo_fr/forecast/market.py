@@ -400,7 +400,12 @@ def public_summary(result: dict, min_days: int = MIN_PUBLIC_DAYS) -> dict:
     """What the public dataset may carry: aggregates only, and only from min_days scored days; never a traded price."""
     s = result["summary"]
     out = {"source": "EEX French Day-Ahead Base and Peak futures traded before the auction, collected locally; "
-                     "traded prices are not republished.", "scored_days": s["scored_days"], "min_days_to_show": min_days}
+                     "traded prices are not republished.", "scored_days": s["scored_days"], "min_days_to_show": min_days,
+           "counts": "settled delivery days whose published-set forecast was issued before the market window (11:15 Paris on the trade "
+                     "date), scored against the auction result; versions issued later and days without a traded price are not counted, "
+                     "and the backfilled walk-forward record in the README (42 windows) is a separate, out-of-sample reissue, not part "
+                     "of this count",
+           "computed_at_utc": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ")}
     if s["scored_days"] >= min_days:
         out.update({k: s[k] for k in ("hit_rate", "mean_pnl_per_mwh", "model_mae", "market_mae", "share_model_beats_market")})
     else:

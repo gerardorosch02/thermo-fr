@@ -114,14 +114,6 @@
     "n_estimators": 300,
     "num_leaves": 31
   },
-  "holdout": {
-    "from": "2026-09-11",
-    "to": "2026-10-10",
-    "hours": 720,
-    "raw_coverage_10_90": 0.7125,
-    "coverage_10_90_with_margin": 0.8014,
-    "pinball_mean": 11.479
-  },
   "events": {
     "negative": {
       "events": 1645,
@@ -134,5 +126,27 @@
       "base_rate": 0.1273
     }
   },
-  "note": "Quantile forecasts with a conformal 10-90 interval and event probabilities (negative price, spike above the trailing-year 95th percentile); see docs/experiments.md. Without these files the forecast carries no band."
+  "note": "Quantile forecasts with a conformal 10-90 interval and event probabilities (negative price, spike above the trailing-year 95th percentile); see docs/experiments.md. Without these files the forecast carries no band.",
+  "recent_check": {
+    "from": "2026-09-11",
+    "to": "2026-10-10",
+    "hours": 720,
+    "raw_coverage_10_90": 0.7125,
+    "coverage_10_90_with_margin": 0.8014,
+    "pinball_mean": 11.479,
+    "excluded_from_stored_fit": false,
+    "note": "a check on the last days by models fitted without them; the stored files were then fitted on all rows including these days"
+  },
+  "frozen_holdout": {
+    "window": "2026-07-01 to 2026-10-10",
+    "strict_hours": 2448,
+    "interval_coverage_10_90": 0.738,
+    "interval_pinball_mean": 8.379,
+    "negative_bss_vs_climatology": 0.367,
+    "negative_bss_vs_last7": 0.411,
+    "spike_bss_vs_climatology": 0.36,
+    "spike_bss_vs_last7": -0.111,
+    "source": "docs/experiments.md, holdout rows of 2026-10-11",
+    "method": "monthly walk-forward, backtest settings, not these files"
+  }
 }

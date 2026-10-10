@@ -369,8 +369,11 @@ def main() -> None:
     else:
         needed = int(market.get("min_days_to_show", 20))
         st.markdown(f"**Live record: collecting data, {int(market.get('scored_days', 0))} of {needed} days.**")
-        st.caption("The live record counts only days whose forecast was published before the trading window; its aggregates appear "
-                   "once enough days are scored.")
+        st.caption("What this counts: settled delivery days whose forecast from the default model was published before the EEX trading "
+                   "window (11:15 Paris on the trade date) and for which a traded price was recorded; versions issued later are not counted, "
+                   "and the 42 backfilled walk-forward windows above are a separate reissue record, not part of this count. The traded "
+                   "prices live on the author's machine, which computes these aggregates; the automated updates carry them through unchanged"
+                   + (f" (last computed {market['computed_at_utc'][:10]})" if market.get("computed_at_utc") else "") + ".")
 
     st.subheader("Negative-price probability and its calibration")
     prob = data.get("prob_tomorrow", pd.DataFrame())

@@ -61,14 +61,25 @@
     "reg_lambda": 1.0,
     "random_state": 7
   },
-  "holdout": {
-    "holdout_from": "2026-09-11",
-    "holdout_to": "2026-10-10",
-    "holdout_hours": 720,
+  "note": "Feature set honest_v2: every input is published before 12:00 Paris on the day before delivery and before the pre-market issue time, 10:05 Paris on D-1.",
+  "recent_check": {
+    "from": "2026-09-11",
+    "to": "2026-10-10",
+    "hours": 720,
+    "excluded_from_stored_fit": false,
+    "note": "a check on the last days before the fit, scored by a model fitted without them; the stored file was then fitted on all rows including these days, so this is not an out-of-sample result for the stored file and not the frozen holdout of docs/experiments.md",
     "mae": 32.97,
     "rmse": 44.13,
     "naive_mae": 38.57,
     "naive_rmse": 56.3
   },
-  "note": "Feature set honest_v2: every input is published before 12:00 Paris on the day before delivery and before the pre-market issue time, 10:05 Paris on D-1."
+  "frozen_holdout": {
+    "window": "2026-07-01 to 2026-10-10",
+    "strict_hours": 2448,
+    "mae": 25.81,
+    "naive_mae": 29.37,
+    "crash_2026_10_01_to_10_10_mae": 36.0,
+    "source": "docs/experiments.md, holdout row of 2026-10-10",
+    "method": "monthly walk-forward, backtest settings, not this file"
+  }
 }

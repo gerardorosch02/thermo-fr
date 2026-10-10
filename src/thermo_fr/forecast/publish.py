@@ -23,7 +23,8 @@ Files written by `export_published`:
     probabilistic_backtest.json  aggregates of the negative-price backtest on the selection window and the holdout, written by
                        `thermo-fr prob-backtest`
     model/honest_v2.txt   the default LightGBM model, refitted monthly by the workflow (see refit.py)
-    model/honest_v2.json  its training period, fit date, features and holdout metrics
+    model/honest_v2.json  its training period, fit date, features, a recent check (the last 30 days, not excluded from the stored
+                          fit) and the frozen-holdout result copied from docs/experiments.md
     model/honest.txt      the fallback model (used when a v2 input is missing), refitted with it; honest.json its metadata
     status.json        when the dataset was written, the last run, the attributions and, under
                        "market", aggregates of the forecast against EEX traded prices (market.py):
@@ -41,6 +42,7 @@ from pathlib import Path
 import pandas as pd
 
 from .market import DEFAULT_PATH as MARKET_PATH
+from .market import MIN_PUBLIC_DAYS
 from .probabilistic import live_calibration
 from .shape import live_shape_record
 from .market import evaluate as evaluate_market
@@ -104,12 +106,20 @@ def shape_status(store: Store, out_dir) -> dict:
     return {k: v for k, v in live.items() if k in ("days", "shape", "battery")}
 
 
-def market_status(store: Store, market_path=MARKET_PATH) -> dict:
-    """The public aggregates of the forecast against traded prices (see market.public_summary)."""
+def market_status(store: Store, market_path=MARKET_PATH, previous: dict | None = None) -> dict:
+    """The public aggregates of the forecast against traded prices (see market.public_summary).
+
+    The traded prices live only on the laptop. A machine without the market file (GitHub Actions) does not recompute the section: it
+    carries the last aggregates the laptop published through unchanged, so the public count never drops to zero for lack of data.
+    """
     rows = load_market(market_path)
     if rows.empty:
-        return {"scored_days": 0, "note": "No traded prices recorded yet."}
-    return public_summary(evaluate_market(store, rows, feature_set=PUBLIC_FEATURE_SET))
+        if previous and previous.get("computed_at_utc"):
+            return {**previous, "carried_through": True,
+                    "carried_note": "this machine holds no traded prices; the aggregates are the last ones computed on the laptop"}
+        return {"scored_days": 0, "min_days_to_show": MIN_PUBLIC_DAYS, "note": "No traded prices recorded yet.",
+                "counts": "settled delivery days whose published-set forecast was issued before the market window, scored against the auction"}
+    return {**public_summary(evaluate_market(store, rows, feature_set=PUBLIC_FEATURE_SET)), "computed_on": "laptop", "carried_through": False}
 
 
 def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None, last_run: dict | None = None,
@@ -195,6 +205,11 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
             break
     band.to_csv(out / "error_band.csv", index=False)
 
+    status_path = out / "status.json"
+    try:
+        previous_status = json.loads(status_path.read_text()) if status_path.exists() else {}
+    except ValueError:
+        previous_status = {}
     fallback_meta = {}
     fallback_path = out / "model" / f"{FALLBACK_FEATURE_SET}.json"
     if fallback_path.exists():
@@ -220,11 +235,11 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
         "actual_days": int(actuals["delivery_day"].nunique()) if len(actuals) else 0,
         "scored_versions": int(len(scores)),
         "model": {k: model_meta.get(k) for k in ("feature_set", "model_file", "fitted_at_utc", "train_from", "train_to", "train_hours",
-                                                 "holdout", "features")} if model_meta else {},
+                                                 "recent_check", "frozen_holdout", "features")} if model_meta else {},
         "fallback_model": {k: fallback_meta.get(k) for k in ("feature_set", "model_file", "fitted_at_utc", "train_from", "train_to",
-                                                             "train_hours", "holdout")} if fallback_meta else {},
+                                                             "train_hours", "recent_check", "frozen_holdout")} if fallback_meta else {},
         "last_run": last_run or {},
-        "market": market_status(store, market_path),
+        "market": market_status(store, market_path, previous=previous_status.get("market")),
         "shape_battery": shape_status(store, out),
         "probabilistic": probabilistic_status(store, out),
         "attributions": ATTRIBUTIONS,

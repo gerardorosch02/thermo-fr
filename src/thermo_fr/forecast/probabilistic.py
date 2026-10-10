@@ -357,8 +357,10 @@ def fit_probabilistic(table: FeatureTable, feature_set: str, out_dir, holdout_da
                       log=print) -> dict:
     """Fit the three quantile models and the two classifiers on every known row, write them next to the point model, with metadata.
 
-    The initial conformal margin comes from a holdout fit: models fitted on the rows up to `holdout_days` before the last known
-    day, scored on the days after it. The live margin (live_margin) replaces it once enough settled days exist in the store.
+    The initial conformal margin comes from a recent check: models fitted on the rows up to `holdout_days` before the last known
+    day, scored on the days after it; the stored files are then fitted on all rows, those days included, so the check is not an
+    out-of-sample result for the stored files and not the frozen holdout of docs/experiments.md. The live margin (live_margin)
+    replaces it once enough settled days exist in the store.
     """
     params = {**REFIT_PROB_PARAMS, **(params or {})}
     out = Path(out_dir)
@@ -387,9 +389,11 @@ def fit_probabilistic(table: FeatureTable, feature_set: str, out_dir, holdout_da
         covered_raw = float(np.mean((y >= frame["q10"]) & (y <= frame["q90"])))
         covered = float(np.mean((y >= frame["q10"] - margin) & (y <= frame["q90"] + margin)))
         holdout = {"from": str((cut + pd.Timedelta(days=1)).date()), "to": str(last_day.date()), "hours": int(n), "raw_coverage_10_90": round(covered_raw, 4),
-                   "coverage_10_90_with_margin": round(covered, 4), "pinball_mean": round(float(np.mean([pinball(y, frame[c].to_numpy(), a) for c, a in zip(("q10", "q50", "q90"), QUANTILES)])), 3)}
-        log(f"Probabilistic holdout {holdout['from']} to {holdout['to']}: raw coverage {100 * covered_raw:.1f}%, margin {margin:.2f}, "
-            f"coverage with margin {100 * covered:.1f}%")
+                   "coverage_10_90_with_margin": round(covered, 4), "pinball_mean": round(float(np.mean([pinball(y, frame[c].to_numpy(), a) for c, a in zip(("q10", "q50", "q90"), QUANTILES)])), 3),
+                   "excluded_from_stored_fit": False,
+                   "note": "a check on the last days by models fitted without them; the stored files were then fitted on all rows including these days"}
+        log(f"Probabilistic recent check {holdout['from']} to {holdout['to']}: raw coverage {100 * covered_raw:.1f}%, margin {margin:.2f}, "
+            f"coverage with margin {100 * covered:.1f}% (these days join the final fit)")
     paths = prob_paths(out, feature_set)
     for alpha, name in zip(QUANTILES, ("q10", "q50", "q90")):
         m = quantile_model(alpha, params)
@@ -408,7 +412,11 @@ def fit_probabilistic(table: FeatureTable, feature_set: str, out_dir, holdout_da
             "train_from": str(days[known].min().date()), "train_to": str(last_day.date()), "train_hours": int(known.sum()),
             "features": list(table.X.columns), "event_features": list(X.columns), "quantiles": list(QUANTILES), "alpha": ALPHA,
             "conformal_margin": round(margin, 3), "conformal_window_days": CONFORMAL_WINDOW_DAYS, "spike_percentile": SPIKE_PERCENTILE,
-            "trailing_days": TRAILING_DAYS, "params": {k: v for k, v in params.items() if k != "verbose"}, "holdout": holdout, "events": events,
+            "trailing_days": TRAILING_DAYS, "params": {k: v for k, v in params.items() if k != "verbose"}, "recent_check": holdout, "events": events,
+            "frozen_holdout": {"window": "2026-07-01 to 2026-10-10", "strict_hours": 2448, "interval_coverage_10_90": 0.738, "interval_pinball_mean": 8.379,
+                               "negative_bss_vs_climatology": 0.367, "negative_bss_vs_last7": 0.411, "spike_bss_vs_climatology": 0.360,
+                               "spike_bss_vs_last7": -0.111, "source": "docs/experiments.md, holdout rows of 2026-10-11",
+                               "method": "monthly walk-forward, backtest settings, not these files"},
             "note": "Quantile forecasts with a conformal 10-90 interval and event probabilities (negative price, spike above the trailing-year "
                     "95th percentile); see docs/experiments.md. Without these files the forecast carries no band."}
     paths["meta"].write_text(json.dumps(meta, indent=2))

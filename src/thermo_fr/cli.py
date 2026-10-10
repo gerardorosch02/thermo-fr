@@ -202,9 +202,10 @@ def cmd_refit_model(args) -> None:
         metas = fetch_and_refit(args.start, end, out_dir=Path(args.out), cache_dir=Path(args.cache_dir), csv_dir=Path(args.csv_dir),
                                 inputs_path=Path(args.data), feature_sets=sets, probabilistic=not args.no_probabilistic)
     for feature_set, meta in metas.items():
-        holdout = meta.get("holdout") or {}
+        check = meta.get("recent_check") or {}
         print(f"{feature_set}: model fitted on {meta['train_hours']:,} hours ({meta['train_from']} to {meta['train_to']}), saved as "
-              f"{meta['model_file']} under {args.out}; holdout MAE {holdout.get('mae')} against benchmark {holdout.get('naive_mae')}")
+              f"{meta['model_file']} under {args.out}; recent check (last days, not excluded from the stored fit) MAE {check.get('mae')} "
+              f"against benchmark {check.get('naive_mae')}")
 
 
 def cmd_import_published(args) -> None:

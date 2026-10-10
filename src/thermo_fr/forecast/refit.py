@@ -5,7 +5,7 @@ needs the ENTSO-E token (full history fetch) and writes two files under
 published/model/:
 
     honest.txt    the LightGBM model in its native text format
-    honest.json   training period, fit date, rows, feature list, holdout metrics
+    honest.json   training period, fit date, rows, feature list, a recent check and the frozen-holdout result from the log
     wind_proxy.json   weights of the wind generation proxy, fitted on the trailing year
     solar_proxy.json  weights of the solar generation proxy, fitted on the trailing months
 
@@ -35,6 +35,14 @@ DEFAULT_MODEL_DIR = Path("published/model")
 # holdout MAE within 0.2 EUR/MWh of the backtest settings (800 trees, 63 leaves) on September
 # 2026 at a fifth of the file size (0.85 MB against 4.45 MB), which matters for a monthly commit.
 REFIT_PARAMS: dict = {"n_estimators": 300, "num_leaves": 31}
+# The frozen holdout of docs/experiments.md (2026-07-01 onward, evaluated once per accepted change, strict rows, monthly walk-forward with the
+# backtest settings). Copied here by hand so that the model metadata can carry it; the recent check below is a different, weaker thing.
+FROZEN_HOLDOUT = {
+    "honest_v2": {"window": "2026-07-01 to 2026-10-10", "strict_hours": 2448, "mae": 25.81, "naive_mae": 29.37, "crash_2026_10_01_to_10_10_mae": 36.00,
+                  "source": "docs/experiments.md, holdout row of 2026-10-10", "method": "monthly walk-forward, backtest settings, not this file"},
+    "honest": {"window": "2026-07-01 to 2026-10-10", "strict_hours": 2448, "mae": 26.23, "naive_mae": 29.37, "crash_2026_10_01_to_10_10_mae": 33.76,
+               "source": "docs/experiments.md, holdout row of 2026-10-10", "method": "monthly walk-forward, backtest settings, not this file"},
+}
 
 
 def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: str = "honest", holdout_days: int = 30,
@@ -55,15 +63,19 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
     train, test = known & (days <= cut), known & (days > cut)
     metrics = {}
     if test.sum() >= 24:
-        log(f"Holdout fit on {int(train.sum()):,} hours, scoring {int(test.sum()):,} hours after {cut.date()} ...")
+        log(f"Recent check: fit on {int(train.sum()):,} hours, scoring {int(test.sum()):,} hours after {cut.date()} (these days join the final fit) ...")
         pred = fit_predict("gbm", table.X[train], table.y[train], table.X[test], params=params)
         actual = table.y[test].to_numpy()
         naive = table.X.loc[test, "price_lag1"].to_numpy()
         ok = ~np.isnan(naive)
         metrics = {
-            "holdout_from": str((cut + pd.Timedelta(days=1)).date()),
-            "holdout_to": str(last_day.date()),
-            "holdout_hours": int(test.sum()),
+            "from": str((cut + pd.Timedelta(days=1)).date()),
+            "to": str(last_day.date()),
+            "hours": int(test.sum()),
+            "excluded_from_stored_fit": False,
+            "note": "a check on the last days before the fit, scored by a model fitted without them; the stored file was then fitted on all "
+                    "rows including these days, so this is not an out-of-sample result for the stored file and not the frozen holdout of "
+                    "docs/experiments.md",
             "mae": round(float(np.mean(np.abs(pred - actual))), 2),
             "rmse": round(float(np.sqrt(np.mean((pred - actual) ** 2))), 2),
             "naive_mae": round(float(np.mean(np.abs(naive[ok] - actual[ok]))), 2),
@@ -84,7 +96,8 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
         "train_hours": int(known.sum()),
         "features": list(FEATURES[feature_set]),
         "params": {k: v for k, v in params.items() if k != "verbose"},
-        "holdout": metrics,
+        "recent_check": metrics,
+        "frozen_holdout": FROZEN_HOLDOUT.get(feature_set),
         "note": f"Feature set {feature_set}: every input is published before 12:00 Paris on the day before delivery"
                 + (" and before the pre-market issue time, 10:05 Paris on D-1." if feature_set != "honest" else "."),
     }

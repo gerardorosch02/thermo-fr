@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-10-10T11:59:53Z",
+  "written_at_utc": "2026-10-10T15:03:23Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -12,8 +12,8 @@
   "from_day": "2026-07-12",
   "tomorrow": "2026-10-11",
   "forecast_versions": 14,
-  "actual_days": 4,
-  "scored_versions": 10,
+  "actual_days": 5,
+  "scored_versions": 14,
   "model": {
     "feature_set": "honest_v2",
     "model_file": "honest_v2.txt",
@@ -21,14 +21,25 @@
     "train_from": "2021-01-01",
     "train_to": "2026-10-10",
     "train_hours": 50614,
-    "holdout": {
-      "holdout_from": "2026-09-11",
-      "holdout_to": "2026-10-10",
-      "holdout_hours": 720,
+    "recent_check": {
+      "from": "2026-09-11",
+      "to": "2026-10-10",
+      "hours": 720,
+      "excluded_from_stored_fit": false,
+      "note": "a check on the last days before the fit, scored by a model fitted without them; the stored file was then fitted on all rows including these days, so this is not an out-of-sample result for the stored file and not the frozen holdout of docs/experiments.md",
       "mae": 32.97,
       "rmse": 44.13,
       "naive_mae": 38.57,
       "naive_rmse": 56.3
+    },
+    "frozen_holdout": {
+      "window": "2026-07-01 to 2026-10-10",
+      "strict_hours": 2448,
+      "mae": 25.81,
+      "naive_mae": 29.37,
+      "crash_2026_10_01_to_10_10_mae": 36.0,
+      "source": "docs/experiments.md, holdout row of 2026-10-10",
+      "method": "monthly walk-forward, backtest settings, not this file"
     },
     "features": [
       "hour",
@@ -82,23 +93,34 @@
     "train_from": "2021-01-01",
     "train_to": "2026-10-01",
     "train_hours": 50376,
-    "holdout": {
-      "holdout_from": "2026-09-02",
-      "holdout_to": "2026-10-01",
-      "holdout_hours": 698,
+    "recent_check": {
+      "from": "2026-09-02",
+      "to": "2026-10-01",
+      "hours": 698,
+      "excluded_from_stored_fit": false,
+      "note": "a check on the last days before the fit, scored by a model fitted without them; the stored file was then fitted on all rows including these days, so this is not an out-of-sample result for the stored file and not the frozen holdout of docs/experiments.md",
       "mae": 27.73,
       "rmse": 36.45,
       "naive_mae": 36.8,
       "naive_rmse": 53.91
+    },
+    "frozen_holdout": {
+      "window": "2026-07-01 to 2026-10-10",
+      "strict_hours": 2448,
+      "mae": 26.23,
+      "naive_mae": 29.37,
+      "crash_2026_10_01_to_10_10_mae": 33.76,
+      "source": "docs/experiments.md, holdout row of 2026-10-10",
+      "method": "monthly walk-forward, backtest settings, not this file"
     }
   },
   "last_run": {
-    "run_id": 17,
-    "command": "morning-run",
-    "kind": "manual",
-    "delivery_day": "2026-10-10",
-    "started_at_utc": "2026-10-09T20:47:16Z",
-    "finished_at_utc": "2026-10-09T20:47:58Z",
+    "run_id": 18,
+    "command": "settle",
+    "kind": "scheduled",
+    "delivery_day": null,
+    "started_at_utc": "2026-10-10T13:00:02Z",
+    "finished_at_utc": "2026-10-10T13:00:56Z",
     "status": "ok",
     "message": ""
   },
@@ -106,7 +128,11 @@
     "source": "EEX French Day-Ahead Base and Peak futures traded before the auction, collected locally; traded prices are not republished.",
     "scored_days": 0,
     "min_days_to_show": 20,
-    "note": "Versus the market: collecting data, 0 of 20 days."
+    "counts": "settled delivery days whose published-set forecast was issued before the market window (11:15 Paris on the trade date), scored against the auction result; versions issued later and days without a traded price are not counted, and the backfilled walk-forward record in the README (42 windows) is a separate, out-of-sample reissue, not part of this count",
+    "computed_at_utc": "2026-10-10T15:03:23Z",
+    "note": "Versus the market: collecting data, 0 of 20 days.",
+    "computed_on": "laptop",
+    "carried_through": false
   },
   "shape_battery": {
     "days": 0

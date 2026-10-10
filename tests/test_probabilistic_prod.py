@@ -29,7 +29,8 @@ def test_fit_load_predict_round_trip(tmp_path, table):
     features = build_features(history, "honest_v2")
     meta = pb.fit_probabilistic(features, "honest_v2", tmp_path / "model", params=SMALL, now=pd.Timestamp("2024-04-01T03:00Z"), log=lambda *_: None)
     paths = pb.prob_paths(tmp_path / "model", "honest_v2")
-    assert all(p.exists() for p in paths.values()) and isinstance(meta["conformal_margin"], float) and meta["holdout"]["hours"] > 24 * 10
+    assert all(p.exists() for p in paths.values()) and isinstance(meta["conformal_margin"], float) and meta["recent_check"]["hours"] > 24 * 10
+    assert meta["recent_check"]["excluded_from_stored_fit"] is False and meta["frozen_holdout"]["interval_coverage_10_90"] == 0.738
     saved = json.loads(paths["meta"].read_text())
     assert saved["features"] == list(features.X.columns) and saved["event_features"][-1] == "spike_threshold" and saved["events"]["negative"]["events"] == 0
     loaded = pb.load_probabilistic(tmp_path / "model", "honest_v2")
