@@ -363,11 +363,14 @@ def cmd_prob_backtest(args) -> None:
     ready = ready[(ready["delivery_day"] >= pd.Timestamp(args.strict_from or args.test_start)) & (ready["delivery_day"] < pd.Timestamp(args.test_end))]
     ready.to_parquet(out / f"prob_ready_{args.label}.parquet")
     record = pb.backtest_record(ready, args.label)
+    (out / f"prob_record_{args.label}.json").write_text(json.dumps(record, indent=2, default=str))  # the full record stays local
     if args.publish:
+        from .forecast.publish import public_probabilistic_record
+
         path = Path(args.publish)
         path.parent.mkdir(parents=True, exist_ok=True)
         existing = json.loads(path.read_text()) if path.exists() else {}
-        existing[args.label] = record
+        existing[args.label] = public_probabilistic_record(record)
         path.write_text(json.dumps(existing, indent=2, default=str))
     overall = record["intervals"]["all"]
     print(f"Probabilistic backtest ({args.label}) strict rows {record['first_day']} to {record['last_day']}:")

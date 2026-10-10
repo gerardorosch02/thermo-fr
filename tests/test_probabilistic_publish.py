@@ -25,17 +25,18 @@ def test_export_and_import_of_the_probabilistic_rows(tmp_path):
     out = tmp_path / "published"
     status = export_published(store, out, days=90, now=pd.Timestamp("2026-10-12T12:00Z"), market_path=tmp_path / "none.csv")
     exported = pd.read_csv(out / "probabilistic.csv")
-    assert len(exported) == 24 and {"q10", "lo", "hi", "p_negative", "p_spike", "spike_threshold", "feature_set"} <= set(exported.columns)
+    assert len(exported) == 24 and {"p_negative", "feature_set", "hour"} <= set(exported.columns)
+    assert not {"q10", "lo", "hi", "p_spike", "spike_threshold"} & set(exported.columns)  # the band and the spike stay local, under evaluation
     tomorrow = pd.read_csv(out / "tomorrow_probabilistic.csv")
     assert len(tomorrow) == 24 and tomorrow["delivery_day"].unique().tolist() == [day]
     live = status["probabilistic"]["live"]
-    assert live["days"] == 1 and live["coverage_10_90"] == 1.0 and live["negative"]["events"] == 0 and len(live["spike"]["reliability"]) == 10
-    assert "band" in status["probabilistic"]["definitions"]
+    assert live["days"] == 1 and live["negative"]["events"] == 0 and "coverage_10_90" not in live and "spike" not in live
+    assert status["probabilistic"]["public_components"] == ["negative"] and "negative" in status["probabilistic"]["definitions"]
     fresh = Store(tmp_path / "fresh.sqlite")
     summary = import_published(fresh, out)
     assert summary["probabilistic_versions"] == 1
     back = fresh.probabilistic_curve(int(fresh.forecast_versions(day, "honest_v2").iloc[0]["forecast_id"]))
-    assert len(back) == 24 and back["conformal_margin"].iloc[0] == 1.5 and back["p_spike"].iloc[0] == 0.3
+    assert len(back) == 24 and back["p_negative"].iloc[0] == 0.02 and back["q10"].isna().all() and back["p_spike"].isna().all()
     assert import_published(fresh, out)["probabilistic_versions"] == 0  # idempotent
     fresh.close()
     store.close()

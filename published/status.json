@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-10-10T11:51:19Z",
+  "written_at_utc": "2026-10-10T11:59:53Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -120,33 +120,13 @@
     "model": {
       "fitted_at_utc": "2026-10-10T11:44:34Z",
       "train_from": "2021-01-01",
-      "train_to": "2026-10-10",
-      "conformal_margin": 12.85,
-      "holdout": {
-        "from": "2026-09-11",
-        "to": "2026-10-10",
-        "hours": 720,
-        "raw_coverage_10_90": 0.7125,
-        "coverage_10_90_with_margin": 0.8014,
-        "pinball_mean": 11.479
-      },
-      "events": {
-        "negative": {
-          "events": 1645,
-          "hours": 50614,
-          "base_rate": 0.0325
-        },
-        "spike": {
-          "events": 6351,
-          "hours": 49895,
-          "base_rate": 0.1273
-        }
-      }
+      "train_to": "2026-10-10"
     },
+    "public_components": [
+      "negative"
+    ],
     "definitions": {
-      "band": "10th to 90th percentile forecasts of each hour's price from quantile models on the same inputs, widened by a conformal margin from the last settled days so that about 80% of outcomes fall inside",
-      "negative": "probability that the hour's price is below zero",
-      "spike": "probability that the hour's price is above the 95th percentile of the trailing year's hourly prices known at the issue time"
+      "negative": "probability that the hour's price is below zero, from a classifier on the same inputs as the point forecast; accepted on the selection window and confirmed on the holdout (docs/experiments.md)"
     }
   },
   "attributions": [

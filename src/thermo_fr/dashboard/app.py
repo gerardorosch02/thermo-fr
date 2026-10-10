@@ -188,9 +188,10 @@ def main() -> None:
                    "produced it; ':fallback' means the default model's inputs were missing and honest.txt was used.")
         if feature_set == "extended":
             st.warning(EXTENDED_NOTE)
-        band_source = st.radio("Shaded band", ("backtest error", "quantile 10-90"), index=0,
+        band_source = st.radio("Shaded band", ("backtest error", "quantile 10-90 (under evaluation)"), index=0,
                                help="backtest error: the historical error percentiles of the point model; quantile 10-90: the quantile models' "
-                                    "band with the conformal margin, when the version carries one. The backtest band stays the default until confirmed.")
+                                    "band with the conformal margin, when the version carries one. Under evaluation: accepted on the selection "
+                                    "window, under-covered on the holdout (73.8%); not published.")
         st.divider()
         if st.button("Refresh now (runs morning-run once)"):
             with st.spinner("Running morning-run (fetching inputs, fitting the models) ..."):
@@ -229,7 +230,7 @@ def main() -> None:
                   if int(meta["train_hours"]) == 0 else f"{meta['model']} fitted live on {int(meta['train_hours']):,} hours")
         st.caption(f"Issued {issued:%Y-%m-%d %H:%M} Paris. Model: {fitted}; this feature set {gate_badge}.")
         by_hour = panel["by_hour"]
-        if band_source == "quantile 10-90" and "lo" in by_hour and by_hour["lo"].notna().any():
+        if band_source.startswith("quantile") and "lo" in by_hour and by_hour["lo"].notna().any():
             by_hour = by_hour.copy()
             by_hour["band_p10"], by_hour["band_p90"], by_hour["band_p25"], by_hour["band_p75"] = by_hour["lo"], by_hour["hi"], by_hour["q10"], by_hour["q90"]
             panel = {**panel, "by_hour": by_hour}
@@ -237,7 +238,7 @@ def main() -> None:
             st.plotly_chart(forecast_chart(by_hour, feature_set, today, has_band), use_container_width=True)
             st.caption("Shaded band: the quantile models' 10th to 90th percentile forecasts widened by the conformal margin (outer) and raw (inner); "
                        f"margin {by_hour['q10'].sub(by_hour['lo']).iloc[0]:.2f} EUR/MWh. About 80% of outcomes should fall inside the outer band.")
-        elif band_source == "quantile 10-90":
+        elif band_source.startswith("quantile"):
             has_band = "band_p10" in by_hour
             st.plotly_chart(forecast_chart(by_hour, feature_set, today, has_band), use_container_width=True)
             st.warning("This version carries no quantile band (the probabilistic model files were missing when it was issued); showing the backtest band.")
@@ -247,12 +248,13 @@ def main() -> None:
         if "p_negative" in by_hour and by_hour["p_negative"].notna().any():
             prob_fig = go.Figure()
             prob_fig.add_trace(go.Bar(x=by_hour["hour"], y=by_hour["p_negative"], name="P(price < 0)", marker_color=COLORS[feature_set]))
-            prob_fig.add_trace(go.Bar(x=by_hour["hour"], y=by_hour["p_spike"], name="P(spike)", marker_color=COLORS["actual"]))
+            prob_fig.add_trace(go.Bar(x=by_hour["hour"], y=by_hour["p_spike"], name="P(spike), under evaluation", marker_color=COLORS["actual"]))
             prob_fig.update_layout(barmode="group", yaxis=dict(range=[0, 1]))
             st.plotly_chart(base_layout(prob_fig, "Probability"), use_container_width=True)
-            st.caption(f"Per-hour probabilities of a negative price and of a spike above the trailing-year 95th percentile "
-                       f"({by_hour['spike_threshold'].iloc[0]:.0f} EUR/MWh at this issue).")
-        if has_band and band_source != "quantile 10-90":
+            st.caption(f"Per-hour probability of a negative price (published) and of a spike above the trailing-year 95th percentile "
+                       f"({by_hour['spike_threshold'].iloc[0]:.0f} EUR/MWh at this issue; under evaluation, not published: on the holdout the "
+                       "trailing threshold labelled 41% of hours as spikes).")
+        if has_band and not band_source.startswith("quantile"):
             n = int(panel["by_hour"]["n"].min())
             st.caption(f"Shaded band: the forecast plus the 10th to 90th (and 25th to 75th) percentile of the signed error "
                        f"of this model at the same hour in the 2024 to 2025 walk-forward backtest ({n:,}+ hours per hour of day). "
@@ -373,7 +375,7 @@ def main() -> None:
             st.warning(f"{skipped['delivery_date']} {skipped['product']}: {skipped['reason']}")
 
     # 5. Calibration of the probabilistic forecasts
-    st.subheader(f"Calibration of the band and the event probabilities ({feature_set})")
+    st.subheader(f"Calibration of the band and the event probabilities ({feature_set}); the band and the spike are under evaluation")
     cal = calibration_panel(db, version, feature_set)
     live = cal["live"]
     if live.get("days"):
