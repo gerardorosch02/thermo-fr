@@ -39,7 +39,7 @@ def test_export_writes_the_public_files_for_the_window(tmp_path):
     status = export_published(store, out, days=90, now=NOW)
     store.close()
     names = {p.name for p in out.iterdir()}
-    assert names == {"forecasts.csv", "actuals.csv", "scores.csv", "tomorrow.csv", "error_band.csv", "status.json"}
+    assert names == {"forecasts.csv", "actuals.csv", "scores.csv", "tomorrow.csv", "error_band.csv", "status.json", "shape_battery.json"}
     forecasts = pd.read_csv(out / "forecasts.csv")
     assert set(forecasts["delivery_day"]) == set(DAYS)  # June is outside the 90-day window, extended is never exported
     assert forecasts.groupby("delivery_day")["issued_at_utc"].nunique().eq(2).all()

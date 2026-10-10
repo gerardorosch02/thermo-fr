@@ -13,6 +13,7 @@ from ..config import LOCAL_TZ
 from ..forecast.jobs import next_delivery_day
 from ..forecast.market import DEFAULT_PATH as MARKET_PATH
 from ..forecast.market import FETCH_LOG_PATH, read_fetch_log
+from ..forecast.shape import live_shape_record
 from ..forecast.market import evaluate as evaluate_market
 from ..forecast.market import load_market
 from ..forecast.store import Store
@@ -176,6 +177,15 @@ def market_panel(path, feature_set: str = "honest_v2", market_path=MARKET_PATH) 
     out["path"] = str(market_path)
     out["sources"] = rows["source"].value_counts().to_dict()
     return out
+
+
+def shape_panel(path, feature_set: str = "honest_v2", backtest_path=Path("published/shape_battery_backtest.json")) -> dict:
+    """Shape and battery value: the backtest aggregates written by shape-backtest and the live record of the stored versions."""
+    import json
+
+    backtest = json.loads(Path(backtest_path).read_text()) if Path(backtest_path).exists() else {}
+    live = _with_store(path, lambda store: live_shape_record(store, feature_set))
+    return {"backtest": backtest, "live": live}
 
 
 def fetch_log_panel(log_path=FETCH_LOG_PATH, limit: int = 40) -> dict:

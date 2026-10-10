@@ -36,6 +36,7 @@ from pathlib import Path
 import pandas as pd
 
 from .market import DEFAULT_PATH as MARKET_PATH
+from .shape import live_shape_record
 from .market import evaluate as evaluate_market
 from .market import headline_version, load_market, premarket_flag, public_summary
 from .store import Store, iso, utc_now
@@ -52,6 +53,26 @@ ATTRIBUTIONS = [
     "https://opendata.reseaux-energies.fr, Licence Ouverte v2.0 (Etalab).",
     "Weather forecasts: Open-Meteo.com, https://open-meteo.com, CC BY 4.0.",
 ]
+
+
+SHAPE_BACKTEST_FILE = "shape_battery_backtest.json"  # written by `thermo-fr shape-backtest`, aggregates only
+
+
+def shape_status(store: Store, out_dir) -> dict:
+    """Write shape_battery.json (backtest aggregates plus the live record of the published set) and return the live aggregates for status."""
+    out = Path(out_dir)
+    backtest_path = out / SHAPE_BACKTEST_FILE
+    backtest = json.loads(backtest_path.read_text()) if backtest_path.exists() else {}
+    live = live_shape_record(store, PUBLIC_FEATURE_SET)
+    daily = live.pop("daily", None)
+    payload = {"backtest": backtest, "live": {**live, "daily": daily.to_dict(orient="records") if daily is not None else []},
+               "definitions": {"shape": "each hour's price minus the day's mean (base)",
+                               "battery": "1 MW / 2 MWh, 88% round-trip, one cycle a day, a 2-hour charge block before a 2-hour discharge block "
+                                          "chosen on the forecast before the gate, settled at the auction result; skipped when the forecast "
+                                          "spread does not cover the efficiency loss",
+                               "benchmarks": "d1: yesterday's shape; same_type: the shape of the most recent earlier day of the same type"}}
+    (out / "shape_battery.json").write_text(json.dumps(payload, indent=2, default=str))
+    return {k: v for k, v in live.items() if k in ("days", "shape", "battery")}
 
 
 def market_status(store: Store, market_path=MARKET_PATH) -> dict:
@@ -156,6 +177,7 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
                                                              "train_hours", "holdout")} if fallback_meta else {},
         "last_run": last_run or {},
         "market": market_status(store, market_path),
+        "shape_battery": shape_status(store, out),
         "attributions": ATTRIBUTIONS,
         "note": "Forecasts use only information available at 12:00 Paris time on the day before delivery. "
                 "Forecast error is measured against a naive same-hour-previous-day baseline (the spot auction result of the "
