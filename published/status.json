@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-10-10T09:40:25Z",
+  "written_at_utc": "2026-10-10T10:16:31Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -107,6 +107,9 @@
     "scored_days": 0,
     "min_days_to_show": 20,
     "note": "Versus the market: collecting data, 0 of 20 days."
+  },
+  "shape_battery": {
+    "days": 0
   },
   "attributions": [
     "Day-ahead prices, load forecast and wind and solar forecasts: ENTSO-E Transparency Platform, https://transparency.entsoe.eu, reused with the source cited as required by its terms.",
