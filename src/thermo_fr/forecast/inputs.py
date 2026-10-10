@@ -19,6 +19,8 @@ One hourly UTC table, data/forecast/inputs.csv, with these columns:
     solar_proxy_mw        pre-gate solar generation proxy (forecast/solar_proxy.py), weights refitted monthly
     wind_pt_<point>_ms    Open-Meteo 100 m wind speed as forecast two days ahead at each wind-region point
     solar_pt_<point>_wm2  Open-Meteo shortwave radiation as forecast two days ahead at each solar-region point
+    nuclear_mw            ENTSO-E actual nuclear generation (used lagged: D-2 and the early hours of D-1)
+    price_<zone>_eur_mwh  ENTSO-E day-ahead price of DE-LU, BE, NL, ES, IT-North and CH (used lagged by one day)
 
 Next to it, sources.json records where each series came from, the ENTSO-E
 document metadata per year (revision numbers, resolutions) and the first
@@ -33,7 +35,8 @@ import numpy as np
 import pandas as pd
 
 from ..data.csv_source import CsvSource
-from ..data.entsoe_client import EntsoeSource
+from ..data.entsoe_client import EntsoeSource, neighbour_price_column
+from ..data.entsoe_rest import NEIGHBOUR_ZONES
 from ..data.sources import UnsupportedSeriesError
 from ..data.solar_points import POINT_COLUMNS as SOLAR_POINT_COLUMNS
 from ..data.solar_points import SolarPointsSource
@@ -41,11 +44,12 @@ from ..data.weather_forecast import OpenMeteoForecastSource
 from ..data.wind_points import POINT_COLUMNS, WindPointsSource
 from . import solar_proxy, wind_proxy
 
+NEIGHBOUR_PRICE_COLUMNS = [neighbour_price_column(z) for z in NEIGHBOUR_ZONES]
 INPUT_COLUMNS = [
     "price_eur_mwh", "load_fc_mw", "solar_fc_mw", "wind_onshore_fc_mw", "wind_offshore_fc_mw",
     "temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2", "temp_proxy_c", "wind100_proxy_ms", "radiation_proxy_wm2",
     "wind_onshore_mw", "wind_offshore_mw", "wind_proxy_mw", "solar_mw", "solar_proxy_mw",
-] + POINT_COLUMNS + SOLAR_POINT_COLUMNS
+] + POINT_COLUMNS + SOLAR_POINT_COLUMNS + ["nuclear_mw"] + NEIGHBOUR_PRICE_COLUMNS
 
 
 def compare_prices(api: pd.Series, csv: pd.Series, tolerance: float = 0.005) -> dict:
@@ -96,6 +100,10 @@ def fetch_inputs(start: str, end: str, cache_dir=Path("data/cache"), csv_dir=Pat
     wind_actual = entsoe.wind_generation_actual(start, end)
     log("Fetching ENTSO-E actual solar generation ...")
     solar_actual = entsoe.solar_generation_actual(start, end)
+    log("Fetching ENTSO-E actual nuclear generation ...")
+    nuclear_actual = entsoe.nuclear_generation_actual(start, end)
+    log("Fetching ENTSO-E day-ahead prices of the neighbouring zones ...")
+    neighbours = entsoe.neighbour_prices(start, end)
 
     weather = OpenMeteoForecastSource(cache_dir=cache_dir / "open-meteo")
     log("Fetching Open-Meteo forecasts as issued (previous runs) and the historical-forecast proxy ...")
@@ -111,8 +119,8 @@ def fetch_inputs(start: str, end: str, cache_dir=Path("data/cache"), csv_dir=Pat
     log("Calibrating the solar proxy month by month on actual generation ...")
     sproxy, solar_fits = solar_proxy.rolling_proxy(solar_points, solar_actual, log=log)
 
-    hourly = pd.concat([price, load_fc, wind_solar, weather_frame, wind_actual, proxy, solar_actual, sproxy, points, solar_points],
-                       axis=1).sort_index()
+    hourly = pd.concat([price, load_fc, wind_solar, weather_frame, wind_actual, proxy, solar_actual, sproxy, points, solar_points,
+                        nuclear_actual, neighbours], axis=1).sort_index()
     hourly = hourly.reindex(columns=INPUT_COLUMNS)
 
     comparison = {"note": "no CSV price export found"}

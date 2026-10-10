@@ -43,17 +43,42 @@ query time). Sources:
   on D-2.
 - Calendar features, including day types, bridge days and the holiday
   neighbours, are known in advance.
+- Actual nuclear generation (ENTSO-E A75, psrType B14) is published within
+  an hour of the operating period (Article 16(1)(a)); on 2026-10-10 the
+  latest quarter-hour was about 50 minutes old. The rules allow two hours.
+  The full day D-2 is therefore known by 02:00 Paris on D-1, and the hours
+  of D-1 that end by NUCLEAR_D1_CUTOFF_HOUR (08:00 Paris) are known by 10:00
+  Paris on D-1, before the earliest pre-market run.
+- Neighbour day-ahead prices (DE-LU, BE, NL, ES, IT-North, CH) for delivery
+  day D-1 clear with the same coupling as France (Switzerland runs its own
+  auction, also on D-2 for D-1), taken as 13:00 Paris on D-2 like the
+  French price lag. The Swiss result for D itself, although it clears before
+  the French gate, is not used: it is not reliably out by the pre-market
+  issue time.
+- The v2 residual load (load forecast minus the wind and solar proxies minus
+  the latest known nuclear generation) is known when its latest component is,
+  the load forecast at 10:00 Paris on D-1.
+
+Two deadlines are checked. The gate (12:00 Paris on D-1) is the hard
+constraint every honest feature must meet. The pre-market issue time,
+PREMARKET_ISSUE (10:05 Paris on D-1, the start of the earliest scheduled
+run), is the moment the forecast is actually produced; check_point_in_time
+with deadline="premarket" verifies that every feature is known by then.
 """
 
 from dataclasses import dataclass
 from typing import Callable
 
+import numpy as np
 import pandas as pd
 
 from ..config import LOCAL_TZ
 
 GATE_HOUR = 12  # Paris local time, on the day before delivery
+PREMARKET_ISSUE = (10, 5)  # Paris, D-1: the earliest scheduled pre-market run starts here (forecast/schedule.py)
 PRICE_PUBLICATION_HOUR = 13
+NUCLEAR_PUBLICATION_LAG_HOURS = 2  # conservative; the regulation says one hour and about 50 minutes was observed
+NUCLEAR_D1_CUTOFF_HOUR = 8  # Paris: D-1 hours ending by then are used, known by 10:00 Paris
 LOAD_FORECAST_HOUR = 10
 WIND_SOLAR_FORECAST_HOUR = 18
 WEATHER_RUN_CYCLE_HOURS = 6
@@ -84,9 +109,19 @@ def gate_for(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
     return gate_closure(delivery_days(index))
 
 
+def premarket_issue_for(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
+    """10:05 Paris on the day before the delivery day of each valid hour, in UTC: when the earliest pre-market run starts."""
+    days = delivery_days(index)
+    local = (days - pd.Timedelta(days=1) + pd.Timedelta(hours=PREMARKET_ISSUE[0], minutes=PREMARKET_ISSUE[1])).tz_localize(LOCAL_TZ)
+    return local.tz_convert("UTC")
+
+
 def _local_clock(days, offset_days: int, hour: int) -> pd.DatetimeIndex:
+    """`hour` o'clock Paris on each day plus offset, in UTC. On the clock-change days a skipped hour moves forward and a repeated hour takes
+    its first (summer-time) occurrence, the earlier of the two, so a rule never claims a later publication than the clock allows."""
     days = pd.DatetimeIndex(pd.to_datetime(days))
-    local = (days + pd.Timedelta(days=offset_days) + pd.Timedelta(hours=hour)).tz_localize(LOCAL_TZ)
+    naive = days + pd.Timedelta(days=offset_days) + pd.Timedelta(hours=hour)
+    local = naive.tz_localize(LOCAL_TZ, ambiguous=np.ones(len(naive), dtype=bool), nonexistent="shift_forward")
     return local.tz_convert("UTC")
 
 
@@ -154,6 +189,30 @@ def calendar_issue(index) -> pd.DatetimeIndex:
     return pd.DatetimeIndex([FAR_PAST] * len(index))
 
 
+def nuclear_d2_issue(index) -> pd.DatetimeIndex:
+    """The last hour of D-2 ends at 00:00 Paris on D-1; its generation is public NUCLEAR_PUBLICATION_LAG_HOURS later."""
+    return _local_clock(delivery_days(index), -1, NUCLEAR_PUBLICATION_LAG_HOURS)
+
+
+def nuclear_d1_issue(index) -> pd.DatetimeIndex:
+    """D-1 hours ending by NUCLEAR_D1_CUTOFF_HOUR Paris are public NUCLEAR_PUBLICATION_LAG_HOURS after that hour."""
+    return _local_clock(delivery_days(index), -1, NUCLEAR_D1_CUTOFF_HOUR + NUCLEAR_PUBLICATION_LAG_HOURS)
+
+
+def neighbour_price_lag1_issue(index) -> pd.DatetimeIndex:
+    """Neighbour prices of D-1, published with the coupling results about 13:00 Paris on D-2."""
+    return price_lag_issue(1)(index)
+
+
+def residual_v2_issue(index) -> pd.DatetimeIndex:
+    """The latest of the load forecast, the generation proxies and the D-1 nuclear hours."""
+    candidates = [load_forecast_issue(index), generation_proxy_issue(index), nuclear_d1_issue(index)]
+    latest = candidates[0]
+    for other in candidates[1:]:
+        latest = pd.DatetimeIndex(latest.where(latest >= other, other))
+    return latest
+
+
 @dataclass(frozen=True)
 class InputTiming:
     name: str
@@ -194,6 +253,22 @@ TIMINGS = {
         "price_lag_same_type", price_lag_same_type_issue,
         "Day-ahead price of the most recent earlier day of the same type (D-1 or earlier), published about 13:00 Paris the day before it.",
     ),
+    "nuclear_d2": InputTiming(
+        "nuclear_d2", nuclear_d2_issue,
+        "ENTSO-E actual nuclear generation of D-2 (A75, B14), public within two hours of each hour: by 02:00 Paris on D-1.",
+    ),
+    "nuclear_d1": InputTiming(
+        "nuclear_d1", nuclear_d1_issue,
+        "ENTSO-E actual nuclear generation of the D-1 hours ending by 08:00 Paris, public by 10:00 Paris on D-1.",
+    ),
+    "neighbour_price_lag1": InputTiming(
+        "neighbour_price_lag1", neighbour_price_lag1_issue,
+        "Day-ahead prices of DE-LU, BE, NL, ES, IT-North and CH for D-1, published about 13:00 Paris on D-2.",
+    ),
+    "residual_v2": InputTiming(
+        "residual_v2", residual_v2_issue,
+        "Load forecast minus wind and solar proxies minus the latest known nuclear generation: known with the load forecast, 10:00 Paris on D-1.",
+    ),
 }
 
 
@@ -206,20 +281,27 @@ def lateness(index: pd.DatetimeIndex, timing_name: str) -> pd.TimedeltaIndex:
     return issue_times(index, timing_name) - gate_for(index)
 
 
-def check_point_in_time(index: pd.DatetimeIndex, feature_timings: dict[str, str]) -> None:
-    """Raise LookaheadError if any feature's issue time is after the gate for any row.
+def check_point_in_time(index: pd.DatetimeIndex, feature_timings: dict[str, str], deadline: str = "gate") -> None:
+    """Raise LookaheadError if any feature's issue time is after the deadline for any row.
 
     `feature_timings` maps feature column names to the names in TIMINGS.
+    `deadline` is "gate" (12:00 Paris on D-1, the auction) or "premarket"
+    (10:05 Paris on D-1, when the earliest scheduled run starts).
     """
     index = pd.DatetimeIndex(index)
     if len(index) == 0:
         return
-    gate = gate_for(index)
+    if deadline == "gate":
+        limit, label = gate_for(index), "12:00 Paris on D-1"
+    elif deadline == "premarket":
+        limit, label = premarket_issue_for(index), "the pre-market issue time, 10:05 Paris on D-1"
+    else:
+        raise ValueError(f"deadline must be 'gate' or 'premarket', not {deadline!r}")
     offenders = []
     for feature, timing_name in feature_timings.items():
-        late = issue_times(index, timing_name) - gate
+        late = issue_times(index, timing_name) - limit
         if (late > pd.Timedelta(0)).any():
             worst = late.max()
-            offenders.append(f"{feature} ({timing_name}): up to {worst} after the gate")
+            offenders.append(f"{feature} ({timing_name}): up to {worst} after the deadline")
     if offenders:
-        raise LookaheadError("Features use information published after 12:00 Paris on D-1: " + "; ".join(offenders))
+        raise LookaheadError(f"Features use information published after {label}: " + "; ".join(offenders))
