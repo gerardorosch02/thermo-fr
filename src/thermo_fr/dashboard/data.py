@@ -13,6 +13,7 @@ from ..config import LOCAL_TZ
 from ..forecast.jobs import next_delivery_day
 from ..forecast.market import DEFAULT_PATH as MARKET_PATH
 from ..forecast.market import FETCH_LOG_PATH, read_fetch_log
+from ..forecast.probabilistic import live_calibration
 from ..forecast.shape import live_shape_record
 from ..forecast.market import evaluate as evaluate_market
 from ..forecast.market import load_market
@@ -51,6 +52,7 @@ def forecast_panel(path, delivery_day: str, feature_set: str, actual_day: str) -
 
     def read(store: Store):
         meta, curve, later = store.headline_forecast(delivery_day, feature_set)
+        prob = store.probabilistic_curve(int(meta["forecast_id"])) if meta is not None else pd.DataFrame()
         versions = store.forecast_versions(delivery_day, feature_set)
         band = store.error_band(feature_set)
         actual = store.actuals_for(actual_day)
@@ -61,7 +63,7 @@ def forecast_panel(path, delivery_day: str, feature_set: str, actual_day: str) -
             later_rows.append({"issued_at_utc": v["issued_at_utc"], "kind": v["kind"], "model": v["model"],
                                "daily_mean": float(c["forecast"].mean()), "forecast_id": int(v["forecast_id"])})
         return {"meta": meta, "curve": curve, "versions": versions, "band": band, "actual_other": actual, "actual_own": own_actual,
-                "later": pd.DataFrame(later_rows)}
+                "later": pd.DataFrame(later_rows), "prob": prob}
 
     out = _with_store(path, read)
     curve = out["curve"]
@@ -81,8 +83,23 @@ def forecast_panel(path, delivery_day: str, feature_set: str, actual_day: str) -
         by_hour = by_hour.merge(band, left_on="hour", right_index=True, how="left")
         for q in ("p10", "p25", "p75", "p90"):
             by_hour[f"band_{q}"] = by_hour["forecast"] + by_hour[q]
+    prob = out.get("prob")
+    if prob is not None and not prob.empty:
+        hourly_prob = prob.copy()
+        hourly_prob["hour"] = hourly_prob.index.tz_convert(LOCAL_TZ).hour
+        agg = hourly_prob.groupby("hour").agg(lo=("lo", "mean"), q10=("q10", "mean"), q50=("q50", "mean"), q90=("q90", "mean"), hi=("hi", "mean"),
+                                              p_negative=("p_negative", "mean"), p_spike=("p_spike", "mean"), spike_threshold=("spike_threshold", "first")).reset_index()
+        by_hour = by_hour.merge(agg, on="hour", how="left")
     out["by_hour"] = by_hour
     return out
+
+
+def calibration_panel(path, feature_set: str = "honest_v2", backtest_path=Path("published/probabilistic_backtest.json")) -> dict:
+    import json
+
+    backtest = json.loads(Path(backtest_path).read_text()) if Path(backtest_path).exists() else {}
+    live = _with_store(path, lambda store: live_calibration(store.probabilistic_settled(feature_set)))
+    return {"backtest": backtest, "live": live}
 
 
 def daily_inputs(frame: pd.DataFrame) -> dict:

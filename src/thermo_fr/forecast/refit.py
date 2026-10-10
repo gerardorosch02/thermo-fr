@@ -102,23 +102,29 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
     return meta
 
 
-def refit_sets(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_sets=("honest",), log=print) -> dict:
-    """One model file per feature set; the proxy weights are written with the first set only (they do not depend on the set)."""
+def refit_sets(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_sets=("honest",), log=print, probabilistic: bool = True) -> dict:
+    """One model file per feature set; the proxy weights, and the probabilistic models, are written with the first set only."""
+    from .probabilistic import fit_probabilistic
+
     metas = {}
     for i, feature_set in enumerate(feature_sets):
         metas[feature_set] = refit_model(hourly, out_dir=out_dir, feature_set=feature_set, log=log, save_proxies=(i == 0))
+        if i == 0 and probabilistic:
+            log(f"Fitting the quantile and event models for {feature_set} ...")
+            metas[feature_set]["probabilistic"] = fit_probabilistic(build_features(hourly, feature_set), feature_set, out_dir, log=log)
     return metas
 
 
 def fetch_and_refit(start: str, end: str, out_dir=DEFAULT_MODEL_DIR, cache_dir=Path("data/cache"), csv_dir=Path("data/csv"),
-                    inputs_path=Path("data/forecast/inputs.csv"), log=print, feature_sets=("honest",)) -> dict:
+                    inputs_path=Path("data/forecast/inputs.csv"), log=print, feature_sets=("honest",), probabilistic: bool = True) -> dict:
     """Fetch the full inputs history for [start, end) (ENTSO-E key needed), save it locally, refit. Returns {feature_set: metadata}."""
     hourly, sources, comparison = fetch_inputs(start, end, cache_dir=cache_dir, csv_dir=csv_dir, log=log)
     inputs_path = Path(inputs_path)
     inputs_path.parent.mkdir(parents=True, exist_ok=True)
     hourly.to_csv(inputs_path, index_label="timestamp_utc")
-    return refit_sets(hourly, out_dir=out_dir, feature_sets=feature_sets, log=log)
+    return refit_sets(hourly, out_dir=out_dir, feature_sets=feature_sets, log=log, probabilistic=probabilistic)
 
 
-def refit_from_file(inputs_path=Path("data/forecast/inputs.csv"), out_dir=DEFAULT_MODEL_DIR, log=print, feature_sets=("honest",)) -> dict:
-    return refit_sets(load_inputs(inputs_path), out_dir=out_dir, feature_sets=feature_sets, log=log)
+def refit_from_file(inputs_path=Path("data/forecast/inputs.csv"), out_dir=DEFAULT_MODEL_DIR, log=print, feature_sets=("honest",),
+                    probabilistic: bool = True) -> dict:
+    return refit_sets(load_inputs(inputs_path), out_dir=out_dir, feature_sets=feature_sets, log=log, probabilistic=probabilistic)

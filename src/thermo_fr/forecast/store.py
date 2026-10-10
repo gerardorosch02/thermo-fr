@@ -51,6 +51,9 @@ CREATE TABLE IF NOT EXISTS forecasts (
 CREATE TABLE IF NOT EXISTS forecast_values (
     forecast_id INTEGER NOT NULL, timestamp_utc TEXT NOT NULL, hour INTEGER NOT NULL, forecast REAL NOT NULL, naive_day REAL,
     PRIMARY KEY (forecast_id, timestamp_utc));
+CREATE TABLE IF NOT EXISTS forecast_prob (
+    forecast_id INTEGER NOT NULL, timestamp_utc TEXT NOT NULL, q10 REAL, q50 REAL, q90 REAL, lo REAL, hi REAL, p_negative REAL, p_spike REAL,
+    spike_threshold REAL, conformal_margin REAL, PRIMARY KEY (forecast_id, timestamp_utc));
 CREATE TABLE IF NOT EXISTS actuals (
     timestamp_utc TEXT PRIMARY KEY, delivery_day TEXT NOT NULL, hour INTEGER NOT NULL, price REAL NOT NULL, fetched_at_utc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scores (
@@ -267,6 +270,38 @@ class Store:
         )
         self.conn.commit()
         return forecast_id
+
+    def save_probabilistic(self, forecast_id: int, frame: pd.DataFrame) -> None:
+        """The quantiles, conformal band and event probabilities of a version (index: valid hour UTC)."""
+        columns = ["q10", "q50", "q90", "lo", "hi", "p_negative", "p_spike", "spike_threshold", "conformal_margin"]
+        rows = [(int(forecast_id), iso(ts), *[None if pd.isna(row[c]) else float(row[c]) for c in columns]) for ts, row in frame.iterrows()]
+        self.conn.executemany(
+            "INSERT OR REPLACE INTO forecast_prob (forecast_id, timestamp_utc, " + ", ".join(columns) + ") VALUES (?, ?, " + ", ".join("?" * len(columns)) + ")",
+            rows,
+        )
+        self.conn.commit()
+
+    def probabilistic_curve(self, forecast_id: int) -> pd.DataFrame:
+        frame = pd.read_sql_query(
+            "SELECT timestamp_utc, q10, q50, q90, lo, hi, p_negative, p_spike, spike_threshold, conformal_margin FROM forecast_prob"
+            " WHERE forecast_id = ? ORDER BY timestamp_utc", self.conn, params=(int(forecast_id),))
+        frame["timestamp_utc"] = pd.to_datetime(frame["timestamp_utc"], utc=True)
+        return frame.set_index("timestamp_utc")
+
+    def probabilistic_settled(self, feature_set: str, days: int = 90) -> pd.DataFrame:
+        """The headline version's probabilistic curve of each settled day of the last `days`, joined with the actual prices."""
+        scores = self.headline_scores(feature_set, days=days)
+        frames = []
+        for _, row in scores.iterrows():
+            curve = self.probabilistic_curve(int(row["forecast_id"]))
+            if curve.empty:
+                continue
+            actual = self.actuals_for(row["delivery_day"])
+            curve["actual"] = actual.reindex(curve.index).to_numpy()
+            curve["delivery_day"] = row["delivery_day"]
+            frames.append(curve)
+        return pd.concat(frames) if frames else pd.DataFrame(columns=["q10", "q50", "q90", "lo", "hi", "p_negative", "p_spike", "spike_threshold",
+                                                                          "conformal_margin", "actual", "delivery_day"])
 
     def forecast_versions(self, delivery_day: str, feature_set: str | None = None) -> pd.DataFrame:
         query = "SELECT * FROM forecasts WHERE delivery_day = ?"

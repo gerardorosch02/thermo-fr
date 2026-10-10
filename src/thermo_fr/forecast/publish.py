@@ -16,7 +16,12 @@ Files written by `export_published`:
                        with the same `premarket` flag
     tomorrow.csv       the headline forecast of the default model for the next delivery day, hourly: the last
                        version issued before the market window, else the latest
-    error_band.csv     backtest error percentiles by hour (the dashboard's shaded band)
+    error_band.csv     backtest error percentiles by hour (the dashboard's shaded band until the quantile band is made the default)
+    probabilistic.csv  per version and hour of the published sets: the probability of a negative price (the quantile band and the spike
+                       probability are computed and stored locally every day but not published, under evaluation);
+                       tomorrow_probabilistic.csv the headline version's rows
+    probabilistic_backtest.json  aggregates of the negative-price backtest on the selection window and the holdout, written by
+                       `thermo-fr prob-backtest`
     model/honest_v2.txt   the default LightGBM model, refitted monthly by the workflow (see refit.py)
     model/honest_v2.json  its training period, fit date, features and holdout metrics
     model/honest.txt      the fallback model (used when a v2 input is missing), refitted with it; honest.json its metadata
@@ -36,6 +41,7 @@ from pathlib import Path
 import pandas as pd
 
 from .market import DEFAULT_PATH as MARKET_PATH
+from .probabilistic import live_calibration
 from .shape import live_shape_record
 from .market import evaluate as evaluate_market
 from .market import headline_version, load_market, premarket_flag, public_summary
@@ -56,6 +62,29 @@ ATTRIBUTIONS = [
 
 
 SHAPE_BACKTEST_FILE = "shape_battery_backtest.json"  # written by `thermo-fr shape-backtest`, aggregates only
+
+
+PROB_BACKTEST_FILE = "probabilistic_backtest.json"  # written by `thermo-fr prob-backtest`, aggregates only
+
+
+def probabilistic_status(store: Store, out_dir) -> dict:
+    """Live calibration of the published set's probabilistic forecasts (aggregates only) plus a pointer to the backtest aggregates."""
+    out = Path(out_dir)
+    live = live_calibration(store.probabilistic_settled(PUBLIC_FEATURE_SET))
+    public_live = {k: live[k] for k in ("days", "hours", "negative") if k in live}  # the band and the spike stay local, under evaluation
+    meta_path = out / "model" / f"{PUBLIC_FEATURE_SET}_probabilistic.json"
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    return {"live": public_live, "backtest_file": PROB_BACKTEST_FILE if (out / PROB_BACKTEST_FILE).exists() else None,
+            "model": {k: meta.get(k) for k in ("fitted_at_utc", "train_from", "train_to") if k in meta} if meta else {},
+            "public_components": ["negative"],
+            "definitions": {"negative": "probability that the hour's price is below zero, from a classifier on the same inputs as the point "
+                                        "forecast; accepted on the selection window and confirmed on the holdout (docs/experiments.md)"}}
+
+
+def public_probabilistic_record(record: dict) -> dict:
+    """What the public backtest file carries: the negative-price event only (the interval and the spike stay in the local reports)."""
+    return {"label": record.get("label"), "first_day": record.get("first_day"), "last_day": record.get("last_day"),
+            "events": {"negative": record.get("events", {}).get("negative", {})}, "written_at_utc": record.get("written_at_utc")}
 
 
 def shape_status(store: Store, out_dir) -> dict:
@@ -137,6 +166,25 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
     else:
         pd.DataFrame(columns=forecasts.columns).to_csv(out / "tomorrow.csv", index=False)
 
+    # public: the negative-price probability only; the quantile band and the spike probability stay in the local store, under evaluation
+    prob = pd.read_sql_query(
+        "SELECT f.delivery_day, f.issued_at_utc, f.feature_set, p.timestamp_utc, p.p_negative"
+        " FROM forecast_prob p JOIN forecasts f ON f.forecast_id = p.forecast_id"
+        f" WHERE f.feature_set IN ({sets_sql}) AND f.delivery_day >= ? ORDER BY f.delivery_day, f.issued_at_utc, p.timestamp_utc",
+        store.conn, params=(*PUBLIC_FEATURE_SETS, cutoff),
+    )
+    if len(prob):
+        prob["hour"] = pd.to_datetime(prob["timestamp_utc"], utc=True).dt.tz_convert("Europe/Paris").dt.hour  # the public app groups by Paris hour
+    else:
+        prob["hour"] = pd.Series(dtype=int)
+    prob.to_csv(out / "probabilistic.csv", index=False)
+    if not tomorrow.empty and len(prob):
+        head_prob = prob[(prob["delivery_day"] == latest_day) & (prob["issued_at_utc"] == headline["issued_at_utc"])
+                         & (prob["feature_set"] == headline["feature_set"])]
+        head_prob.to_csv(out / "tomorrow_probabilistic.csv", index=False)
+    else:
+        pd.DataFrame(columns=prob.columns).to_csv(out / "tomorrow_probabilistic.csv", index=False)
+
     band = pd.DataFrame()
     for band_set in (PUBLIC_FEATURE_SET, FALLBACK_FEATURE_SET):  # the default model's band, else the fallback model's
         band = pd.read_sql_query(
@@ -178,6 +226,7 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
         "last_run": last_run or {},
         "market": market_status(store, market_path),
         "shape_battery": shape_status(store, out),
+        "probabilistic": probabilistic_status(store, out),
         "attributions": ATTRIBUTIONS,
         "note": "Forecasts use only information available at 12:00 Paris time on the day before delivery. "
                 "Forecast error is measured against a naive same-hour-previous-day baseline (the spot auction result of the "
@@ -192,7 +241,7 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
 def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
     """Load the published files into a (usually empty) store."""
     src = Path(in_dir)
-    summary = {"forecast_versions": 0, "actual_rows": 0, "scores": 0, "error_band_rows": 0}
+    summary = {"forecast_versions": 0, "actual_rows": 0, "scores": 0, "error_band_rows": 0, "probabilistic_versions": 0}
     forecasts_path = src / "forecasts.csv"
     if forecasts_path.exists() and forecasts_path.stat().st_size > 0:
         forecasts = pd.read_csv(forecasts_path)
@@ -230,6 +279,20 @@ def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
                 "mae_below_baseline": None if pd.isna(r["mae_below_baseline"]) else bool(r["mae_below_baseline"]),
             }, now=pd.Timestamp(r["settled_at_utc"]) if isinstance(r["settled_at_utc"], str) else None)
             summary["scores"] += 1
+    prob_path = src / "probabilistic.csv"
+    if prob_path.exists() and prob_path.stat().st_size > 0:
+        prob = pd.read_csv(prob_path)
+        if not prob.empty:
+            versions = pd.read_sql_query("SELECT forecast_id, delivery_day, issued_at_utc, feature_set FROM forecasts", store.conn)
+            merged = prob.merge(versions, on=["delivery_day", "issued_at_utc", "feature_set"], how="inner")
+            for fid, group in merged.groupby("forecast_id"):
+                if not store.probabilistic_curve(int(fid)).empty:
+                    continue
+                frame = group.set_index(pd.to_datetime(group["timestamp_utc"], utc=True)).reindex(
+                    columns=["q10", "q50", "q90", "lo", "hi", "p_negative", "p_spike", "spike_threshold"])  # public files carry p_negative only
+                frame["conformal_margin"] = (frame["q10"] - frame["lo"]).round(4)
+                store.save_probabilistic(int(fid), frame)
+                summary["probabilistic_versions"] += 1
     band_path = src / "error_band.csv"
     if band_path.exists() and band_path.stat().st_size > 0:
         band = pd.read_csv(band_path)

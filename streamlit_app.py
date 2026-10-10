@@ -72,6 +72,8 @@ def load_published(version: float) -> dict:
         "scores": read("scores.csv"),
         "band": read("error_band.csv"),
         "shape": json.loads((PUBLISHED / "shape_battery.json").read_text()) if (PUBLISHED / "shape_battery.json").exists() else {},
+        "prob_tomorrow": read("tomorrow_probabilistic.csv"),
+        "prob_backtest": json.loads((PUBLISHED / "probabilistic_backtest.json").read_text()) if (PUBLISHED / "probabilistic_backtest.json").exists() else {},
     }
     # the dataset may carry more than one feature set (the default model's and the fallback's); the app shows the default
     for key in ("forecasts", "scores"):
@@ -152,6 +154,7 @@ def tomorrow_table(data: dict) -> pd.DataFrame:
         by_hour = by_hour.merge(band[["hour", "p10", "p25", "p75", "p90", "n"]], on="hour", how="left")
         for q in ("p10", "p25", "p75", "p90"):
             by_hour[f"band_{q}"] = by_hour["forecast"] + by_hour[q]
+        by_hour.attrs["band_source"] = "backtest"
     return by_hour
 
 
@@ -220,6 +223,10 @@ def history_chart(data: dict, days: int = 30) -> go.Figure | None:
 
 # The backfilled trading record, scored as a walk-forward (see the repository's docs/forecast.md); aggregates only,
 # the traded prices themselves are not republished. Updated by hand when the record is re-scored.
+# The shaded band on tomorrow's chart is the backtest error band. The quantile band exists in the local store, under evaluation, and is
+# not published; this constant stays "backtest" (the public dataset carries no quantile columns, so no other value would work).
+BAND_SOURCE = "backtest"
+
 MARKET_RECORD = {
     "period": "delivery days 2026-08-29 to 2026-10-10",
     "windows": 42, "base_windows": 38, "peak_windows": 4,
@@ -364,6 +371,48 @@ def main() -> None:
         st.markdown(f"**Live record: collecting data, {int(market.get('scored_days', 0))} of {needed} days.**")
         st.caption("The live record counts only days whose forecast was published before the trading window; its aggregates appear "
                    "once enough days are scored.")
+
+    st.subheader("Negative-price probability and its calibration")
+    prob = data.get("prob_tomorrow", pd.DataFrame())
+    prob_status = status.get("probabilistic") or {}
+    if not prob.empty and "p_negative" in prob:
+        hourly = prob.groupby("hour").agg(p_negative=("p_negative", "mean")).reset_index()
+        st.markdown("**Tomorrow's per-hour probability of a negative price** (headline version), from a classifier on the same inputs as the "
+                    "point forecast.")
+        fig = go.Figure(go.Bar(x=hourly["hour"], y=hourly["p_negative"], name="P(price < 0)", marker_color=COLORS["forecast"]))
+        fig.update_layout(yaxis=dict(range=[0, 1]))
+        st.plotly_chart(layout(fig, "Probability", "Delivery hour (Paris time)"), use_container_width=True)
+    else:
+        st.info("No negative-price probability for tomorrow's headline version yet (a version issued without the probabilistic model files "
+                "carries none).")
+    backtest = data.get("prob_backtest") or {}
+    live = prob_status.get("live") or {}
+    rows = []
+    for label, record in backtest.items():
+        r = record.get("events", {}).get("negative", {})
+        rows.append({"window": f"backtest {label} ({record.get('first_day')} to {record.get('last_day')})", "hours": r.get("hours"), "events": r.get("events"),
+                     "Brier (model)": r.get("brier", {}).get("model"), "Brier (climatology)": r.get("brier", {}).get("clim"),
+                     "Brier (last 7 days)": r.get("brier", {}).get("last7"), "BSS vs climatology": r.get("bss_vs_clim"), "BSS vs last 7 days": r.get("bss_vs_last7"),
+                     "log loss": r.get("log_loss", {}).get("model")})
+    if live.get("days") and live.get("negative"):
+        n = live["negative"]
+        rows.append({"window": f"live, {live['days']} settled days", "hours": n.get("hours"), "events": n.get("events"), "Brier (model)": n.get("brier"),
+                     "Brier (climatology)": n.get("brier_base_rate"), "log loss": n.get("log_loss")})
+    if rows:
+        st.markdown("**Calibration** (aggregates only). Benchmarks: climatology, the frequency for that hour of day and calendar month over the "
+                    "trailing year; and the frequency at that hour over the last 7 days. BSS is the Brier skill score; positive means better than "
+                    "the benchmark. On the live row the benchmark is the base rate of the settled days.")
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        for label, record in backtest.items():
+            table = pd.DataFrame(record.get("events", {}).get("negative", {}).get("reliability", []))
+            if not table.empty:
+                with st.expander(f"Reliability table, backtest {label} (10 bins)"):
+                    st.dataframe(table, hide_index=True, use_container_width=True)
+        if live.get("negative", {}).get("reliability"):
+            with st.expander("Reliability table, live"):
+                st.dataframe(pd.DataFrame(live["negative"]["reliability"]), hide_index=True, use_container_width=True)
+    st.caption("Accepted on the selection window and confirmed on the holdout (158 events, Brier skill +0.37 and +0.41); see docs/experiments.md. "
+               "A quantile band and a spike probability are computed and stored every day but are under evaluation and not shown here.")
 
     st.subheader("Shape and battery value")
     shape = data.get("shape") or {}

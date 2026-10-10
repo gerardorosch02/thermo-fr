@@ -1,0 +1,178 @@
+{
+  "selection": {
+    "label": "selection",
+    "first_day": "2024-02-17",
+    "last_day": "2026-06-30",
+    "events": {
+      "negative": {
+        "hours": 20752,
+        "events": 1264,
+        "base_rate": 0.0609,
+        "bss_vs_clim": 0.2256,
+        "bss_vs_last7": 0.2403,
+        "brier": {
+          "model": 0.03283,
+          "clim": 0.04239,
+          "last7": 0.04321
+        },
+        "log_loss": {
+          "model": 0.1394,
+          "clim": 0.186,
+          "last7": 0.2468
+        },
+        "reliability": [
+          {
+            "bin": "0.0-0.1",
+            "n": 19354,
+            "mean_forecast": 0.0023,
+            "observed_frequency": 0.0204
+          },
+          {
+            "bin": "0.1-0.2",
+            "n": 231,
+            "mean_forecast": 0.1417,
+            "observed_frequency": 0.3723
+          },
+          {
+            "bin": "0.2-0.3",
+            "n": 138,
+            "mean_forecast": 0.2473,
+            "observed_frequency": 0.3986
+          },
+          {
+            "bin": "0.3-0.4",
+            "n": 98,
+            "mean_forecast": 0.3521,
+            "observed_frequency": 0.5102
+          },
+          {
+            "bin": "0.4-0.5",
+            "n": 89,
+            "mean_forecast": 0.4486,
+            "observed_frequency": 0.5843
+          },
+          {
+            "bin": "0.5-0.6",
+            "n": 89,
+            "mean_forecast": 0.555,
+            "observed_frequency": 0.4944
+          },
+          {
+            "bin": "0.6-0.7",
+            "n": 91,
+            "mean_forecast": 0.6493,
+            "observed_frequency": 0.5385
+          },
+          {
+            "bin": "0.7-0.8",
+            "n": 91,
+            "mean_forecast": 0.7518,
+            "observed_frequency": 0.6923
+          },
+          {
+            "bin": "0.8-0.9",
+            "n": 149,
+            "mean_forecast": 0.8489,
+            "observed_frequency": 0.6913
+          },
+          {
+            "bin": "0.9-1.0",
+            "n": 422,
+            "mean_forecast": 0.9667,
+            "observed_frequency": 0.872
+          }
+        ],
+        "accepted": true
+      }
+    },
+    "written_at_utc": "2026-10-10T11:55:47Z"
+  },
+  "holdout": {
+    "label": "holdout",
+    "first_day": "2026-07-01",
+    "last_day": "2026-10-10",
+    "events": {
+      "negative": {
+        "hours": 2448,
+        "events": 158,
+        "base_rate": 0.0645,
+        "bss_vs_clim": 0.367,
+        "bss_vs_last7": 0.4107,
+        "brier": {
+          "model": 0.03374,
+          "clim": 0.0533,
+          "last7": 0.05726
+        },
+        "log_loss": {
+          "model": 0.1408,
+          "clim": 0.2089,
+          "last7": 0.2909
+        },
+        "reliability": [
+          {
+            "bin": "0.0-0.1",
+            "n": 2305,
+            "mean_forecast": 0.0032,
+            "observed_frequency": 0.0239
+          },
+          {
+            "bin": "0.1-0.2",
+            "n": 34,
+            "mean_forecast": 0.1443,
+            "observed_frequency": 0.3529
+          },
+          {
+            "bin": "0.2-0.3",
+            "n": 18,
+            "mean_forecast": 0.2477,
+            "observed_frequency": 0.6667
+          },
+          {
+            "bin": "0.3-0.4",
+            "n": 14,
+            "mean_forecast": 0.3478,
+            "observed_frequency": 0.5
+          },
+          {
+            "bin": "0.4-0.5",
+            "n": 10,
+            "mean_forecast": 0.4519,
+            "observed_frequency": 1.0
+          },
+          {
+            "bin": "0.5-0.6",
+            "n": 13,
+            "mean_forecast": 0.5659,
+            "observed_frequency": 0.9231
+          },
+          {
+            "bin": "0.6-0.7",
+            "n": 6,
+            "mean_forecast": 0.6437,
+            "observed_frequency": 0.6667
+          },
+          {
+            "bin": "0.7-0.8",
+            "n": 15,
+            "mean_forecast": 0.7632,
+            "observed_frequency": 0.8667
+          },
+          {
+            "bin": "0.8-0.9",
+            "n": 11,
+            "mean_forecast": 0.8505,
+            "observed_frequency": 1.0
+          },
+          {
+            "bin": "0.9-1.0",
+            "n": 22,
+            "mean_forecast": 0.9541,
+            "observed_frequency": 1.0
+          }
+        ],
+        "accepted": true
+      }
+    },
+    "written_at_utc": "2026-10-10T11:55:48Z"
+  }
+}
