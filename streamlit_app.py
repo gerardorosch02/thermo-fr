@@ -71,6 +71,7 @@ def load_published(version: float) -> dict:
         "actuals": read("actuals.csv"),
         "scores": read("scores.csv"),
         "band": read("error_band.csv"),
+        "shape": json.loads((PUBLISHED / "shape_battery.json").read_text()) if (PUBLISHED / "shape_battery.json").exists() else {},
     }
     # the dataset may carry more than one feature set (the default model's and the fallback's); the app shows the default
     for key in ("forecasts", "scores"):
@@ -363,6 +364,50 @@ def main() -> None:
         st.markdown(f"**Live record: collecting data, {int(market.get('scored_days', 0))} of {needed} days.**")
         st.caption("The live record counts only days whose forecast was published before the trading window; its aggregates appear "
                    "once enough days are scored.")
+
+    st.subheader("Shape and battery value")
+    shape = data.get("shape") or {}
+    backtest = shape.get("backtest") or {}
+    if backtest:
+        st.markdown("The level forecast is one thing; the shape of the day, each hour's price minus the day's mean, is what a storage asset "
+                    "trades on. A shape model (gradient boosting on the same inputs, the shape as target) is compared with two benchmarks: "
+                    "yesterday's shape and the shape of the most recent day of the same type. The battery is 1 MW / 2 MWh with 88% "
+                    "round-trip efficiency, one cycle a day: a two-hour charge block before a two-hour discharge block chosen on the forecast "
+                    "before the gate and settled at the auction result, skipped when the forecast spread does not cover the efficiency loss.")
+        for label, record in backtest.items():
+            st.markdown(f"**{label.capitalize()} window, {record['first_day']} to {record['last_day']}, {record['shape']['days']} days**")
+            rows = []
+            for method, name in (("model", "shape model"), ("d1", "D-1 shape"), ("same_type", "same-type day shape")):
+                s, b = record["shape"][method], record["battery"][method]
+                rows.append({"method": name, "shape MAE (EUR/MWh)": s["shape_mae"], "spread error (EUR/MWh)": s["spread_error"],
+                             "cheapest-2 hit rate": f"{100 * s['cheapest2_hit_rate']:.0f}%", "dearest-2 hit rate": f"{100 * s['dearest2_hit_rate']:.0f}%",
+                             "battery EUR/day": b["eur_per_day"], "share of perfect foresight": f"{100 * (b['share_of_perfect'] or 0):.0f}%"})
+            rows.append({"method": "perfect foresight", "battery EUR/day": record["battery"]["perfect_eur_per_day"], "share of perfect foresight": "100%"})
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            bars = pd.DataFrame({"method": ["shape model", "D-1 shape", "same-type day shape", "perfect foresight"],
+                                 "EUR/day": [record["battery"]["model"]["eur_per_day"], record["battery"]["d1"]["eur_per_day"],
+                                             record["battery"]["same_type"]["eur_per_day"], record["battery"]["perfect_eur_per_day"]]})
+            fig = go.Figure(go.Bar(x=bars["method"], y=bars["EUR/day"], marker_color=[COLORS["forecast"], COLORS["benchmark"], COLORS["benchmark"],
+                                                                                   COLORS["actual"]]))
+            st.plotly_chart(layout(fig, "Battery value (EUR/day)", ""), use_container_width=True)
+    live = shape.get("live") or {}
+    if live.get("days"):
+        st.markdown(f"**Live record, {live['days']} settled days** (pre-market version of each day): shape MAE "
+                    f"{live['shape']['model']['shape_mae']:.2f} against {live['shape']['d1']['shape_mae']:.2f} for yesterday's shape; battery "
+                    f"{live['battery']['model']['eur_per_day']:.1f} EUR/day, {100 * (live['battery']['model']['share_of_perfect'] or 0):.0f}% of "
+                    f"perfect foresight ({live['battery']['perfect_eur_per_day']:.1f} EUR/day).")
+        daily = pd.DataFrame(live["daily"])
+        if not daily.empty:
+            fig = go.Figure()
+            for column, name, color in (("value_model", "shape model", COLORS["forecast"]), ("value_d1", "D-1 shape", COLORS["benchmark"]),
+                                        ("value_perfect", "perfect foresight", COLORS["actual"])):
+                fig.add_trace(go.Scatter(x=daily["delivery_day"], y=daily[column].cumsum(), name=name, mode="lines", line=dict(color=color)))
+            st.plotly_chart(layout(fig, "Cumulative battery value (EUR)", "Delivery day"), use_container_width=True)
+    elif backtest:
+        st.caption("The live record starts with the first settled day forecast by the default model (honest_v2); none has settled yet.")
+    else:
+        st.info("No shape and battery results published yet.")
+    st.caption("Aggregates and the live daily values only; no traded prices appear here.")
 
     st.subheader("How it works")
     st.markdown(HOW_IT_WORKS)

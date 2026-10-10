@@ -1,0 +1,246 @@
+{
+  "backtest": {
+    "selection": {
+      "label": "selection",
+      "feature_set": "honest_v2",
+      "first_day": "2024-02-17",
+      "last_day": "2026-06-30",
+      "months": [
+        "2024-02",
+        "2024-03",
+        "2024-04",
+        "2024-05",
+        "2024-06",
+        "2024-07",
+        "2024-08",
+        "2024-09",
+        "2024-10",
+        "2024-11",
+        "2024-12",
+        "2025-01",
+        "2025-02",
+        "2025-03",
+        "2025-04",
+        "2025-05",
+        "2025-06",
+        "2025-07",
+        "2025-08",
+        "2025-09",
+        "2025-10",
+        "2025-11",
+        "2025-12",
+        "2026-01",
+        "2026-02",
+        "2026-03",
+        "2026-04",
+        "2026-05",
+        "2026-06"
+      ],
+      "level_source": "reports/forecast/predictions_honest_v2.csv",
+      "shape": {
+        "hours": 20752,
+        "days": 865,
+        "model": {
+          "shape_mae": 11.29,
+          "spread_error": 10.02,
+          "cheapest2_hit_rate": 0.558,
+          "dearest2_hit_rate": 0.612
+        },
+        "d1": {
+          "shape_mae": 15.89,
+          "spread_error": 14.79,
+          "cheapest2_hit_rate": 0.487,
+          "dearest2_hit_rate": 0.504
+        },
+        "same_type": {
+          "shape_mae": 15.06,
+          "spread_error": 13.44,
+          "cheapest2_hit_rate": 0.506,
+          "dearest2_hit_rate": 0.518
+        }
+      },
+      "battery": {
+        "days": 865,
+        "perfect_eur_per_day": 138.69,
+        "model": {
+          "eur_per_day": 125.73,
+          "share_of_perfect": 0.907,
+          "days_traded": 865,
+          "days_skipped": 0,
+          "losing_days": 2
+        },
+        "d1": {
+          "eur_per_day": 115.69,
+          "share_of_perfect": 0.834,
+          "days_traded": 865,
+          "days_skipped": 0,
+          "losing_days": 15
+        },
+        "same_type": {
+          "eur_per_day": 117.52,
+          "share_of_perfect": 0.85,
+          "days_traded": 862,
+          "days_skipped": 3,
+          "losing_days": 10
+        }
+      },
+      "written_at_utc": "2026-10-10T10:14:05Z",
+      "paired": {
+        "method": "moving-block bootstrap, block 7 days, 5,000 resamples, 95% percentile interval",
+        "battery_value": {
+          "d1": {
+            "days": 865,
+            "mean_difference": 10.04,
+            "ci95_low": 7.84,
+            "ci95_high": 12.37,
+            "share_model_wins": 0.486,
+            "share_ties": 0.221,
+            "distinguishable_from_zero": true
+          },
+          "same_type": {
+            "days": 862,
+            "mean_difference": 7.91,
+            "ci95_low": 6.14,
+            "ci95_high": 10.1,
+            "share_model_wins": 0.454,
+            "share_ties": 0.242,
+            "distinguishable_from_zero": true
+          }
+        },
+        "shape_mae": {
+          "d1": {
+            "days": 865,
+            "mean_difference": 4.59,
+            "ci95_low": 4.02,
+            "ci95_high": 5.19,
+            "share_model_wins": 0.768,
+            "share_ties": 0.0,
+            "distinguishable_from_zero": true
+          },
+          "same_type": {
+            "days": 865,
+            "mean_difference": 3.77,
+            "ci95_low": 3.26,
+            "ci95_high": 4.32,
+            "share_model_wins": 0.74,
+            "share_ties": 0.0,
+            "distinguishable_from_zero": true
+          }
+        }
+      }
+    },
+    "holdout": {
+      "label": "holdout",
+      "feature_set": "honest_v2",
+      "first_day": "2026-07-01",
+      "last_day": "2026-10-10",
+      "months": [
+        "2026-07",
+        "2026-08",
+        "2026-09",
+        "2026-10"
+      ],
+      "level_source": "reports/forecast/predictions_honest_v2_holdout.csv",
+      "shape": {
+        "hours": 2448,
+        "days": 102,
+        "model": {
+          "shape_mae": 22.37,
+          "spread_error": 30.58,
+          "cheapest2_hit_rate": 0.559,
+          "dearest2_hit_rate": 0.642
+        },
+        "d1": {
+          "shape_mae": 23.1,
+          "spread_error": 25.37,
+          "cheapest2_hit_rate": 0.613,
+          "dearest2_hit_rate": 0.608
+        },
+        "same_type": {
+          "shape_mae": 21.96,
+          "spread_error": 23.62,
+          "cheapest2_hit_rate": 0.593,
+          "dearest2_hit_rate": 0.583
+        }
+      },
+      "battery": {
+        "days": 102,
+        "perfect_eur_per_day": 278.75,
+        "model": {
+          "eur_per_day": 257.09,
+          "share_of_perfect": 0.922,
+          "days_traded": 102,
+          "days_skipped": 0,
+          "losing_days": 0
+        },
+        "d1": {
+          "eur_per_day": 265.37,
+          "share_of_perfect": 0.952,
+          "days_traded": 102,
+          "days_skipped": 0,
+          "losing_days": 0
+        },
+        "same_type": {
+          "eur_per_day": 266.51,
+          "share_of_perfect": 0.956,
+          "days_traded": 102,
+          "days_skipped": 0,
+          "losing_days": 0
+        }
+      },
+      "written_at_utc": "2026-10-10T10:14:59Z",
+      "paired": {
+        "method": "moving-block bootstrap, block 7 days, 5,000 resamples, 95% percentile interval",
+        "battery_value": {
+          "d1": {
+            "days": 102,
+            "mean_difference": -8.28,
+            "ci95_low": -20.08,
+            "ci95_high": -2.17,
+            "share_model_wins": 0.343,
+            "share_ties": 0.324,
+            "distinguishable_from_zero": true
+          },
+          "same_type": {
+            "days": 102,
+            "mean_difference": -9.42,
+            "ci95_low": -19.72,
+            "ci95_high": -1.08,
+            "share_model_wins": 0.382,
+            "share_ties": 0.324,
+            "distinguishable_from_zero": true
+          }
+        },
+        "shape_mae": {
+          "d1": {
+            "days": 102,
+            "mean_difference": 0.73,
+            "ci95_low": -2.51,
+            "ci95_high": 2.91,
+            "share_model_wins": 0.451,
+            "share_ties": 0.0,
+            "distinguishable_from_zero": false
+          },
+          "same_type": {
+            "days": 102,
+            "mean_difference": -0.41,
+            "ci95_low": -3.98,
+            "ci95_high": 2.14,
+            "share_model_wins": 0.471,
+            "share_ties": 0.0,
+            "distinguishable_from_zero": false
+          }
+        }
+      }
+    }
+  },
+  "live": {
+    "days": 0,
+    "daily": []
+  },
+  "definitions": {
+    "shape": "each hour's price minus the day's mean (base)",
+    "battery": "1 MW / 2 MWh, 88% round-trip, one cycle a day, a 2-hour charge block before a 2-hour discharge block chosen on the forecast before the gate, settled at the auction result; skipped when the forecast spread does not cover the efficiency loss",
+    "benchmarks": "d1: yesterday's shape; same_type: the shape of the most recent earlier day of the same type"
+  }
+}

@@ -60,6 +60,11 @@ def status_panel(path, version, day):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
+def shape_panel(path, version, feature_set):
+    return q.shape_panel(path, feature_set)
+
+
+@st.cache_data(show_spinner=False)
 def fetch_log_panel(log_version):
     return q.fetch_log_panel()
 
@@ -337,7 +342,47 @@ def main() -> None:
         for skipped in s["skipped"]:
             st.warning(f"{skipped['delivery_date']} {skipped['product']}: {skipped['reason']}")
 
-    # 5. Data status
+    # 5. Shape and battery value
+    st.subheader(f"Shape and battery value ({feature_set})")
+    shape = shape_panel(db, version, feature_set)
+    backtest = shape["backtest"]
+    if backtest:
+        for label, record in backtest.items():
+            st.markdown(f"**Backtest, {label} window {record['first_day']} to {record['last_day']}, {record['shape']['days']} days** "
+                        f"(shape = price minus the day's mean; battery 1 MW / 2 MWh, 88% round-trip, one cycle a day, blocks chosen on the "
+                        f"forecast before the gate)")
+            rows = []
+            for method, name in (("model", "shape model"), ("d1", "D-1 shape"), ("same_type", "same-type day shape")):
+                s, b = record["shape"][method], record["battery"][method]
+                rows.append({"method": name, "shape MAE (EUR/MWh)": s["shape_mae"], "spread error": s["spread_error"],
+                             "cheapest-2 hit rate": s["cheapest2_hit_rate"], "dearest-2 hit rate": s["dearest2_hit_rate"],
+                             "battery EUR/day": b["eur_per_day"], "share of perfect": b["share_of_perfect"], "days traded": b["days_traded"],
+                             "losing days": b["losing_days"]})
+            rows.append({"method": "perfect foresight", "battery EUR/day": record["battery"]["perfect_eur_per_day"], "share of perfect": 1.0})
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    else:
+        st.info("No shape backtest yet: run `thermo-fr shape-backtest`.")
+    live = shape["live"]
+    if live.get("days"):
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Settled days", live["days"])
+        c2.metric("Shape MAE, model vs D-1", f"{live['shape']['model']['shape_mae']:.2f} vs {live['shape']['d1']['shape_mae']:.2f}")
+        c3.metric("Battery EUR/day, model", f"{live['battery']['model']['eur_per_day']:.1f}",
+                  help=f"perfect foresight {live['battery']['perfect_eur_per_day']:.1f} EUR/day")
+        c4.metric("Share of perfect, model vs D-1", f"{100 * (live['battery']['model']['share_of_perfect'] or 0):.0f}% vs "
+                  f"{100 * (live['battery']['d1']['share_of_perfect'] or 0):.0f}%")
+        daily = live["daily"]
+        fig = go.Figure()
+        for column, name, color in (("value_model", "model", COLORS[feature_set]), ("value_d1", "D-1 shape", COLORS["benchmark"]),
+                                    ("value_perfect", "perfect foresight", COLORS["actual"])):
+            fig.add_trace(go.Scatter(x=daily["delivery_day"], y=daily[column].cumsum(), name=name, mode="lines", line=dict(color=color)))
+        st.plotly_chart(base_layout(fig, "Cumulative battery value (EUR)", "Delivery day"), use_container_width=True)
+        with st.expander("Daily table"):
+            st.dataframe(daily.round(2), hide_index=True, use_container_width=True)
+    else:
+        st.info("No settled day with a pre-market version yet for the live shape record.")
+
+    # 6. Data status
     st.subheader(f"Data status for {tomorrow}")
     status = status_panel(db, version, tomorrow)
     if "table" not in status:

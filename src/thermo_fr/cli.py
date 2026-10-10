@@ -339,6 +339,45 @@ def cmd_nuclear_availability(args) -> None:
     print(f"Daily mean unavailable {frame['unavailable_mw'].mean():.0f} MW, available {frame['available_mw'].mean():.0f} MW of {args.installed_mw:,} MW.")
 
 
+def cmd_shape_backtest(args) -> None:
+    from .forecast.features import build_features
+    from .forecast.inputs import load_inputs
+    from .forecast.shape import evaluate_shape, walk_forward_shape
+
+    hourly = load_inputs(Path(args.data))
+    hourly = hourly[hourly.index < pd.Timestamp(args.test_end, tz="UTC") - pd.Timedelta(hours=2)]  # nothing after the window enters a fit
+    table = build_features(hourly, args.feature_set)
+    level = None
+    if args.level:
+        frame = pd.read_csv(args.level, index_col=0, parse_dates=True)
+        frame.index = pd.to_datetime(frame.index, utc=True)
+        level = frame["gbm"]
+    bt = walk_forward_shape(table, args.test_start, args.test_end, level=level, log=print)
+    pred = bt.predictions[bt.predictions["delivery_day"] >= pd.Timestamp(args.strict_from or args.test_start)]
+    result = evaluate_shape(pred, strict_only=True)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    pred.to_csv(out / f"shape_predictions_{args.label}.csv", index_label="timestamp_utc")
+    result["battery_daily"].to_csv(out / f"battery_daily_{args.label}.csv", index=False)
+    record = {"label": args.label, "feature_set": args.feature_set, "first_day": result["first_day"], "last_day": result["last_day"],
+              "months": bt.months, "level_source": args.level or "D-1 mean", "shape": result["shape"], "battery": result["battery"],
+              "written_at_utc": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ")}
+    if args.publish:
+        path = Path(args.publish)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = json.loads(path.read_text()) if path.exists() else {}
+        existing[args.label] = record
+        path.write_text(json.dumps(existing, indent=2))
+    print(f"Shape backtest ({args.label}, {args.feature_set}) on strict rows {result['first_day']} to {result['last_day']}, "
+          f"{result['shape']['days']} days:")
+    for method in ("model", "d1", "same_type"):
+        s, b = result["shape"][method], result["battery"][method]
+        print(f"  {method:10s} shape MAE {s['shape_mae']:>6}  spread error {s['spread_error']:>6}  cheapest-2 hit {100 * s['cheapest2_hit_rate']:.0f}%  "
+              f"dearest-2 hit {100 * s['dearest2_hit_rate']:.0f}%  battery {b['eur_per_day']:>7} EUR/day = {100 * (b['share_of_perfect'] or 0):.0f}% "
+              f"of perfect, traded {b['days_traded']} skipped {b['days_skipped']} losing {b['losing_days']}")
+    print(f"  perfect foresight {result['battery']['perfect_eur_per_day']} EUR/day over {result['battery']['days']} days")
+
+
 def cmd_schedule_step(args) -> None:
     from .forecast.schedule import main as schedule_main
 
@@ -518,6 +557,19 @@ def main(argv=None) -> None:
     avail.add_argument("--snapshots", default="data/entsoe/outage_snapshots")
     avail.add_argument("--installed-mw", type=float, default=63_020.0)
     avail.set_defaults(func=cmd_nuclear_availability)
+
+    shp = sub.add_parser("shape-backtest", help="Walk-forward of the shape model (price minus the day's base) with the battery backtest")
+    shp.add_argument("--data", default="data/forecast/inputs.csv")
+    shp.add_argument("--feature-set", default="honest_v2", choices=FEATURE_SETS)
+    shp.add_argument("--test-start", default="2024-02-01")
+    shp.add_argument("--test-end", default="2026-07-01", help="exclusive")
+    shp.add_argument("--strict-from", default="2024-02-17", help="first delivery day of the scored window")
+    shp.add_argument("--level", default="reports/forecast/predictions_honest_v2.csv",
+                     help="walk-forward level predictions whose daily mean is the base forecast for the battery decision (gbm column)")
+    shp.add_argument("--out", default="reports/shape")
+    shp.add_argument("--publish", default="published/shape_battery_backtest.json", help="aggregates only; '' to skip")
+    shp.add_argument("--label", default="selection", help="selection or holdout")
+    shp.set_defaults(func=cmd_shape_backtest)
 
     sched = sub.add_parser("schedule-step", help="Which step a scheduled GitHub Actions run should perform, from the Paris clock")
     sched.add_argument("--event", required=True)
