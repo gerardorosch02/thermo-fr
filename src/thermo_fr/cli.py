@@ -339,6 +339,44 @@ def cmd_nuclear_availability(args) -> None:
     print(f"Daily mean unavailable {frame['unavailable_mw'].mean():.0f} MW, available {frame['available_mw'].mean():.0f} MW of {args.installed_mw:,} MW.")
 
 
+def cmd_prob_backtest(args) -> None:
+    """Walk-forward of the quantile and event models; writes reports/prob and the aggregates file the public app reads."""
+    from .forecast import probabilistic as pb
+    from .forecast.features import build_features
+    from .forecast.inputs import load_inputs
+
+    hourly = load_inputs(Path(args.data))
+    hourly = hourly[hourly.index < pd.Timestamp(args.test_end, tz="UTC") - pd.Timedelta(hours=2)]
+    table = build_features(hourly, args.feature_set)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    raw_path = out / f"prob_raw_{args.label}.parquet"
+    if args.reuse and raw_path.exists():
+        pred = pd.read_parquet(raw_path)
+    else:
+        pred = pb.walk_forward_prob(table, args.walk_start or args.test_start, args.test_end, log=print).predictions
+        pred.to_parquet(raw_path)
+    if args.earlier:
+        earlier = pd.read_parquet(args.earlier)
+        pred = pd.concat([earlier[earlier["delivery_day"] < args.test_start], pred]).sort_index()
+    ready = pb.prepare(pred)
+    ready = ready[(ready["delivery_day"] >= pd.Timestamp(args.strict_from or args.test_start)) & (ready["delivery_day"] < pd.Timestamp(args.test_end))]
+    ready.to_parquet(out / f"prob_ready_{args.label}.parquet")
+    record = pb.backtest_record(ready, args.label)
+    if args.publish:
+        path = Path(args.publish)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = json.loads(path.read_text()) if path.exists() else {}
+        existing[args.label] = record
+        path.write_text(json.dumps(existing, indent=2, default=str))
+    overall = record["intervals"]["all"]
+    print(f"Probabilistic backtest ({args.label}) strict rows {record['first_day']} to {record['last_day']}:")
+    for m, r in overall.items():
+        print(f"  {m:12s} pinball mean {r['pinball_mean']:>6}  coverage {100 * r['coverage_10_90']:5.1f}%  width {r['mean_width']:>6}")
+    for event, r in record["events"].items():
+        print(f"  {event}: events {r.get('events')}  BSS vs climatology {r.get('bss_vs_clim')}  vs last 7 days {r.get('bss_vs_last7')}  accepted {r.get('accepted')}")
+
+
 def cmd_shape_backtest(args) -> None:
     from .forecast.features import build_features
     from .forecast.inputs import load_inputs
@@ -558,6 +596,20 @@ def main(argv=None) -> None:
     avail.add_argument("--snapshots", default="data/entsoe/outage_snapshots")
     avail.add_argument("--installed-mw", type=float, default=63_020.0)
     avail.set_defaults(func=cmd_nuclear_availability)
+
+    prb = sub.add_parser("prob-backtest", help="Walk-forward of the quantile and event models with their benchmarks; aggregates to published/")
+    prb.add_argument("--data", default="data/forecast/inputs.csv")
+    prb.add_argument("--feature-set", default="honest_v2", choices=FEATURE_SETS)
+    prb.add_argument("--walk-start", default="2023-02-01", help="first month of the walk-forward (a year before the scored window feeds the trailing benchmarks)")
+    prb.add_argument("--test-start", default="2024-02-17")
+    prb.add_argument("--test-end", default="2026-07-01", help="exclusive")
+    prb.add_argument("--strict-from", default=None)
+    prb.add_argument("--earlier", default=None, help="an earlier raw parquet whose rows feed the trailing windows (for the holdout)")
+    prb.add_argument("--reuse", action="store_true", help="reuse reports/prob/prob_raw_<label>.parquet instead of refitting")
+    prb.add_argument("--out", default="reports/prob")
+    prb.add_argument("--publish", default="published/probabilistic_backtest.json", help="aggregates only; '' to skip")
+    prb.add_argument("--label", default="selection")
+    prb.set_defaults(func=cmd_prob_backtest)
 
     shp = sub.add_parser("shape-backtest", help="Walk-forward of the shape model (price minus the day's base) with the battery backtest")
     shp.add_argument("--data", default="data/forecast/inputs.csv")

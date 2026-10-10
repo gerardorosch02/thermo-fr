@@ -39,7 +39,7 @@ def test_export_writes_the_public_files_for_the_window(tmp_path):
     status = export_published(store, out, days=90, now=NOW)
     store.close()
     names = {p.name for p in out.iterdir()}
-    assert names == {"forecasts.csv", "actuals.csv", "scores.csv", "tomorrow.csv", "error_band.csv", "status.json", "shape_battery.json"}
+    assert names == {"forecasts.csv", "actuals.csv", "scores.csv", "tomorrow.csv", "error_band.csv", "status.json", "shape_battery.json", "probabilistic.csv", "tomorrow_probabilistic.csv"}
     forecasts = pd.read_csv(out / "forecasts.csv")
     assert set(forecasts["delivery_day"]) == set(DAYS)  # June is outside the 90-day window, extended is never exported
     assert forecasts.groupby("delivery_day")["issued_at_utc"].nunique().eq(2).all()
@@ -64,7 +64,7 @@ def test_import_rebuilds_an_empty_store_and_is_idempotent(tmp_path):
 
     fresh = Store(tmp_path / "fresh.sqlite")
     summary = import_published(fresh, out)
-    assert summary == {"forecast_versions": 8, "actual_rows": 72, "scores": 3, "error_band_rows": 24}
+    assert summary == {"forecast_versions": 8, "actual_rows": 72, "scores": 3, "error_band_rows": 24, "probabilistic_versions": 0}
     meta, curve = fresh.latest_forecast("2026-10-10", "honest")
     assert meta["issued_at_utc"] == "2026-10-09T09:00:00Z" and curve["forecast"].iloc[0] == 108.0 and len(curve) == 24
     assert fresh.latest_scores("honest").shape[0] == 3 and len(fresh.error_band("honest")) == 24
@@ -85,7 +85,7 @@ def test_import_tolerates_missing_or_empty_files(tmp_path):
     empty.mkdir()
     (empty / "forecasts.csv").write_text("")
     store = Store(tmp_path / "db.sqlite")
-    assert import_published(store, empty) == {"forecast_versions": 0, "actual_rows": 0, "scores": 0, "error_band_rows": 0}
+    assert import_published(store, empty) == {"forecast_versions": 0, "actual_rows": 0, "scores": 0, "error_band_rows": 0, "probabilistic_versions": 0}
     store.close()
 
 

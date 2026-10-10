@@ -72,6 +72,8 @@ def load_published(version: float) -> dict:
         "scores": read("scores.csv"),
         "band": read("error_band.csv"),
         "shape": json.loads((PUBLISHED / "shape_battery.json").read_text()) if (PUBLISHED / "shape_battery.json").exists() else {},
+        "prob_tomorrow": read("tomorrow_probabilistic.csv"),
+        "prob_backtest": json.loads((PUBLISHED / "probabilistic_backtest.json").read_text()) if (PUBLISHED / "probabilistic_backtest.json").exists() else {},
     }
     # the dataset may carry more than one feature set (the default model's and the fallback's); the app shows the default
     for key in ("forecasts", "scores"):
@@ -148,10 +150,19 @@ def tomorrow_table(data: dict) -> pd.DataFrame:
     if "actual_today" not in by_hour:
         by_hour["actual_today"] = float("nan")
     band = data["band"]
-    if not band.empty:
+    prob = data.get("prob_tomorrow", pd.DataFrame())
+    use_quantiles = BAND_SOURCE == "quantile" and not prob.empty and set(prob["hour"]) >= set(by_hour["hour"])
+    if use_quantiles:
+        q = prob.groupby("hour").agg(lo=("lo", "mean"), q10=("q10", "mean"), q50=("q50", "mean"), q90=("q90", "mean"), hi=("hi", "mean")).reset_index()
+        by_hour = by_hour.merge(q, on="hour", how="left")
+        by_hour["band_p10"], by_hour["band_p90"] = by_hour["lo"], by_hour["hi"]
+        by_hour["band_p25"], by_hour["band_p75"] = by_hour["q10"], by_hour["q90"]
+        by_hour.attrs["band_source"] = "quantile"
+    elif not band.empty:
         by_hour = by_hour.merge(band[["hour", "p10", "p25", "p75", "p90", "n"]], on="hour", how="left")
         for q in ("p10", "p25", "p75", "p90"):
             by_hour[f"band_{q}"] = by_hour["forecast"] + by_hour[q]
+        by_hour.attrs["band_source"] = "backtest"
     return by_hour
 
 
@@ -220,6 +231,10 @@ def history_chart(data: dict, days: int = 30) -> go.Figure | None:
 
 # The backfilled trading record, scored as a walk-forward (see the repository's docs/forecast.md); aggregates only,
 # the traded prices themselves are not republished. Updated by hand when the record is re-scored.
+# The shaded band on tomorrow's chart: "backtest" keeps the historical error percentiles; "quantile" uses the conformal 10-90 band of
+# the quantile models when tomorrow's version carries one. Kept on "backtest" until the owner confirms the switch.
+BAND_SOURCE = "backtest"
+
 MARKET_RECORD = {
     "period": "delivery days 2026-08-29 to 2026-10-10",
     "windows": 42, "base_windows": 38, "peak_windows": 4,
@@ -307,7 +322,10 @@ def main() -> None:
         if pd.Timestamp(day) < pd.Timestamp.now(tz=PARIS).normalize().tz_localize(None):
             st.warning(f"The latest published forecast is for {day}, which is in the past. The workflow may not have run today.")
         st.plotly_chart(tomorrow_chart(by_hour, day, previous), use_container_width=True)
-        if "band_p10" in by_hour:
+        if "band_p10" in by_hour and by_hour.attrs.get("band_source") == "quantile":
+            st.caption("Shaded band: the 10th to 90th percentile forecasts of the quantile models, widened by a conformal margin from the last "
+                       "settled days (outer band); the inner band is the raw 10th to 90th. About 80% of outcomes should fall inside the outer band.")
+        elif "band_p10" in by_hour:
             st.caption("Shaded band: historical error of this model at each hour in the 2024 to 2025 backtest, not a probability forecast.")
         with st.expander("Hourly values"):
             st.dataframe(by_hour[["hour", "forecast", "naive_day", "actual_today"]].round(2).rename(
@@ -364,6 +382,52 @@ def main() -> None:
         st.markdown(f"**Live record: collecting data, {int(market.get('scored_days', 0))} of {needed} days.**")
         st.caption("The live record counts only days whose forecast was published before the trading window; its aggregates appear "
                    "once enough days are scored.")
+
+    st.subheader("Probabilities and calibration")
+    prob = data.get("prob_tomorrow", pd.DataFrame())
+    prob_status = status.get("probabilistic") or {}
+    if not prob.empty:
+        hourly = prob.groupby("hour").agg(p_negative=("p_negative", "mean"), p_spike=("p_spike", "mean"), q10=("q10", "mean"), q50=("q50", "mean"),
+                                          q90=("q90", "mean"), lo=("lo", "mean"), hi=("hi", "mean"), threshold=("spike_threshold", "first")).reset_index()
+        st.markdown(f"**Tomorrow's per-hour probabilities** (headline version): a negative price, and a spike above the trailing-year 95th percentile, "
+                    f"{hourly['threshold'].iloc[0]:.0f} EUR/MWh at this issue.")
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=hourly["hour"], y=hourly["p_negative"], name="P(price < 0)", marker_color=COLORS["forecast"]))
+        fig.add_trace(go.Bar(x=hourly["hour"], y=hourly["p_spike"], name="P(spike)", marker_color=COLORS["actual"]))
+        fig.update_layout(barmode="group", yaxis=dict(range=[0, 1]))
+        st.plotly_chart(layout(fig, "Probability", "Delivery hour (Paris time)"), use_container_width=True)
+        with st.expander("Quantiles and band by hour"):
+            st.dataframe(hourly[["hour", "lo", "q10", "q50", "q90", "hi", "p_negative", "p_spike"]].round(3), hide_index=True, use_container_width=True)
+    else:
+        st.info("No probabilistic forecast for tomorrow's headline version yet (the files that produce it may be missing, in which case the "
+                "forecast carries no band).")
+    backtest = data.get("prob_backtest") or {}
+    live = prob_status.get("live") or {}
+    rows = []
+    for label, record in backtest.items():
+        overall = record["intervals"]["all"]
+        rows.append({"window": f"backtest {label} ({record['first_day']} to {record['last_day']})", "10-90 coverage": f"{100 * overall['model']['coverage_10_90']:.1f}%",
+                     "mean width (EUR/MWh)": overall["model"]["mean_width"], "pinball mean": overall["model"]["pinball_mean"],
+                     "benchmark a pinball": overall["bench_point"]["pinball_mean"], "benchmark b pinball": overall["bench_d1"]["pinball_mean"],
+                     "negative: events / BSS vs climatology / vs last 7 days": f"{record['events']['negative'].get('events')} / {record['events']['negative'].get('bss_vs_clim')} / {record['events']['negative'].get('bss_vs_last7')}",
+                     "spike: events / BSS vs climatology / vs last 7 days": f"{record['events']['spike'].get('events')} / {record['events']['spike'].get('bss_vs_clim')} / {record['events']['spike'].get('bss_vs_last7')}"})
+    if live.get("days"):
+        rows.append({"window": f"live, {live['days']} settled days", "10-90 coverage": f"{100 * live.get('coverage_10_90', float('nan')):.1f}%",
+                     "mean width (EUR/MWh)": live.get("mean_width"), "pinball mean": live.get("pinball_mean"),
+                     "negative: events / BSS vs climatology / vs last 7 days": f"{live.get('negative', {}).get('events')} / Brier {live.get('negative', {}).get('brier')}",
+                     "spike: events / BSS vs climatology / vs last 7 days": f"{live.get('spike', {}).get('events')} / Brier {live.get('spike', {}).get('brier')}"})
+    if rows:
+        st.markdown("**Calibration** (aggregates only). Benchmarks: a, the point forecast plus trailing-year error quantiles by hour; b, yesterday's "
+                    "price plus trailing-year quantiles of its errors. BSS is the Brier skill score; positive means better than the benchmark.")
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        for label, record in backtest.items():
+            with st.expander(f"Reliability tables, backtest {label}"):
+                for event in ("negative", "spike"):
+                    table = pd.DataFrame(record["events"][event].get("reliability", []))
+                    if not table.empty:
+                        st.markdown(f"{event}: {record['events'][event].get('events')} events in {record['events'][event].get('hours')} hours")
+                        st.dataframe(table, hide_index=True, use_container_width=True)
+    st.caption("The live record starts with the first settled day whose version carried a band; the backtest rows come from docs/experiments.md.")
 
     st.subheader("Shape and battery value")
     shape = data.get("shape") or {}

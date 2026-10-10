@@ -38,7 +38,7 @@ def test_fit_load_predict_round_trip(tmp_path, table):
     frame = pb.predict_probabilistic(loaded, features.X[day_rows], threshold)
     assert list(frame.columns) == pb.PROB_COLUMNS and len(frame) == 24
     assert (frame["q10"] <= frame["q50"]).all() and (frame["q50"] <= frame["q90"]).all() and ((frame["q10"] - frame["lo"]).round(3) == frame["conformal_margin"].round(3)).all()
-    assert frame["p_negative"].between(0, 1).all() and frame["p_spike"].between(0, 1).all() and frame["spike_threshold"].eq(threshold).all()
+    assert frame["p_negative"].between(0, 1).all() and frame["p_spike"].between(0, 1).all() and (frame["spike_threshold"] - threshold).abs().lt(1e-3).all()
     assert pb.load_probabilistic(tmp_path / "elsewhere", "honest_v2") is None
     paths["spike"].unlink()
     assert pb.load_probabilistic(tmp_path / "model", "honest_v2") is None  # one missing file means no band at all

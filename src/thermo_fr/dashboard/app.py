@@ -60,6 +60,11 @@ def status_panel(path, version, day):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
+def calibration_panel(path, version, feature_set):
+    return q.calibration_panel(path, feature_set)
+
+
+@st.cache_data(show_spinner=False)
 def shape_panel(path, version, feature_set):
     return q.shape_panel(path, feature_set)
 
@@ -183,6 +188,9 @@ def main() -> None:
                    "produced it; ':fallback' means the default model's inputs were missing and honest.txt was used.")
         if feature_set == "extended":
             st.warning(EXTENDED_NOTE)
+        band_source = st.radio("Shaded band", ("backtest error", "quantile 10-90"), index=0,
+                               help="backtest error: the historical error percentiles of the point model; quantile 10-90: the quantile models' "
+                                    "band with the conformal margin, when the version carries one. The backtest band stays the default until confirmed.")
         st.divider()
         if st.button("Refresh now (runs morning-run once)"):
             with st.spinner("Running morning-run (fetching inputs, fitting the models) ..."):
@@ -220,9 +228,31 @@ def main() -> None:
                   + (" (used because the default model's inputs were missing)" if str(meta["model"]).endswith(":fallback") else "")
                   if int(meta["train_hours"]) == 0 else f"{meta['model']} fitted live on {int(meta['train_hours']):,} hours")
         st.caption(f"Issued {issued:%Y-%m-%d %H:%M} Paris. Model: {fitted}; this feature set {gate_badge}.")
-        has_band = "band_p10" in panel["by_hour"]
-        st.plotly_chart(forecast_chart(panel["by_hour"], feature_set, today, has_band), use_container_width=True)
-        if has_band:
+        by_hour = panel["by_hour"]
+        if band_source == "quantile 10-90" and "lo" in by_hour and by_hour["lo"].notna().any():
+            by_hour = by_hour.copy()
+            by_hour["band_p10"], by_hour["band_p90"], by_hour["band_p25"], by_hour["band_p75"] = by_hour["lo"], by_hour["hi"], by_hour["q10"], by_hour["q90"]
+            panel = {**panel, "by_hour": by_hour}
+            has_band = True
+            st.plotly_chart(forecast_chart(by_hour, feature_set, today, has_band), use_container_width=True)
+            st.caption("Shaded band: the quantile models' 10th to 90th percentile forecasts widened by the conformal margin (outer) and raw (inner); "
+                       f"margin {by_hour['q10'].sub(by_hour['lo']).iloc[0]:.2f} EUR/MWh. About 80% of outcomes should fall inside the outer band.")
+        elif band_source == "quantile 10-90":
+            has_band = "band_p10" in by_hour
+            st.plotly_chart(forecast_chart(by_hour, feature_set, today, has_band), use_container_width=True)
+            st.warning("This version carries no quantile band (the probabilistic model files were missing when it was issued); showing the backtest band.")
+        else:
+            has_band = "band_p10" in by_hour
+            st.plotly_chart(forecast_chart(by_hour, feature_set, today, has_band), use_container_width=True)
+        if "p_negative" in by_hour and by_hour["p_negative"].notna().any():
+            prob_fig = go.Figure()
+            prob_fig.add_trace(go.Bar(x=by_hour["hour"], y=by_hour["p_negative"], name="P(price < 0)", marker_color=COLORS[feature_set]))
+            prob_fig.add_trace(go.Bar(x=by_hour["hour"], y=by_hour["p_spike"], name="P(spike)", marker_color=COLORS["actual"]))
+            prob_fig.update_layout(barmode="group", yaxis=dict(range=[0, 1]))
+            st.plotly_chart(base_layout(prob_fig, "Probability"), use_container_width=True)
+            st.caption(f"Per-hour probabilities of a negative price and of a spike above the trailing-year 95th percentile "
+                       f"({by_hour['spike_threshold'].iloc[0]:.0f} EUR/MWh at this issue).")
+        if has_band and band_source != "quantile 10-90":
             n = int(panel["by_hour"]["n"].min())
             st.caption(f"Shaded band: the forecast plus the 10th to 90th (and 25th to 75th) percentile of the signed error "
                        f"of this model at the same hour in the 2024 to 2025 walk-forward backtest ({n:,}+ hours per hour of day). "
@@ -342,7 +372,30 @@ def main() -> None:
         for skipped in s["skipped"]:
             st.warning(f"{skipped['delivery_date']} {skipped['product']}: {skipped['reason']}")
 
-    # 5. Shape and battery value
+    # 5. Calibration of the probabilistic forecasts
+    st.subheader(f"Calibration of the band and the event probabilities ({feature_set})")
+    cal = calibration_panel(db, version, feature_set)
+    live = cal["live"]
+    if live.get("days"):
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Settled days with a band", live["days"])
+        c2.metric("10-90 coverage, live", f"{100 * live.get('coverage_10_90', 0):.1f}%")
+        c3.metric("Mean width", f"{live.get('mean_width', 0):.1f} EUR/MWh")
+        c4.metric("Negative / spike events", f"{live.get('negative', {}).get('events', 0)} / {live.get('spike', {}).get('events', 0)}")
+        for event in ("negative", "spike"):
+            if live.get(event):
+                with st.expander(f"Live reliability, {event} (Brier {live[event]['brier']}, base-rate Brier {live[event]['brier_base_rate']})"):
+                    st.dataframe(pd.DataFrame(live[event]["reliability"]), hide_index=True, use_container_width=True)
+    else:
+        st.info("No settled day with a band yet; the live calibration starts with the first.")
+    for label, record in (cal["backtest"] or {}).items():
+        overall = record["intervals"]["all"]
+        st.markdown(f"**Backtest {label}, {record['first_day']} to {record['last_day']}**: 10-90 coverage {100 * overall['model']['coverage_10_90']:.1f}%, "
+                    f"width {overall['model']['mean_width']}, pinball mean {overall['model']['pinball_mean']} (benchmark a {overall['bench_point']['pinball_mean']}, "
+                    f"b {overall['bench_d1']['pinball_mean']}); negative BSS {record['events']['negative'].get('bss_vs_clim')} / "
+                    f"{record['events']['negative'].get('bss_vs_last7')}, spike BSS {record['events']['spike'].get('bss_vs_clim')} / {record['events']['spike'].get('bss_vs_last7')}")
+
+    # 6. Shape and battery value
     st.subheader(f"Shape and battery value ({feature_set})")
     shape = shape_panel(db, version, feature_set)
     backtest = shape["backtest"]
