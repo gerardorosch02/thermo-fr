@@ -335,3 +335,169 @@ def prepare(pred: pd.DataFrame) -> pd.DataFrame:
     for event in EVENTS:
         out = event_benchmarks(out, event)
     return out
+
+
+# ---------------------------------------------------------------------------- production: model files, live prediction, live calibration
+
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+PROB_PARTS = ("q10", "q50", "q90", "negative", "spike")
+REFIT_PROB_PARAMS = {"n_estimators": 300, "num_leaves": 31}  # the same small models as the published point model
+PROB_COLUMNS = ["q10", "q50", "q90", "lo", "hi", "p_negative", "p_spike", "spike_threshold", "conformal_margin"]
+
+
+def prob_paths(model_dir, feature_set: str) -> dict:
+    out = {part: Path(model_dir) / f"{feature_set}_{part}.txt" for part in PROB_PARTS}
+    out["meta"] = Path(model_dir) / f"{feature_set}_probabilistic.json"
+    return out
+
+
+def fit_probabilistic(table: FeatureTable, feature_set: str, out_dir, holdout_days: int = 30, params: dict | None = None, now=None,
+                      log=print) -> dict:
+    """Fit the three quantile models and the two classifiers on every known row, write them next to the point model, with metadata.
+
+    The initial conformal margin comes from a holdout fit: models fitted on the rows up to `holdout_days` before the last known
+    day, scored on the days after it. The live margin (live_margin) replaces it once enough settled days exist in the store.
+    """
+    params = {**REFIT_PROB_PARAMS, **(params or {})}
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    days = table.info["delivery_day"]
+    X = table.X.copy()
+    X["spike_threshold"] = spike_thresholds(table.y, days)
+    labels = event_labels(table.y, X["spike_threshold"])
+    known = table.y.notna()
+    last_day = days[known].max()
+    cut = last_day - pd.Timedelta(days=holdout_days)
+    train, test = known & (days <= cut), known & (days > cut)
+    margin, holdout = 0.0, {}
+    if test.sum() >= 24 * 10:
+        q = {}
+        for alpha, name in zip(QUANTILES, ("q10", "q50", "q90")):
+            m = quantile_model(alpha, params)
+            m.fit(X.loc[train].drop(columns=["spike_threshold"]), table.y[train])
+            q[name] = np.asarray(m.predict(X.loc[test].drop(columns=["spike_threshold"])), dtype=float)
+        frame = sort_quantiles(pd.DataFrame(q, index=X.index[test]))
+        y = table.y[test].to_numpy()
+        scores = np.maximum(frame["q10"].to_numpy() - y, y - frame["q90"].to_numpy())
+        n = len(scores)
+        rank = min(int(np.ceil((n + 1) * (1 - ALPHA))), n)
+        margin = float(np.sort(scores)[rank - 1])
+        covered_raw = float(np.mean((y >= frame["q10"]) & (y <= frame["q90"])))
+        covered = float(np.mean((y >= frame["q10"] - margin) & (y <= frame["q90"] + margin)))
+        holdout = {"from": str((cut + pd.Timedelta(days=1)).date()), "to": str(last_day.date()), "hours": int(n), "raw_coverage_10_90": round(covered_raw, 4),
+                   "coverage_10_90_with_margin": round(covered, 4), "pinball_mean": round(float(np.mean([pinball(y, frame[c].to_numpy(), a) for c, a in zip(("q10", "q50", "q90"), QUANTILES)])), 3)}
+        log(f"Probabilistic holdout {holdout['from']} to {holdout['to']}: raw coverage {100 * covered_raw:.1f}%, margin {margin:.2f}, "
+            f"coverage with margin {100 * covered:.1f}%")
+    paths = prob_paths(out, feature_set)
+    for alpha, name in zip(QUANTILES, ("q10", "q50", "q90")):
+        m = quantile_model(alpha, params)
+        m.fit(X.loc[known].drop(columns=["spike_threshold"]), table.y[known])
+        m.booster_.save_model(str(paths[name]))
+    events = {}
+    for event in EVENTS:
+        keep = known & labels[event].notna()
+        y_event = labels.loc[keep, event].astype(int)
+        events[event] = {"events": int(y_event.sum()), "hours": int(len(y_event)), "base_rate": round(float(y_event.mean()), 4)}
+        m = event_model({**params, "objective": "binary"})
+        m.fit(X[keep], y_event)
+        m.booster_.save_model(str(paths[event]))
+    fit_time = pd.Timestamp(now).tz_convert("UTC") if now is not None else pd.Timestamp.now(tz="UTC")
+    meta = {"feature_set": feature_set, "parts": {k: v.name for k, v in paths.items() if k != "meta"}, "fitted_at_utc": fit_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "train_from": str(days[known].min().date()), "train_to": str(last_day.date()), "train_hours": int(known.sum()),
+            "features": list(table.X.columns), "event_features": list(X.columns), "quantiles": list(QUANTILES), "alpha": ALPHA,
+            "conformal_margin": round(margin, 3), "conformal_window_days": CONFORMAL_WINDOW_DAYS, "spike_percentile": SPIKE_PERCENTILE,
+            "trailing_days": TRAILING_DAYS, "params": {k: v for k, v in params.items() if k != "verbose"}, "holdout": holdout, "events": events,
+            "note": "Quantile forecasts with a conformal 10-90 interval and event probabilities (negative price, spike above the trailing-year "
+                    "95th percentile); see docs/experiments.md. Without these files the forecast carries no band."}
+    paths["meta"].write_text(json.dumps(meta, indent=2))
+    return meta
+
+
+def load_probabilistic(model_dir, feature_set: str):
+    """The boosters and metadata, or None when any file is missing (the forecast then carries no band)."""
+    from lightgbm import Booster
+
+    paths = prob_paths(model_dir, feature_set)
+    if not all(p.exists() for p in paths.values()):
+        return None
+    models = {part: Booster(model_str=paths[part].read_text(encoding="utf-8").replace("\r\n", "\n")) for part in PROB_PARTS}
+    models["meta"] = json.loads(paths["meta"].read_text())
+    return models
+
+
+def predict_probabilistic(models: dict, X_day: pd.DataFrame, spike_threshold: float, margin: float | None = None) -> pd.DataFrame:
+    """Quantiles (sorted), the conformal interval with `margin` (default the metadata's), and the two event probabilities, per hour."""
+    margin = float(models["meta"]["conformal_margin"]) if margin is None else float(margin)
+    features = models["meta"]["features"]
+    event_features = models["meta"]["event_features"]
+    X = X_day.copy()
+    X["spike_threshold"] = spike_threshold
+    out = pd.DataFrame(index=X_day.index)
+    for part in ("q10", "q50", "q90"):
+        out[part] = np.asarray(models[part].predict(X[features]), dtype=float)
+    out = sort_quantiles(out)
+    out["lo"] = out["q10"] - margin
+    out["hi"] = out["q90"] + margin
+    for event in EVENTS:
+        out[f"p_{event}"] = np.clip(np.asarray(models[event].predict(X[event_features]), dtype=float), 0.0, 1.0)
+    out["spike_threshold"] = spike_threshold
+    out["conformal_margin"] = margin
+    return out.round(4)
+
+
+def spike_threshold_for_day(hourly: pd.DataFrame, day, trailing_days: int = TRAILING_DAYS, percentile: float = SPIKE_PERCENTILE) -> float:
+    """The trailing-year 95th percentile of the known hourly prices before `day`, from the inputs table."""
+    from .timing import delivery_days
+
+    prices = hourly["price_eur_mwh"].dropna()
+    days = pd.Series(delivery_days(prices.index), index=prices.index)
+    day = pd.Timestamp(day).normalize()
+    window = prices[(days >= day - pd.Timedelta(days=trailing_days)) & (days < day)]
+    return float(np.quantile(window.to_numpy(), percentile)) if len(window) >= 24 * 30 else float("nan")
+
+
+def live_margin(settled: pd.DataFrame, min_days: int = 20, alpha: float = ALPHA) -> float | None:
+    """The conformal margin from stored raw quantiles and actuals of the last settled days (columns q10, q90, actual, delivery_day)."""
+    frame = settled.dropna(subset=["q10", "q90", "actual"])
+    if frame.empty or frame["delivery_day"].nunique() < min_days:
+        return None
+    scores = np.maximum(frame["q10"] - frame["actual"], frame["actual"] - frame["q90"]).to_numpy()
+    n = len(scores)
+    rank = min(int(np.ceil((n + 1) * (1 - alpha))), n)
+    return float(np.sort(scores)[rank - 1])
+
+
+def live_calibration(settled: pd.DataFrame) -> dict:
+    """Aggregates only: coverage and width of the stored 10-90 band, Brier scores and reliability of the event probabilities on settled days."""
+    frame = settled.dropna(subset=["actual"])
+    out = {"days": int(frame["delivery_day"].nunique()) if len(frame) else 0, "hours": int(len(frame))}
+    if frame.empty:
+        return out
+    band = frame.dropna(subset=["lo", "hi"])
+    if len(band):
+        y = band["actual"].to_numpy()
+        out["coverage_10_90"] = round(float(np.mean((y >= band["lo"]) & (y <= band["hi"]))), 4)
+        out["mean_width"] = round(float((band["hi"] - band["lo"]).mean()), 2)
+        out["pinball_mean"] = round(float(np.mean([pinball(y, band[c].to_numpy(), a) for c, a in zip(("q10", "q50", "q90"), QUANTILES)])), 3)
+    for event, label in (("negative", frame["actual"] < 0), ("spike", frame["actual"] > frame["spike_threshold"])):
+        part = frame.dropna(subset=[f"p_{event}"])
+        if part.empty:
+            continue
+        yv = label.loc[part.index].to_numpy(dtype=float)
+        pv = part[f"p_{event}"].to_numpy(dtype=float)
+        out[event] = {"events": int(yv.sum()), "hours": int(len(yv)), "brier": round(brier(yv, pv), 5),
+                      "brier_base_rate": round(brier(yv, np.full(len(yv), yv.mean())), 5) if len(yv) else None,
+                      "log_loss": round(log_loss(yv, pv), 4), "reliability": reliability_table(yv, pv).to_dict(orient="records")}
+    return out
+
+
+def backtest_record(ready: pd.DataFrame, label: str) -> dict:
+    """The aggregates of a backtest, for published/probabilistic_backtest.json (no hourly data)."""
+    intervals = evaluate_intervals(ready)
+    events = evaluate_events(ready)
+    return {"label": label, "first_day": intervals["first_day"], "last_day": intervals["last_day"], "intervals_accepted": intervals["accepted"],
+            "intervals": {s: {m: v for m, v in part.items()} for s, part in intervals["by_slice"].items()},
+            "events": {e: {k: (v.to_dict(orient="records") if hasattr(v, "to_dict") else v) for k, v in r.items()} for e, r in events.items()},
+            "written_at_utc": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ")}

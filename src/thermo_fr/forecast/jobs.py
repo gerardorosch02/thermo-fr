@@ -45,6 +45,7 @@ from ..data.weather_forecast import OpenMeteoForecastSource
 from ..data.wind_points import WindPointsSource
 from .day import HISTORY_DAYS, forecast_day, merge_inputs
 from .features import FEATURES, build_features
+from .probabilistic import live_margin, load_probabilistic, predict_probabilistic, spike_threshold_for_day
 from .gen_proxy import apply_weights, load_weights
 from .inputs import INPUT_COLUMNS, NEIGHBOUR_PRICE_COLUMNS, load_inputs
 from .solar_proxy import SOLAR
@@ -168,6 +169,32 @@ def refresh_error_band(store: Store, reports_dir=Path("reports/forecast"), now=N
     return done
 
 
+def probabilistic_curve(store: Store, run_id: int, day: str, forecast_id: int, feature_set: str, model_dir, inputs: pd.DataFrame, now=None) -> bool:
+    """Add the quantile band and event probabilities to a version when the probabilistic model files exist; otherwise record that there is no band."""
+    models = load_probabilistic(model_dir, feature_set)
+    if models is None:
+        message = f"no probabilistic model files for {feature_set} under {model_dir}: this version carries no band or event probabilities"
+        log.warning("probabilistic: %s", message)
+        store.record_status(run_id, day, "probabilistic", "absent", message=message, now=now)
+        return False
+    try:
+        table = build_features(inputs, feature_set)
+        rows = table.info["delivery_day"] == pd.Timestamp(day).normalize()
+        threshold = spike_threshold_for_day(inputs, day)
+        margin = live_margin(store.probabilistic_settled(feature_set))
+        frame = predict_probabilistic(models, table.X[rows], threshold, margin)
+        store.save_probabilistic(forecast_id, frame)
+        source = "live (last settled days)" if margin is not None else "metadata (initial)"
+        store.record_status(run_id, day, "probabilistic", "present", hours=int(len(frame)),
+                            message=f"10-90 band margin {frame['conformal_margin'].iloc[0]:.2f} from {source}; spike threshold {threshold:.1f}", now=now)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        message = f"{exc.__class__.__name__}: {exc}"
+        log.error("probabilistic for %s failed: %s", day, message)
+        store.record_status(run_id, day, "probabilistic", "error", message=message, now=now)
+        return False
+
+
 def missing_features(day: str, inputs: pd.DataFrame, feature_set: str) -> list[str]:
     """The features of the set that have no value at all on the delivery day's rows (an input that did not arrive)."""
     table = build_features(inputs, feature_set)
@@ -256,6 +283,8 @@ def morning_run(store: Store, delivery_day: str | None = None, kind: str = "sche
                 forecast_id = store.save_forecast(
                     run_id, day, feature_set, issued_at, model_name, kind, curve.attrs["train_hours"], curve.attrs["passes_gate"], curve
                 )
+                if stored is not None and suffix == "":
+                    probabilistic_curve(store, run_id, day, forecast_id, predict_set, Path(stored).parent, merged, now=now)
                 summary["forecasts"][feature_set] = forecast_id
                 log.info("%s forecast for %s stored as version %d (issued %s)", feature_set, day, forecast_id, issued_at)
             except Exception as exc:  # noqa: BLE001
