@@ -193,6 +193,16 @@ def history_chart(data: dict, days: int = 30) -> go.Figure | None:
     return layout(fig, "EUR/MWh", "Delivery hour (Paris time)")
 
 
+# The backfilled trading record, scored as a walk-forward (see the repository's docs/forecast.md); aggregates only,
+# the traded prices themselves are not republished. Updated by hand when the record is re-scored.
+MARKET_RECORD = {
+    "period": "delivery days 2026-08-29 to 2026-10-10",
+    "windows": 42, "base_windows": 38, "peak_windows": 4,
+    "hit_rate": 0.29, "mean_pnl_per_mwh": -2.5, "model_mae": 27.0, "market_mae": 5.1, "share_model_beats_market": 0.12,
+    "reason": "The model reacts to large moves about two days late, because its price lags carry yesterday's level into "
+              "tomorrow's forecast, while the market reprices the same morning.",
+}
+
 HOW_IT_WORKS = """
 **Target.** The hourly French day-ahead electricity price (EPEX / single day-ahead coupling), in Paris delivery hours.
 
@@ -216,10 +226,12 @@ the past; it is not a probability forecast for tomorrow.
 **Updates.** A GitHub Actions workflow publishes the forecast on weekday mornings and scores it against the
 published prices every afternoon. Source code, method and backtest: the repository linked above.
 
-**Limitations.** Forecast error is measured against a naive baseline, the spot auction result of the same hour on the previous
-day; a lower error than the baseline says nothing about whether a trade would have made money. Trading value is measured
-separately, against EEX French day-ahead futures traded before the auction (the "Versus the market" panel), on the days for
-which traded prices were recorded by hand: a small sample so far, reported whatever it says. The error band is the model's
+**Limitations.** Two measurements give two different answers. On forecast error the model beats the naive baseline, the spot
+auction result of the same hour on the previous day. Against EEX French day-ahead futures traded before the auction it loses
+(the "Versus the market" panel): over 42 windows the direction implied by the forecast had a 29% hit rate and a mean P&L of
+-2.5 EUR/MWh per window, and the forecast's error against the auction was 27.0 EUR/MWh where the traded price's was 5.1. The
+model reacts to large moves about two days late, because its price lags carry yesterday's level into tomorrow's forecast,
+while the market reprices the same morning. The error band is the model's
 past error distribution, not a probability forecast. Errors are largest on days with regime changes (cold snaps,
 price collapses, days after holidays), which is also where a forecast matters most. A known weakness is the top 5% price
 hours, typically cold, calm winter evenings when gas sets the price: the generation proxies improve the error elsewhere but
@@ -295,6 +307,16 @@ def main() -> None:
                          hide_index=True, use_container_width=True)
 
     st.subheader("Versus the market")
+    r = MARKET_RECORD
+    st.markdown(f"**The model beats the naive baseline on forecast error and loses against the traded price.** Over {r['windows']} windows "
+                f"({r['base_windows']} base, {r['peak_windows']} peak; {r['period']}) the direction implied by the forecast against the EEX "
+                f"French day-ahead future's 11:15 to 12:00 Paris VWAP, settled at the auction result, had a hit rate of {100 * r['hit_rate']:.0f}% "
+                f"and a mean P&L of {r['mean_pnl_per_mwh']:+.1f} EUR/MWh per window. The forecast's error against the auction was "
+                f"{r['model_mae']:.1f} EUR/MWh where the traded price's was {r['market_mae']:.1f}; the forecast's error was the smaller one on "
+                f"{100 * r['share_model_beats_market']:.0f}% of windows. {r['reason']}")
+    st.caption("Backfilled record scored as a walk-forward: each day with a model fitted only on data before it, or with the version "
+               "actually issued before the window where one existed. Traded prices come from EEX and are not republished; the live "
+               "record below grows one weekday at a time.")
     market = status.get("market") or {}
     if market.get("scored_days", 0) and "hit_rate" in market:
         c1, c2, c3, c4 = st.columns(4)
@@ -307,10 +329,9 @@ def main() -> None:
                    "republished here; only these aggregates are.")
     else:
         needed = int(market.get("min_days_to_show", 20))
-        st.markdown(f"**Versus the market: collecting data, {int(market.get('scored_days', 0))} of {needed} days.**")
-        st.caption("Trading value is measured against EEX French day-ahead futures traded before the auction: the forecast issued before "
-                   "the trading window against the traded VWAP, settled at the auction result. Aggregates appear once enough days are "
-                   "scored. Market prices come from EEX and are not republished here.")
+        st.markdown(f"**Live record: collecting data, {int(market.get('scored_days', 0))} of {needed} days.**")
+        st.caption("The live record counts only days whose forecast was published before the trading window; its aggregates appear "
+                   "once enough days are scored.")
 
     st.subheader("How it works")
     st.markdown(HOW_IT_WORKS)
