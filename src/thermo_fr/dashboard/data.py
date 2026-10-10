@@ -166,7 +166,7 @@ def flag_for(row) -> str:
     return "ok"
 
 
-def market_panel(path, feature_set: str = "honest", market_path=MARKET_PATH) -> dict:
+def market_panel(path, feature_set: str = "honest_v2", market_path=MARKET_PATH) -> dict:
     """The forecast against EEX traded prices, day by day, from the local file (collected, pasted or typed; never published)."""
     rows = load_market(market_path)
     if rows.empty:

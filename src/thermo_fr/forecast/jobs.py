@@ -55,11 +55,13 @@ from .wind_proxy import WIND
 log = logging.getLogger("thermo_fr.jobs")
 
 DEFAULT_WEIGHTS_PATH = WIND.default_path
-DEFAULT_MODEL_FILE = Path("published/model/honest.txt")
+DEFAULT_MODEL_FILE = Path("published/model/honest_v2.txt")  # the default model (docs/experiments.md, decision of 2026-10-10)
+FALLBACK_MODEL_FILE = Path("published/model/honest.txt")  # used when a v2 input is missing for the day
 INPUT_SERIES = ["load_fc_mw", "solar_fc_mw", "wind_onshore_fc_mw", "wind_offshore_fc_mw", "temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2",
                 "wind_proxy_mw", "solar_proxy_mw", "nuclear_mw"] + NEIGHBOUR_PRICE_COLUMNS
 WEATHER_SERIES = ["temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2"]
-FEATURE_SETS = ("honest", "extended")
+FEATURE_SETS = ("honest_v2", "extended")  # what a morning run produces by default
+BAND_SETS = ("honest_v2", "honest", "extended")  # the sets whose backtest error band is refreshed when a predictions file exists
 
 
 def next_delivery_day(now=None) -> str:
@@ -155,7 +157,7 @@ def fetch_fresh(day: str, cache_dir: Path, store: Store, run_id: int, entsoe=Non
 
 def refresh_error_band(store: Store, reports_dir=Path("reports/forecast"), now=None) -> list[str]:
     done = []
-    for feature_set in FEATURE_SETS:
+    for feature_set in BAND_SETS:
         path = Path(reports_dir) / f"predictions_{feature_set}.csv"
         if not path.exists():
             continue
@@ -189,7 +191,7 @@ def stored_model_feature_set(model_file) -> str:
 def morning_run(store: Store, delivery_day: str | None = None, kind: str = "scheduled", inputs_path=Path("data/forecast/inputs.csv"),
                 cache_dir=Path("data/cache"), reports_dir=Path("reports/forecast"), entsoe=None, weather=None, now=None,
                 feature_sets=FEATURE_SETS, model_file=None, wind_points=None, wind_weights=WIND.default_path, solar_points=None,
-                solar_weights=SOLAR.default_path, fallback_model_file=DEFAULT_MODEL_FILE) -> dict:
+                solar_weights=SOLAR.default_path, fallback_model_file=FALLBACK_MODEL_FILE) -> dict:
     """One morning run. Returns a summary dict; never raises for a source failure.
 
     If the stored model needs an input that did not arrive for the delivery

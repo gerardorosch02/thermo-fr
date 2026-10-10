@@ -105,6 +105,7 @@ def solar_weights(table, tmp_path):
 
 def run(store, table, history, tmp_path, weights, entsoe=None, weather=None, now=NOW, **kw):
     solar = kw.pop("solar_weights", tmp_path / "model" / "solar_proxy.json")
+    kw.setdefault("feature_sets", ("honest", "extended"))  # the older tests were written for these two sets
     return morning_run(store, DAY, kind="test", inputs_path=history, entsoe=entsoe or FakeEntsoe(table), weather=weather or FakeWeather(table),
                        now=now, reports_dir=tmp_path / "none", wind_points=kw.pop("wind_points", None) or FakeWindPoints(table),
                        wind_weights=weights, solar_points=kw.pop("solar_points", None) or FakeSolarPoints(table), solar_weights=solar, **kw)

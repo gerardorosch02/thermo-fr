@@ -388,9 +388,10 @@ def main(argv=None) -> None:
     morning.add_argument("--cache-dir", default="data/cache")
     morning.add_argument("--reports-dir", default="reports/forecast", help="backtest predictions for the error band")
     morning.add_argument("--logs-dir", default="logs")
-    morning.add_argument("--feature-sets", nargs="+", default=["honest", "extended"], choices=("honest", "extended"))
-    morning.add_argument("--model-file", default="published/model/honest.txt",
-                         help="stored LightGBM model for the honest set, the same file the GitHub workflow predicts with (default: %(default)s)")
+    morning.add_argument("--feature-sets", nargs="+", default=["honest_v2", "extended"], choices=("honest_v2", "honest", "extended"))
+    morning.add_argument("--model-file", default="published/model/honest_v2.txt",
+                         help="stored LightGBM model (its own feature set is predicted with it), the same file the GitHub workflow predicts "
+                              "with (default: %(default)s)")
     morning.add_argument("--refit", action="store_true", help="ignore --model-file and fit the models live on the inputs history")
     morning.add_argument("--fallback-model-file", default="published/model/honest.txt",
                          help="used instead of --model-file when an input that model needs is missing for the day (recorded in data_status)")
@@ -411,8 +412,8 @@ def main(argv=None) -> None:
     refit.add_argument("--out", default="published/model")
     refit.add_argument("--data", default="data/forecast/inputs.csv", help="where the fetched history is saved (local only)")
     refit.add_argument("--from-file", action="store_true", help="refit from --data without fetching")
-    refit.add_argument("--feature-sets", nargs="+", default=["honest"], choices=FEATURE_SETS,
-                       help="one model file per set; honest stays the default the morning run predicts with (default: %(default)s)")
+    refit.add_argument("--feature-sets", nargs="+", default=["honest_v2", "honest"], choices=FEATURE_SETS,
+                       help="one model file per set: the default model honest_v2 and the fallback honest (default: %(default)s)")
     refit.add_argument("--cache-dir", default="data/cache")
     refit.add_argument("--csv-dir", default="data/csv")
     refit.add_argument("--logs-dir", default="logs")
@@ -464,7 +465,7 @@ def main(argv=None) -> None:
     meval = mkt_sub.add_parser("evaluate", help="score every stored market row with the forecast that was live before its window")
     meval.add_argument("--path", default="data/market/eex_fr_da.csv")
     meval.add_argument("--db", default="data/forecast.db")
-    meval.add_argument("--feature-set", default="honest")
+    meval.add_argument("--feature-set", default="honest_v2")
     meval.add_argument("--bands", nargs="+", type=float, default=[0.0, 1.0, 2.0, 5.0, 10.0], help="no-trade bands in EUR/MWh (in sample)")
     meval.set_defaults(func=cmd_market_evaluate)
 

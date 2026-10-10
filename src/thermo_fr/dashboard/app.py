@@ -17,8 +17,9 @@ import streamlit as st
 
 from thermo_fr.dashboard import data as q
 
-COLORS = {"honest": "#2a78d6", "extended": "#1baf7a", "actual": "#eb6834", "benchmark": "#52514e", "grid": "#e6e5e1"}
-BAND_RGBA = {"honest": ("rgba(42,120,214,0.14)", "rgba(42,120,214,0.30)"), "extended": ("rgba(27,175,122,0.14)", "rgba(27,175,122,0.30)")}
+COLORS = {"honest_v2": "#2a78d6", "honest": "#6f5fc6", "extended": "#1baf7a", "actual": "#eb6834", "benchmark": "#52514e", "grid": "#e6e5e1"}
+BAND_RGBA = {"honest_v2": ("rgba(42,120,214,0.14)", "rgba(42,120,214,0.30)"), "honest": ("rgba(111,95,198,0.14)", "rgba(111,95,198,0.30)"),
+             "extended": ("rgba(27,175,122,0.14)", "rgba(27,175,122,0.30)")}
 EXTENDED_NOTE = (
     "The extended feature set adds the ENTSO-E day-ahead wind and solar forecasts, which the platform allows to be "
     "published until 18:00 on the day before delivery, after the 12:00 gate. Until the timing log shows them arriving "
@@ -169,9 +170,12 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Settings")
-        feature_set = st.radio("Feature set", ("honest", "extended"), index=0,
-                               help="Honest: every input is published before 12:00 Paris on the day before delivery.")
-        st.caption("Honest set: calendar, ENTSO-E load forecast, Open-Meteo weather issued two days ahead, lagged prices.")
+        feature_set = st.radio("Feature set", ("honest_v2", "honest", "extended"), index=0,
+                               help="honest_v2 is the default model (published/model/honest_v2.txt); honest is the fallback model's set; "
+                                    "both use only inputs published before 12:00 Paris on the day before delivery.")
+        st.caption("honest_v2: the honest set (calendar, load forecast, weather issued two days ahead, wind and solar proxies, price lags) "
+                   "plus lagged nuclear generation, the neighbours' D-1 prices and a residual load. Each version names the model that "
+                   "produced it; ':fallback' means the default model's inputs were missing and honest.txt was used.")
         if feature_set == "extended":
             st.warning(EXTENDED_NOTE)
         st.divider()
@@ -207,7 +211,8 @@ def main() -> None:
         c2.metric("Versions today", int(len(panel["versions"])))
         c3.metric("Daily mean forecast", f"{panel['by_hour']['forecast'].mean():.1f} EUR/MWh")
         c4.metric("Run kind", str(meta["kind"]))
-        fitted = (f"the stored model {str(meta['model']).split(':', 1)[-1]} (the file the GitHub workflow predicts with)"
+        fitted = (f"the stored model {str(meta['model']).split(':', 1)[-1]}"
+                  + (" (used because the default model's inputs were missing)" if str(meta["model"]).endswith(":fallback") else "")
                   if int(meta["train_hours"]) == 0 else f"{meta['model']} fitted live on {int(meta['train_hours']):,} hours")
         st.caption(f"Issued {issued:%Y-%m-%d %H:%M} Paris. Model: {fitted}; this feature set {gate_badge}.")
         has_band = "band_p10" in panel["by_hour"]
