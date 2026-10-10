@@ -11,7 +11,11 @@ name: Day-ahead forecast
 #                day and predicts with the stored model published/model/honest.txt
 #   settle       daily afternoon: fetches the auction results, scores the forecasts
 #   refit        first weekday of the month: fetches the full history since 2021,
-#                refits, commits only the model file and its metadata
+#                refits the honest model and the honest_v2 candidate (lagged
+#                nuclear generation, neighbour prices, residual load; see
+#                docs/experiments.md), commits only the model files and their
+#                metadata. The morning run keeps predicting with honest.txt
+#                until the v2 model is made the default.
 #
 # Timing. GitHub cron is UTC; Paris is UTC+2 in summer and UTC+1 in winter. The
 # ENTSO-E load forecast is due at 10:00 Paris on the day before delivery and
@@ -89,7 +93,7 @@ jobs:
             settle)
               thermo-fr settle --kind scheduled --db data/forecast.db ;;
             refit)
-              thermo-fr refit-model --start 2021-01-01 --out published/model ;;
+              thermo-fr refit-model --start 2021-01-01 --out published/model --feature-sets honest honest_v2 ;;
             morning-run)
               test -f published/model/honest.txt || { echo "no stored model: run the refit step first"; exit 1; }
               thermo-fr morning-run --kind scheduled --db data/forecast.db --data data/forecast/inputs.csv \

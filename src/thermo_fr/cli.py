@@ -150,8 +150,9 @@ def cmd_morning_run(args) -> None:
     store = Store(Path(args.db))
     try:
         model_file = None if args.refit or not args.model_file else Path(args.model_file)
+        fallback = Path(args.fallback_model_file) if args.fallback_model_file else None
         summary = morning_run(store, args.date, kind=args.kind, inputs_path=Path(args.data), cache_dir=Path(args.cache_dir),
-                              reports_dir=Path(args.reports_dir), feature_sets=tuple(args.feature_sets), model_file=model_file,
+                              reports_dir=Path(args.reports_dir), feature_sets=tuple(args.feature_sets), model_file=model_file, fallback_model_file=fallback,
                               wind_weights=Path(args.wind_weights), solar_weights=Path(args.solar_weights))
     finally:
         store.close()
@@ -193,15 +194,17 @@ def cmd_refit_model(args) -> None:
     from .forecast.refit import fetch_and_refit, refit_from_file
 
     setup_logging("refit-model", logs_dir=Path(args.logs_dir))
+    sets = tuple(args.feature_sets)
     if args.from_file:
-        meta = refit_from_file(Path(args.data), out_dir=Path(args.out))
+        metas = refit_from_file(Path(args.data), out_dir=Path(args.out), feature_sets=sets)
     else:
         end = args.end or first_of_this_month()
-        meta = fetch_and_refit(args.start, end, out_dir=Path(args.out), cache_dir=Path(args.cache_dir), csv_dir=Path(args.csv_dir),
-                               inputs_path=Path(args.data))
-    holdout = meta.get("holdout") or {}
-    print(f"Model fitted on {meta['train_hours']:,} hours ({meta['train_from']} to {meta['train_to']}), saved under {args.out}; "
-          f"holdout MAE {holdout.get('mae')} against benchmark {holdout.get('naive_mae')}")
+        metas = fetch_and_refit(args.start, end, out_dir=Path(args.out), cache_dir=Path(args.cache_dir), csv_dir=Path(args.csv_dir),
+                                inputs_path=Path(args.data), feature_sets=sets)
+    for feature_set, meta in metas.items():
+        holdout = meta.get("holdout") or {}
+        print(f"{feature_set}: model fitted on {meta['train_hours']:,} hours ({meta['train_from']} to {meta['train_to']}), saved as "
+              f"{meta['model_file']} under {args.out}; holdout MAE {holdout.get('mae')} against benchmark {holdout.get('naive_mae')}")
 
 
 def cmd_import_published(args) -> None:
@@ -389,6 +392,8 @@ def main(argv=None) -> None:
     morning.add_argument("--model-file", default="published/model/honest.txt",
                          help="stored LightGBM model for the honest set, the same file the GitHub workflow predicts with (default: %(default)s)")
     morning.add_argument("--refit", action="store_true", help="ignore --model-file and fit the models live on the inputs history")
+    morning.add_argument("--fallback-model-file", default="published/model/honest.txt",
+                         help="used instead of --model-file when an input that model needs is missing for the day (recorded in data_status)")
     morning.add_argument("--wind-weights", default="published/model/wind_proxy.json", help="wind proxy calibration written by refit-model")
     morning.add_argument("--solar-weights", default="published/model/solar_proxy.json", help="solar proxy calibration written by refit-model")
     morning.set_defaults(func=cmd_morning_run)
@@ -406,6 +411,8 @@ def main(argv=None) -> None:
     refit.add_argument("--out", default="published/model")
     refit.add_argument("--data", default="data/forecast/inputs.csv", help="where the fetched history is saved (local only)")
     refit.add_argument("--from-file", action="store_true", help="refit from --data without fetching")
+    refit.add_argument("--feature-sets", nargs="+", default=["honest"], choices=FEATURE_SETS,
+                       help="one model file per set; honest stays the default the morning run predicts with (default: %(default)s)")
     refit.add_argument("--cache-dir", default="data/cache")
     refit.add_argument("--csv-dir", default="data/csv")
     refit.add_argument("--logs-dir", default="logs")

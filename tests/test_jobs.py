@@ -9,9 +9,14 @@ from test_forecast_features import synthetic_inputs
 from thermo_fr.data.solar_points import POINT_COLUMNS as SOLAR_POINT_COLUMNS
 from thermo_fr.data.wind_points import POINT_COLUMNS
 from thermo_fr.forecast import models, solar_proxy, wind_proxy
-from thermo_fr.forecast.jobs import day_hours, morning_run, next_delivery_day, presence, settle, setup_logging
+from thermo_fr.forecast.inputs import NEIGHBOUR_PRICE_COLUMNS
+from thermo_fr.forecast.jobs import day_hours, missing_features, morning_run, next_delivery_day, presence, settle, setup_logging
+from thermo_fr.forecast.refit import refit_model
 from thermo_fr.forecast.store import Store
+from thermo_fr.forecast.features import FEATURES
 from thermo_fr.forecast.wind_proxy import calibrate, save_weights
+
+FEATURES_HONEST = FEATURES["honest"]
 
 DAY = "2024-04-10"  # delivery day inside the synthetic table
 NOW = pd.Timestamp("2024-04-09T07:30Z")  # 09:30 Paris on D-1
@@ -42,6 +47,12 @@ class FakeEntsoe:
 
     def day_ahead_prices(self, start, end):
         return self._slice("prices", start, end, "price_eur_mwh")
+
+    def nuclear_generation_actual(self, start, end):
+        return self._slice("nuclear_actual", start, end, "nuclear_mw")
+
+    def neighbour_prices(self, start, end):
+        return self._slice("neighbour_prices", start, end, NEIGHBOUR_PRICE_COLUMNS)
 
 
 class FakeWeather:
@@ -135,7 +146,7 @@ def test_morning_run_stores_both_feature_sets_and_the_timing_log(store, table, h
     assert summary["error_band"] == []
     status = store.latest_status(DAY)
     assert set(status.index) == {"load_forecast", "wind_solar_forecast", "prices", "weather_issued", "wind_points", "wind_proxy",
-                                 "solar_points", "solar_proxy"}
+                                 "solar_points", "solar_proxy", "nuclear_actual", "neighbour_prices"}
     assert status.loc["wind_proxy", "status"] == "present" and status.loc["wind_proxy", "hours"] == 24
     assert status.loc["solar_proxy", "status"] == "present" and status.loc["solar_proxy", "hours"] == 24
     assert status.loc["load_forecast", "status"] == "present" and status.loc["load_forecast", "hours"] == 24
@@ -181,7 +192,7 @@ def test_wind_solar_down_gives_partial_run_with_honest_forecast_only(store, tabl
 
 
 def test_everything_down_is_a_failed_run_not_a_crash(store, table, history, tmp_path, weights, solar_weights):
-    entsoe = FakeEntsoe(table, down=("load_forecast", "wind_solar_forecast", "prices"))
+    entsoe = FakeEntsoe(table, down=("load_forecast", "wind_solar_forecast", "prices", "nuclear_actual", "neighbour_prices"))
     summary = run(store, table, history, tmp_path, weights, entsoe=entsoe, weather=FakeWeather(table, down=True),
                   wind_points=FakeWindPoints(table, down=True), solar_points=FakeSolarPoints(table, down=True))
     assert summary["status"] == "failed" and summary["forecasts"] == {}
@@ -253,6 +264,41 @@ def test_settle_with_prices_down_is_partial_or_failed(store, table, history, tmp
     settled = settle(store, entsoe=FakeEntsoe(table, down=("prices",)), now=pd.Timestamp("2024-04-09T13:00Z"), kind="test")
     assert settled["status"] == "failed" and settled["scored"] == 0 and settled["errors"]
     assert store.latest_status(DAY).loc["prices", "status"] == "error"
+
+
+def test_v2_model_falls_back_to_the_honest_model_when_its_inputs_are_missing(store, table, history, tmp_path, weights, solar_weights):
+    before = table[table.index < "2024-04-01"]
+    refit_model(before, out_dir=tmp_path / "model", feature_set="honest_v2", holdout_days=0, log=lambda *_: None, params={"n_estimators": 20})
+    refit_model(before, out_dir=tmp_path / "model", feature_set="honest", holdout_days=0, log=lambda *_: None, params={"n_estimators": 20})
+    v2, honest = tmp_path / "model" / "honest_v2.txt", tmp_path / "model" / "honest.txt"
+    # every input arrives: the v2 model predicts
+    summary = run(store, table, history, tmp_path, weights, feature_sets=("honest_v2",), model_file=v2, fallback_model_file=honest)
+    versions = store.forecast_versions(DAY, "honest_v2")
+    assert summary["status"] == "ok" and versions["model"].tolist() == ["gbm:honest_v2.txt"]
+    status = store.status_for(DAY)
+    assert {"nuclear_actual", "neighbour_prices"} <= set(status["item"]) and "fallback" not in set(status["status"])
+    # nuclear generation does not arrive: the day's nuclear features are all missing, the honest model takes over, the run is partial
+    entsoe = FakeEntsoe(table, down=("nuclear_actual",))
+    summary = run(store, table, history, tmp_path, weights, entsoe=entsoe, feature_sets=("honest_v2",), model_file=v2, fallback_model_file=honest, now=NOW + pd.Timedelta(hours=1))
+    versions = store.forecast_versions(DAY, "honest_v2")
+    assert summary["status"] == "partial" and versions["model"].tolist()[-1] == "gbm:honest.txt:fallback"
+    rows = store.status_for(DAY)
+    fallback = rows[(rows["item"] == "model") & (rows["status"] == "fallback")]
+    assert len(fallback) == 1 and "nuclear_d1_early_mw" in fallback.iloc[0]["message"] and "honest.txt" in fallback.iloc[0]["message"]
+    assert "fallback" in store.runs(limit=1).iloc[0]["message"]
+    # the same failure without a usable fallback produces no v2 forecast and an error, never a prediction with missing features
+    summary = run(store, table, history, tmp_path, weights, entsoe=entsoe, feature_sets=("honest_v2",), model_file=v2, fallback_model_file=None, now=NOW + pd.Timedelta(hours=2))
+    assert summary["status"] == "failed" and any("inputs missing" in e for e in summary["errors"])
+    assert len(store.forecast_versions(DAY, "honest_v2")) == 2
+
+
+def test_missing_features_names_the_columns_without_values_on_the_day(table):
+    assert missing_features(DAY, table, "honest_v2") == []
+    blank = table.copy()
+    blank.loc[blank.index >= "2024-04-07", "nuclear_mw"] = float("nan")
+    assert set(missing_features(DAY, blank, "honest_v2")) == {"nuclear_d2_mw", "nuclear_d2_mean_mw", "nuclear_d1_early_mw", "residual_v2_mw"}
+    assert missing_features(DAY, blank, "honest") == []
+    assert missing_features("2030-01-01", table, "honest") == list(FEATURES_HONEST)
 
 
 def test_setup_logging_writes_a_file_without_secrets(tmp_path, monkeypatch):

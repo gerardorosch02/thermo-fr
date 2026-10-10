@@ -38,7 +38,7 @@ REFIT_PARAMS: dict = {"n_estimators": 300, "num_leaves": 31}
 
 
 def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: str = "honest", holdout_days: int = 30,
-                now=None, log=print, params: dict | None = None) -> dict:
+                now=None, log=print, params: dict | None = None, save_proxies: bool = True) -> dict:
     """Fit on `hourly` (the inputs table) and write the model and metadata. Returns the metadata.
 
     `params` overrides GBM_PARAMS for the published model (for example fewer
@@ -85,9 +85,10 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
         "features": list(FEATURES[feature_set]),
         "params": {k: v for k, v in params.items() if k != "verbose"},
         "holdout": metrics,
-        "note": "Honest feature set: every input is published before 12:00 Paris on the day before delivery.",
+        "note": f"Feature set {feature_set}: every input is published before 12:00 Paris on the day before delivery"
+                + (" and before the pre-market issue time, 10:05 Paris on D-1." if feature_set != "honest" else "."),
     }
-    for spec, actual_of in PROXIES:
+    for spec, actual_of in (PROXIES if save_proxies else ()):
         weights = latest_weights(hourly, actual_of(hourly), spec)
         name = f"{spec.name}_proxy"
         if weights is not None:
@@ -101,15 +102,23 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
     return meta
 
 
+def refit_sets(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_sets=("honest",), log=print) -> dict:
+    """One model file per feature set; the proxy weights are written with the first set only (they do not depend on the set)."""
+    metas = {}
+    for i, feature_set in enumerate(feature_sets):
+        metas[feature_set] = refit_model(hourly, out_dir=out_dir, feature_set=feature_set, log=log, save_proxies=(i == 0))
+    return metas
+
+
 def fetch_and_refit(start: str, end: str, out_dir=DEFAULT_MODEL_DIR, cache_dir=Path("data/cache"), csv_dir=Path("data/csv"),
-                    inputs_path=Path("data/forecast/inputs.csv"), log=print) -> dict:
-    """Fetch the full inputs history for [start, end) (ENTSO-E key needed), save it locally, refit."""
+                    inputs_path=Path("data/forecast/inputs.csv"), log=print, feature_sets=("honest",)) -> dict:
+    """Fetch the full inputs history for [start, end) (ENTSO-E key needed), save it locally, refit. Returns {feature_set: metadata}."""
     hourly, sources, comparison = fetch_inputs(start, end, cache_dir=cache_dir, csv_dir=csv_dir, log=log)
     inputs_path = Path(inputs_path)
     inputs_path.parent.mkdir(parents=True, exist_ok=True)
     hourly.to_csv(inputs_path, index_label="timestamp_utc")
-    return refit_model(hourly, out_dir=out_dir, log=log)
+    return refit_sets(hourly, out_dir=out_dir, feature_sets=feature_sets, log=log)
 
 
-def refit_from_file(inputs_path=Path("data/forecast/inputs.csv"), out_dir=DEFAULT_MODEL_DIR, log=print) -> dict:
-    return refit_model(load_inputs(inputs_path), out_dir=out_dir, log=log)
+def refit_from_file(inputs_path=Path("data/forecast/inputs.csv"), out_dir=DEFAULT_MODEL_DIR, log=print, feature_sets=("honest",)) -> dict:
+    return refit_sets(load_inputs(inputs_path), out_dir=out_dir, feature_sets=feature_sets, log=log)

@@ -45,6 +45,20 @@ def test_refit_writes_model_and_metadata_with_holdout_metrics(tmp_path, table):
     assert small["params"]["n_estimators"] == 300 and small["params"]["num_leaves"] == 31  # REFIT_PARAMS by default
 
 
+def test_refit_sets_writes_one_model_per_set_and_the_proxies_once(tmp_path, table):
+    from thermo_fr.forecast.refit import refit_sets
+
+    history = table[table.index < "2024-04-01"]
+    metas = refit_sets(history, out_dir=tmp_path / "model", feature_sets=("honest", "honest_v2"), log=lambda *_: None)
+    assert set(metas) == {"honest", "honest_v2"}
+    for name in ("honest", "honest_v2"):
+        assert (tmp_path / "model" / f"{name}.txt").exists() and json.loads((tmp_path / "model" / f"{name}.json").read_text())["feature_set"] == name
+    v2 = json.loads((tmp_path / "model" / "honest_v2.json").read_text())
+    assert {"nuclear_d1_early_mw", "price_de_lu_lag1", "spread_ch_lag1", "residual_v2_mw"} <= set(v2["features"])
+    assert "pre-market" in v2["note"] and "wind_proxy" in metas["honest"] and "wind_proxy" not in v2
+    assert (tmp_path / "model" / "wind_proxy.json").exists()
+
+
 def test_stored_model_predicts_on_a_ten_day_window(tmp_path, table):
     refit_model(table[table.index < "2024-04-01"], out_dir=tmp_path / "model", holdout_days=0, log=lambda *_: None)
     window = table[(table.index >= "2024-03-30") & (table.index < "2024-04-12")]
