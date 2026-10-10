@@ -114,12 +114,12 @@ thermo-fr dashboard                               # http://localhost:8501
 Windows Task Scheduler entries (the jobs run as the current user and read `ENTSOE_API_KEY` from the user environment, so set it with `setx ENTSOE_API_KEY ...` once):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Install   # morning-run weekdays 07:00, 08:00, 09:15, 09:45, 10:30, 11:30; settle daily 14:00; market fetch weekdays 11:20 and 11:35; outage snapshot weekdays 09:00 and weekends 10:00 (local time, London intended; 09:15 and 09:45 London are pre-market runs at 10:15 and 10:45 Paris, 11:20 and 11:35 London are 12:20 and 12:35 Paris)
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Install   # morning-run weekdays 07:00, 08:00, 09:15, 09:45, 10:30, 11:30; settle daily 14:00; market fetch weekdays 11:20 and 11:35; outage snapshot weekdays 09:00 and weekends 10:00; fuel snapshot daily 22:15 (private collector, only if local\fuel_fetch.py exists) (local time, London intended; 09:15 and 09:45 London are pre-market runs at 10:15 and 10:45 Paris, 11:20 and 11:35 London are 12:20 and 12:35 Paris)
 powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Show
 powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Remove
 ```
 
-All four tasks have "run task as soon as possible after a scheduled start is missed" and "wake the computer to run this task" turned on. Waking from sleep or hibernation also needs Windows to allow wake timers: Power Options, Sleep, Allow wake timers set to Enable for both plugged in and on battery (`powercfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 1`, the same with `/setdcvalueindex`, then `powercfg /setactive SCHEME_CURRENT`). A machine that is shut down cannot be woken by a task.
+All five tasks have "run task as soon as possible after a scheduled start is missed" and "wake the computer to run this task" turned on. Waking from sleep or hibernation also needs Windows to allow wake timers: Power Options, Sleep, Allow wake timers set to Enable for both plugged in and on battery (`powercfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 1`, the same with `/setdcvalueindex`, then `powercfg /setactive SCHEME_CURRENT`). A machine that is shut down cannot be woken by a task.
 
 The dashboard shows tomorrow's pre-market forecast (the last version issued before the EEX market window opens at 11:15 Paris on the day before; versions issued later are listed underneath as "issued after the market window, not tradeable") with today's actual prices, the same-hour-previous-day baseline and a shaded band built from the backtest's error distribution at each hour (historical error, not a probability forecast); tomorrow's forecast load, wind, solar, residual load and temperature with the change against today's inputs; the last 30 settled days against actual prices with rolling MAE and the share of days whose MAE was below the naive baseline's; a "Versus the market" panel with the daily table and cumulative P&L of the forecast against the recorded EEX traded prices; the data status for tomorrow (arrival time of each input, anything missing or late), the market data collection log with any day the collector skipped or was refused, and the timing-probe summary across all logged days. A sidebar toggle switches between the honest and extended feature sets, with a note that the extended set may use information published after the gate until the timing log shows otherwise. Database reads are cached; the "Refresh now" button runs `morning-run` once.
 
@@ -234,7 +234,7 @@ src/thermo_fr/
   dashboard/data.py      read-only queries for the dashboard
   dashboard/app.py       the Streamlit app
 scripts/schedule_tasks.ps1   install, show or remove the Task Scheduler entries
-local/                 git-ignored: the EEX collector module (`market fetch` loads it from here; nothing in it is committed)
+local/                 git-ignored: the EEX collector module (`market fetch` loads it from here) and the private collector and loader for gas and carbon prices; nothing in it is committed. The public timing rules fuel_index_lag1 (end-of-day indices known from 22:00 CET on D-2) and fuel_morning_trades (D-1 trades up to the issue time) in forecast/timing.py are what the private loader checks itself against
 scripts/screenshot_dashboard.py  full-page screenshot of the running dashboard
 forecast/publish.py      export and import of the public dataset under published/
 forecast/refit.py        monthly refit: model file and metadata under published/model/

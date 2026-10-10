@@ -59,6 +59,14 @@ query time). Sources:
   the latest known nuclear generation) is known when its latest component is,
   the load forecast at 10:00 Paris on D-1.
 
+- Gas and carbon prices (private collector, kept outside the repository):
+  the end-of-day gas day-ahead indices and the carbon spot index for gas day
+  D-1 are published on the evening of D-2 and count as known from 22:00 CET
+  on D-2 (21:00 UTC, all year); the morning trades of the gas front month and
+  the carbon December future on D-1 count only up to the forecast's issue
+  time, so that feature is known at the pre-market issue time itself and
+  never later.
+
 Two deadlines are checked. The gate (12:00 Paris on D-1) is the hard
 constraint every honest feature must meet. The pre-market issue time,
 PREMARKET_ISSUE (10:05 Paris on D-1, the start of the earliest scheduled
@@ -79,6 +87,7 @@ PREMARKET_ISSUE = (10, 5)  # Paris, D-1: the earliest scheduled pre-market run s
 PRICE_PUBLICATION_HOUR = 13
 NUCLEAR_PUBLICATION_LAG_HOURS = 2  # conservative; the regulation says one hour and about 50 minutes was observed
 NUCLEAR_D1_CUTOFF_HOUR = 8  # Paris: D-1 hours ending by then are used, known by 10:00 Paris
+FUEL_INDEX_PUBLICATION_UTC = 21  # 22:00 CET: the evening publication of the gas and carbon end-of-day indices
 LOAD_FORECAST_HOUR = 10
 WIND_SOLAR_FORECAST_HOUR = 18
 WEATHER_RUN_CYCLE_HOURS = 6
@@ -204,6 +213,17 @@ def neighbour_price_lag1_issue(index) -> pd.DatetimeIndex:
     return price_lag_issue(1)(index)
 
 
+def fuel_index_lag1_issue(index) -> pd.DatetimeIndex:
+    """Gas and carbon end-of-day indices for gas day D-1: published on D-2, known from 22:00 CET (21:00 UTC) on D-2."""
+    days = delivery_days(index)
+    return pd.DatetimeIndex((days - pd.Timedelta(days=2) + pd.Timedelta(hours=FUEL_INDEX_PUBLICATION_UTC)).tz_localize("UTC"))
+
+
+def fuel_morning_trades_issue(index) -> pd.DatetimeIndex:
+    """Morning trades of the gas front month and the carbon December future on D-1, taken up to the pre-market issue time only."""
+    return premarket_issue_for(index)
+
+
 def residual_v2_issue(index) -> pd.DatetimeIndex:
     """The latest of the load forecast, the generation proxies and the D-1 nuclear hours."""
     candidates = [load_forecast_issue(index), generation_proxy_issue(index), nuclear_d1_issue(index)]
@@ -268,6 +288,14 @@ TIMINGS = {
     "residual_v2": InputTiming(
         "residual_v2", residual_v2_issue,
         "Load forecast minus wind and solar proxies minus the latest known nuclear generation: known with the load forecast, 10:00 Paris on D-1.",
+    ),
+    "fuel_index_lag1": InputTiming(
+        "fuel_index_lag1", fuel_index_lag1_issue,
+        "Gas and carbon prices (private collector): end-of-day gas day-ahead and carbon spot indices for gas day D-1, known from 22:00 CET on D-2.",
+    ),
+    "fuel_morning_trades": InputTiming(
+        "fuel_morning_trades", fuel_morning_trades_issue,
+        "Gas and carbon prices (private collector): gas front month and carbon December future trades on D-1 up to the 10:05 Paris issue time.",
     ),
 }
 
