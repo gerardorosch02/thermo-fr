@@ -59,6 +59,11 @@ def status_panel(path, version, day):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
+def fetch_log_panel(log_version):
+    return q.fetch_log_panel()
+
+
+@st.cache_data(show_spinner=False)
 def market_panel(path, version, market_version, feature_set):
     return q.market_panel(path, feature_set)
 
@@ -300,8 +305,8 @@ def main() -> None:
     st.subheader(f"Versus the market: EEX day-ahead futures traded before the auction ({feature_set})")
     mkt = market_panel(db, version, q.db_version(q.MARKET_PATH), feature_set)
     if not mkt["rows"]:
-        st.info(f"No traded prices recorded. Add a day with `thermo-fr market add ...`; rows are kept in {mkt['path']}, which is git-ignored "
-                "and never published.")
+        st.info(f"No traded prices recorded. The scheduled `thermo-fr market fetch` collects them, or add a day with `thermo-fr market paste` "
+                f"or `thermo-fr market add`; rows are kept in {mkt['path']}, which is git-ignored and never published.")
     else:
         s = mkt["summary"]
         if s["scored_days"]:
@@ -314,14 +319,15 @@ def main() -> None:
             st.plotly_chart(market_chart(mkt["table"]), use_container_width=True)
             st.caption("Direction: long when the forecast is above the traded VWAP of the window, short when below. P&L per MWh = "
                        "(auction result - entry) x direction. Each day uses the latest forecast version issued before the window opened. "
-                       "Traded prices are entered by hand from EEX and stay on this machine.")
+                       "Traded prices come from EEX (collected on this machine from its public market data page, pasted or typed) and "
+                       f"stay here. Rows by source: {mkt.get('sources', {})}.")
             with st.expander("No-trade bands (in sample)"):
                 st.dataframe(mkt["bands"], hide_index=True, use_container_width=True)
                 st.caption(mkt["bands_note"])
         with st.expander("Daily table", expanded=True):
-            shown = mkt["table"][["delivery_date", "product", "window_paris", "issued_paris", "model", "forecast", "entry_vwap", "entry_close",
-                                  "auction", "direction", "pnl_per_mwh", "cumulative_pnl_per_mwh", "model_error", "market_error",
-                                  "model_beats_market"]] if not mkt["table"].empty else mkt["table"]
+            shown = mkt["table"][["delivery_date", "product", "trade_date", "window_paris", "issued_paris", "model", "forecast", "entry_vwap",
+                                  "entry_close", "auction", "direction", "pnl_per_mwh", "cumulative_pnl_per_mwh", "model_error", "market_error",
+                                  "model_beats_market", "window_trades", "window_volume_mwh", "source"]] if not mkt["table"].empty else mkt["table"]
             st.dataframe(shown, hide_index=True, use_container_width=True)
         for skipped in s["skipped"]:
             st.warning(f"{skipped['delivery_date']} {skipped['product']}: {skipped['reason']}")
@@ -341,6 +347,20 @@ def main() -> None:
                 st.warning(f"{item}: {row['flag']}" + (f" ({row['message'][:120]})" if row["message"] else ""))
         st.dataframe(table.rename(columns={"first_seen_paris": "first seen (Paris)", "minutes_before_gate": "minutes before gate",
                                            "checked_at_utc": "last checked (UTC)"}), use_container_width=True)
+    st.markdown("**Market data collection** (the scheduled `thermo-fr market fetch`; raw responses and the log stay on this machine)")
+    fetch_log = fetch_log_panel(q.db_version(q.FETCH_LOG_PATH))
+    if fetch_log["entries"].empty:
+        st.info("No collection run logged yet. Days without a collected row can be entered with `thermo-fr market paste`.")
+    else:
+        if fetch_log["problems"].empty:
+            st.success(f"Last collection run {fetch_log['last_run_utc']}: {fetch_log.get('stored_in_last_run', 0)} row(s) stored, no problems.")
+        else:
+            for _, row in fetch_log["problems"].iterrows():
+                (st.error if row["status"] == "error" else st.warning)(
+                    f"{row['delivery_date']} {row['product']}: {row['status']}, {row['message']}"
+                    + (" Enter the day with `thermo-fr market paste` if you have the prices." if row["status"] == "error" else ""))
+        with st.expander("Collection log"):
+            st.dataframe(fetch_log["entries"], hide_index=True, use_container_width=True)
     st.markdown("**Timing probe so far: first appearance by input, across all logged delivery days**")
     if status["summary"].empty:
         st.info("The timing log is empty.")

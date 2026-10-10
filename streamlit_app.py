@@ -320,7 +320,7 @@ def main() -> None:
         st.markdown(f"- {line}")
     st.caption("Forecasts and derived numbers are the author's own and carry no endorsement by the data providers. "
                "Fundamentals come from ENTSO-E, RTE and Open-Meteo; spot prices are the EPEX auction results as published by ENTSO-E; "
-               "traded prices are EEX day-ahead futures entered by hand and not republished. Nothing here is trading advice.")
+               "traded prices are EEX day-ahead futures, collected locally and not republished. Nothing here is trading advice.")
 
 
 if __name__ == "__main__":

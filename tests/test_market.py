@@ -43,12 +43,12 @@ def store(tmp_path):
     s.save_forecast(2, "2026-10-10", "honest", pd.Timestamp("2026-10-09T10:30Z"), "gbm", "manual", 50000, True, flat("2026-10-10", 40.0))
     c = curve_for("2026-10-10")
     s.save_actuals(pd.Series(51.26, index=c.index), pd.Series(["2026-10-10"] * len(c)))
-    # 2026-10-11: forecast below the market, auction below the entry: a winning short
-    s.save_forecast(3, "2026-10-11", "honest", pd.Timestamp("2026-10-10T07:00Z"), "gbm:honest.txt", "scheduled", 0, True, flat("2026-10-11", 30.0))
-    c = curve_for("2026-10-11")
-    s.save_actuals(pd.Series(45.0, index=c.index), pd.Series(["2026-10-11"] * len(c)))
-    # 2026-10-12: only a version issued after the window
-    s.save_forecast(4, "2026-10-12", "honest", pd.Timestamp("2026-10-11T10:00Z"), "gbm:honest.txt", "manual", 0, True, flat("2026-10-12", 60.0))
+    # 2026-10-13 (a Tuesday, traded Monday 10-12): forecast below the market, auction below the entry: a winning short
+    s.save_forecast(3, "2026-10-13", "honest", pd.Timestamp("2026-10-12T07:00Z"), "gbm:honest.txt", "scheduled", 0, True, flat("2026-10-13", 30.0))
+    c = curve_for("2026-10-13")
+    s.save_actuals(pd.Series(45.0, index=c.index), pd.Series(["2026-10-13"] * len(c)))
+    # 2026-10-14: only a version issued after the window
+    s.save_forecast(4, "2026-10-14", "honest", pd.Timestamp("2026-10-13T10:00Z"), "gbm:honest.txt", "manual", 0, True, flat("2026-10-14", 60.0))
     yield s
     s.close()
 
@@ -65,9 +65,9 @@ def test_only_forecasts_issued_before_the_window_are_used(store):
     meta, curve = forecast_before(store, "2026-10-10", start)
     assert meta["forecast_id"] == 1 and curve["forecast"].iloc[0] == 80.0  # the 12:30 version is ignored even though it is later and closer
     with pytest.raises(NoForecastBeforeWindowError, match="issued before the window"):
-        forecast_before(store, "2026-10-12", window_bounds("2026-10-12", "11:15", "12:00")[0])
+        forecast_before(store, "2026-10-14", window_bounds("2026-10-14", "11:15", "12:00")[0])
     with pytest.raises(NoForecastBeforeWindowError, match="no honest forecast stored"):
-        forecast_before(store, "2026-10-13", window_bounds("2026-10-13", "11:15", "12:00")[0])
+        forecast_before(store, "2026-10-15", window_bounds("2026-10-15", "11:15", "12:00")[0])
     # a version issued exactly at the window start does not count as before it
     with pytest.raises(NoForecastBeforeWindowError):
         forecast_before(store, "2026-10-10", pd.Timestamp("2026-10-09T08:00Z"))
@@ -79,10 +79,11 @@ def test_pnl_sign_convention_long_and_short(store):
     assert long["pnl_per_mwh"] == pytest.approx(51.26 - 60.60) and long["pnl_per_mwh_close"] == pytest.approx(51.26 - 60.90)
     assert long["model_error"] == pytest.approx(28.74) and long["market_error"] == pytest.approx(9.34) and long["model_beats_market"] == False  # noqa: E712
     assert long["issued_paris"] == "10:00" and long["model"] == "gbm:honest.txt"
-    short = evaluate_day(store, MarketRow("2026-10-11", "base", "11:15", "12:00", 50.0, 51.0, 49.0, 50.0, 50.0, "test"))
+    short = evaluate_day(store, MarketRow("2026-10-13", "base", "11:15", "12:00", 50.0, 51.0, 49.0, 50.0, 50.0, "test"))
     assert short["direction"] == "short" and short["pnl_per_mwh"] == pytest.approx(5.0)  # sold at 50, auction 45
     assert short["model_error"] == pytest.approx(15.0) and short["market_error"] == pytest.approx(5.0)
-    flat_row = MarketRow("2026-10-11", "base", "11:15", "12:00", 30.0, 30.0, 30.0, 30.0, 30.0, "test")
+    assert short["trade_date"] == "2026-10-12" and short["window_trades"] is None
+    flat_row = MarketRow("2026-10-13", "base", "11:15", "12:00", 30.0, 30.0, 30.0, 30.0, 30.0, "test")
     assert evaluate_day(store, flat_row)["direction"] == "none" and np.isnan(evaluate_day(store, flat_row)["pnl_per_mwh"])
 
 
@@ -101,15 +102,15 @@ def test_base_and_peak_averages_across_daylight_saving_days():
 
 
 def test_evaluate_reports_days_totals_bands_and_skipped(store):
-    rows = pd.DataFrame([SEED.__dict__, MarketRow("2026-10-11", "base", "11:15", "12:00", 50.0, 51.0, 49.0, 50.0, 50.0, "test").__dict__,
-                         MarketRow("2026-10-12", "base", "11:15", "12:00", 50.0, 51.0, 49.0, 50.0, 50.0, "test").__dict__])
+    rows = pd.DataFrame([SEED.__dict__, MarketRow("2026-10-13", "base", "11:15", "12:00", 50.0, 51.0, 49.0, 50.0, 50.0, "test").__dict__,
+                         MarketRow("2026-10-14", "base", "11:15", "12:00", 50.0, 51.0, 49.0, 50.0, 50.0, "test").__dict__])
     result = evaluate(store, rows, bands=(0.0, 19.5))
     table, summary = result["table"], result["summary"]
     assert len(table) == 2 and summary["days"] == 2 and summary["scored_days"] == 2
     assert table["cumulative_pnl_per_mwh"].tolist() == pytest.approx([-9.34, -4.34])
     assert summary["hit_rate"] == 0.5 and summary["total_pnl_per_mwh"] == pytest.approx(-4.34) and summary["share_model_beats_market"] == 0.0
     assert summary["model_mae"] == pytest.approx((28.74 + 15.0) / 2, abs=0.01) and summary["market_mae"] == pytest.approx((9.34 + 5.0) / 2, abs=0.01)
-    assert len(summary["skipped"]) == 1 and summary["skipped"][0]["delivery_date"] == "2026-10-12" and "before the window" in summary["skipped"][0]["reason"]
+    assert len(summary["skipped"]) == 1 and summary["skipped"][0]["delivery_date"] == "2026-10-14" and "before the window" in summary["skipped"][0]["reason"]
     bands = result["bands"].set_index("band_eur_mwh")
     # signals are +19.4 (day 1) and -20.0 (day 2): the 19.5 band keeps only the second trade
     assert bands.loc[0.0, "trades"] == 2 and bands.loc[19.5, "trades"] == 1 and bands.loc[19.5, "total_pnl_per_mwh"] == pytest.approx(5.0)
