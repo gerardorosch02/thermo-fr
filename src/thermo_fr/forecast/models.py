@@ -10,6 +10,8 @@
   It shows how much the boosting adds over a linear fit.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
@@ -97,10 +99,16 @@ def save_model(model, path) -> "Path":
 
 
 def load_model(path):
-    """A LightGBM Booster from a file written by save_model."""
+    """A LightGBM Booster from a file written by save_model.
+
+    The file is read as text and its line endings normalised first: a Windows
+    checkout with core.autocrlf converts the committed file to CRLF, which
+    LightGBM's parser rejects ("Model format error, expect a tree here").
+    """
     from lightgbm import Booster
 
-    return Booster(model_file=str(path))
+    text = Path(path).read_text(encoding="utf-8").replace("\r\n", "\n")
+    return Booster(model_str=text)
 
 
 def predict_with(path, X: pd.DataFrame) -> np.ndarray:

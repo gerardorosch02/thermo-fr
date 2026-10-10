@@ -12,6 +12,7 @@ import pandas as pd
 from ..config import LOCAL_TZ
 from ..forecast.jobs import next_delivery_day
 from ..forecast.market import DEFAULT_PATH as MARKET_PATH
+from ..forecast.market import FETCH_LOG_PATH, read_fetch_log
 from ..forecast.market import evaluate as evaluate_market
 from ..forecast.market import load_market
 from ..forecast.store import Store
@@ -166,13 +167,28 @@ def flag_for(row) -> str:
 
 
 def market_panel(path, feature_set: str = "honest", market_path=MARKET_PATH) -> dict:
-    """The forecast against EEX traded prices, day by day, from the hand-entered local file (never published)."""
+    """The forecast against EEX traded prices, day by day, from the local file (collected, pasted or typed; never published)."""
     rows = load_market(market_path)
     if rows.empty:
         return {"rows": 0, "path": str(market_path)}
     out = _with_store(path, lambda store: evaluate_market(store, rows, feature_set=feature_set))
     out["rows"] = int(len(rows))
     out["path"] = str(market_path)
+    out["sources"] = rows["source"].value_counts().to_dict()
+    return out
+
+
+def fetch_log_panel(log_path=FETCH_LOG_PATH, limit: int = 40) -> dict:
+    """The market collection log for the data status panel: the latest entries and the problems of the most recent run."""
+    entries = read_fetch_log(log_path, limit=limit)
+    out = {"entries": entries, "problems": pd.DataFrame(columns=entries.columns), "last_run_utc": None}
+    if entries.empty:
+        return out
+    last_stamp = entries["logged_at_utc"].max()
+    last_run = entries[entries["logged_at_utc"] >= (pd.Timestamp(last_stamp) - pd.Timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ")]
+    out["last_run_utc"] = last_stamp
+    out["problems"] = last_run[last_run["status"].isin(["error", "skipped"])]
+    out["stored_in_last_run"] = int((last_run["status"] == "stored").sum())
     return out
 
 

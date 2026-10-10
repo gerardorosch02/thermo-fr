@@ -221,12 +221,56 @@ def cmd_market_add(args) -> None:
 
     try:
         start, end = parse_window(args.window)
-        row = MarketRow(args.date, args.product, start, end, args.open, args.high, args.low, args.close, args.vwap, args.source, args.note or "")
+        row = MarketRow(args.date, args.product, start, end, args.open, args.high, args.low, args.close, args.vwap, args.source, args.note or "",
+                        trade_date=args.trade_date or "", trades=args.trades, volume_mwh=args.volume_mwh)
         frame = add_row(row, Path(args.path))
     except MarketDataError as exc:
         raise SystemExit(f"market add: {exc}")
-    print(f"Stored {args.product} row for {args.date}, window {start}-{end} Paris, VWAP {args.vwap}; {len(frame)} row(s) in {args.path} "
-          "(git-ignored, never published)")
+    print(f"Stored {args.product} row for {args.date}, window {start}-{end} Paris on {row.traded_on}, VWAP {args.vwap}; {len(frame)} row(s) in "
+          f"{args.path} (git-ignored, never published)")
+
+
+def cmd_market_paste(args) -> None:
+    import sys
+
+    from .forecast.market import MarketDataError, add_row, parse_paste
+
+    text = args.text if args.text else sys.stdin.read()
+    try:
+        row = parse_paste(text, delivery_date=args.date or "", source=args.source)
+        frame = add_row(row, Path(args.path))
+    except MarketDataError as exc:
+        raise SystemExit(f"market paste: {exc}")
+    print(f"Parsed and stored {row.product} row for {row.delivery_date}, window {row.window_start}-{row.window_end} Paris on {row.traded_on}, "
+          f"O {row.open} H {row.high} L {row.low} C {row.close} VWAP {row.vwap}; {len(frame)} row(s) in {args.path} (git-ignored, never published)")
+
+
+def cmd_market_fetch(args) -> None:
+    import logging
+
+    from .forecast.jobs import setup_logging
+    from .forecast.market import delivery_days_to_collect, run_fetcher
+
+    setup_logging("market-fetch")
+    log = logging.getLogger("thermo_fr.market")
+    if args.date:
+        days = list(args.date)
+    elif args.backfill:
+        today = pd.Timestamp.now(tz="Europe/Paris").tz_localize(None).normalize()
+        days = [d.strftime("%Y-%m-%d") for d in pd.date_range(today - pd.Timedelta(days=args.backfill), today, freq="D")]
+    else:
+        days = delivery_days_to_collect()
+    outcomes = run_fetcher(days, plugin=Path(args.plugin), market_path=Path(args.path), log_path=Path(args.log), raw_dir=Path(args.raw_dir),
+                           spacing_s=args.spacing, log=log.info)
+    counts = {}
+    for o in outcomes:
+        counts[o.status] = counts.get(o.status, 0) + 1
+    print("market fetch for " + ", ".join(days) + ": " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
+    for o in outcomes:
+        if o.status == "error":
+            print(f"  {o.delivery_date} {o.product}: {o.message}")
+    if counts.get("error") and not counts.get("stored"):
+        print("Nothing stored. Fall back to: thermo-fr market paste --date <delivery day> --text \"...\"")
 
 
 def cmd_market_evaluate(args) -> None:
@@ -378,18 +422,38 @@ def main(argv=None) -> None:
     imp.add_argument("--db", default="data/forecast.db")
     imp.set_defaults(func=cmd_import_published)
 
-    mkt = sub.add_parser("market", help="EEX traded prices entered by hand, and the forecast scored against them")
+    mkt = sub.add_parser("market", help="EEX traded prices (collected locally, pasted or typed) and the forecast scored against them")
     mkt_sub = mkt.add_subparsers(dest="market_command", required=True)
     madd = mkt_sub.add_parser("add", help="append one traded-price row to data/market/eex_fr_da.csv (git-ignored)")
     madd.add_argument("--date", required=True, help="delivery date, YYYY-MM-DD")
     madd.add_argument("--product", required=True, choices=("base", "peak"))
-    madd.add_argument("--window", required=True, help="trading window on the day before delivery, Paris time, e.g. 11:15-12:00")
+    madd.add_argument("--window", required=True, help="trading window on the trade date, Paris time, e.g. 11:15-12:00")
     for name in ("open", "high", "low", "close", "vwap"):
         madd.add_argument(f"--{name}", required=True, type=float)
     madd.add_argument("--source", required=True, help='where the prices came from, e.g. "EEX via trader"')
     madd.add_argument("--note", default="")
+    madd.add_argument("--trade-date", default="", help="the day the window was traded; default the day before delivery, Friday for Sat/Sun/Mon")
+    madd.add_argument("--trades", type=int, default=None, help="trades in the window, if known")
+    madd.add_argument("--volume-mwh", type=float, default=None, help="volume traded in the window, if known")
     madd.add_argument("--path", default="data/market/eex_fr_da.csv")
     madd.set_defaults(func=cmd_market_add)
+    mpaste = mkt_sub.add_parser("paste", help="parse a pasted line such as 'FR DA Base EEX Trades 11:15-12:00 O: 100.00 H: 102.00 L: 99.00 "
+                                              "C: 101.00 VWAP: 100.50' and store it (fallback when the fetch fails)")
+    mpaste.add_argument("--date", default="", help="delivery date, YYYY-MM-DD (needed unless the text carries one)")
+    mpaste.add_argument("--text", default="", help="the pasted text; read from stdin when omitted")
+    mpaste.add_argument("--source", default="EEX via trader")
+    mpaste.add_argument("--path", default="data/market/eex_fr_da.csv")
+    mpaste.set_defaults(func=cmd_market_paste)
+    mfetch = mkt_sub.add_parser("fetch", help="collect the window from EEX's public market data page with the local, git-ignored collector "
+                                              "module (laptop Task Scheduler only, never GitHub Actions)")
+    mfetch.add_argument("--date", nargs="*", default=None, help="delivery days to collect; default tomorrow (Friday: Saturday to Monday)")
+    mfetch.add_argument("--backfill", type=int, default=0, help="collect the last N days of history instead (one-off)")
+    mfetch.add_argument("--plugin", default="local/eex_fetch.py", help="the local collector module")
+    mfetch.add_argument("--path", default="data/market/eex_fr_da.csv")
+    mfetch.add_argument("--log", default="data/market/fetch_log.csv", help="the collection log shown in the dashboard's data status panel")
+    mfetch.add_argument("--raw-dir", default="data/market/raw", help="where raw responses are kept (git-ignored)")
+    mfetch.add_argument("--spacing", type=float, default=10.0, help="seconds between requests")
+    mfetch.set_defaults(func=cmd_market_fetch)
     meval = mkt_sub.add_parser("evaluate", help="score every stored market row with the forecast that was live before its window")
     meval.add_argument("--path", default="data/market/eex_fr_da.csv")
     meval.add_argument("--db", default="data/forecast.db")
