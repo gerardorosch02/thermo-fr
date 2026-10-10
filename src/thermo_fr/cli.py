@@ -249,6 +249,36 @@ def cmd_market_paste(args) -> None:
           f"O {row.open} H {row.high} L {row.low} C {row.close} VWAP {row.vwap}; {len(frame)} row(s) in {args.path} (git-ignored, never published)")
 
 
+def cmd_market_publish(args) -> None:
+    """Laptop only: write published/market.json from the local store and traded prices, commit that one file and push it (rebase, no force)."""
+    import logging
+
+    from .forecast.gitsync import GitSyncError, commit_and_push
+    from .forecast.jobs import setup_logging
+    from .forecast.publish import write_market_file
+    from .forecast.store import Store
+
+    setup_logging("market-publish")
+    log = logging.getLogger("thermo_fr.market")
+    store = Store(Path(args.db))
+    try:
+        section = write_market_file(store, Path(args.out), Path(args.path))
+    finally:
+        store.close()
+    if section is None:
+        print(f"No traded prices in {args.path}: market.json not written, nothing to push.")
+        return
+    print(f"published/market.json: {section['scored_days']} scored day(s), computed {section.get('computed_at_utc')}")
+    if args.no_push:
+        return
+    try:
+        result = commit_and_push(Path(args.repo), [Path(args.out) / "market.json"], f"Market aggregates {pd.Timestamp.now(tz='UTC'):%Y-%m-%dT%H:%MZ}",
+                                 branch=args.branch, log=log.info)
+    except GitSyncError as exc:
+        raise SystemExit(f"market publish: {exc}")
+    print("pushed" if result["pushed"] else "nothing to commit")
+
+
 def cmd_market_fetch(args) -> None:
     import logging
 
@@ -580,6 +610,15 @@ def main(argv=None) -> None:
     mfetch.add_argument("--raw-dir", default="data/market/raw", help="where raw responses are kept (git-ignored)")
     mfetch.add_argument("--spacing", type=float, default=10.0, help="seconds between requests")
     mfetch.set_defaults(func=cmd_market_fetch)
+    mpub = mkt_sub.add_parser("publish", help="laptop only: write published/market.json from the local store and push that one file "
+                                              "(rebase onto the workflow's commits, never force)")
+    mpub.add_argument("--db", default="data/forecast.db")
+    mpub.add_argument("--path", default="data/market/eex_fr_da.csv")
+    mpub.add_argument("--out", default="published")
+    mpub.add_argument("--repo", default=".")
+    mpub.add_argument("--branch", default="main")
+    mpub.add_argument("--no-push", action="store_true", help="write the file only")
+    mpub.set_defaults(func=cmd_market_publish)
     meval = mkt_sub.add_parser("evaluate", help="score every stored market row with the forecast that was live before its window")
     meval.add_argument("--path", default="data/market/eex_fr_da.csv")
     meval.add_argument("--db", default="data/forecast.db")

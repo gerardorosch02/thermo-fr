@@ -17,6 +17,8 @@ Files written by `export_published`:
     tomorrow.csv       the headline forecast of the default model for the next delivery day, hourly: the last
                        version issued before the market window, else the latest
     error_band.csv     backtest error percentiles by hour (the dashboard's shaded band until the quantile band is made the default)
+    market.json        the market aggregates, written only on the laptop (where the traded prices are) by `thermo-fr market publish`, which
+                       commits and pushes that one file; the workflow never writes it and copies it into status.json unchanged
     probabilistic.csv  per version and hour of the published sets: the probability of a negative price (the quantile band and the spike
                        probability are computed and stored locally every day but not published, under evaluation);
                        tomorrow_probabilistic.csv the headline version's rows
@@ -104,6 +106,31 @@ def shape_status(store: Store, out_dir) -> dict:
                                "benchmarks": "d1: yesterday's shape; same_type: the shape of the most recent earlier day of the same type"}}
     (out / "shape_battery.json").write_text(json.dumps(payload, indent=2, default=str))
     return {k: v for k, v in live.items() if k in ("days", "shape", "battery")}
+
+
+MARKET_FILE = "market.json"  # written only where the traded prices are (the laptop); every other publisher reads it and carries it through
+
+
+def write_market_file(store: Store, out_dir, market_path=MARKET_PATH) -> dict | None:
+    """Compute the market aggregates where the traded prices are and write published/market.json; None when there is no market file."""
+    rows = load_market(market_path)
+    if rows.empty:
+        return None
+    section = market_status(store, market_path)
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / MARKET_FILE).write_text(json.dumps(section, indent=2, default=str))
+    return section
+
+
+def read_market_file(out_dir) -> dict | None:
+    path = Path(out_dir) / MARKET_FILE
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except ValueError:
+        return None
 
 
 def market_status(store: Store, market_path=MARKET_PATH, previous: dict | None = None) -> dict:
@@ -210,6 +237,7 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
         previous_status = json.loads(status_path.read_text()) if status_path.exists() else {}
     except ValueError:
         previous_status = {}
+    write_market_file(store, out, market_path)  # only where the traded prices are; elsewhere the existing file is read below
     fallback_meta = {}
     fallback_path = out / "model" / f"{FALLBACK_FEATURE_SET}.json"
     if fallback_path.exists():
@@ -239,7 +267,7 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
         "fallback_model": {k: fallback_meta.get(k) for k in ("feature_set", "model_file", "fitted_at_utc", "train_from", "train_to",
                                                              "train_hours", "recent_check", "frozen_holdout")} if fallback_meta else {},
         "last_run": last_run or {},
-        "market": market_status(store, market_path, previous=previous_status.get("market")),
+        "market": market_status(store, market_path, previous=read_market_file(out) or previous_status.get("market")),
         "shape_battery": shape_status(store, out),
         "probabilistic": probabilistic_status(store, out),
         "attributions": ATTRIBUTIONS,

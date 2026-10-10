@@ -36,7 +36,7 @@ def filled_store(path) -> Store:
 def test_export_writes_the_public_files_for_the_window(tmp_path):
     store = filled_store(tmp_path / "db.sqlite")
     out = tmp_path / "published"
-    status = export_published(store, out, days=90, now=NOW)
+    status = export_published(store, out, days=90, now=NOW, market_path=tmp_path / "no_market.csv")
     store.close()
     names = {p.name for p in out.iterdir()}
     assert names == {"forecasts.csv", "actuals.csv", "scores.csv", "tomorrow.csv", "error_band.csv", "status.json", "shape_battery.json", "probabilistic.csv", "tomorrow_probabilistic.csv"}
@@ -59,7 +59,7 @@ def test_export_writes_the_public_files_for_the_window(tmp_path):
 def test_import_rebuilds_an_empty_store_and_is_idempotent(tmp_path):
     store = filled_store(tmp_path / "db.sqlite")
     out = tmp_path / "published"
-    export_published(store, out, days=90, now=NOW)
+    export_published(store, out, days=90, now=NOW, market_path=tmp_path / "no_market.csv")
     store.close()
 
     fresh = Store(tmp_path / "fresh.sqlite")
@@ -73,7 +73,7 @@ def test_import_rebuilds_an_empty_store_and_is_idempotent(tmp_path):
     assert again["forecast_versions"] == 0 and len(fresh.forecast_versions("2026-10-10", "honest")) == 2
     # exporting from the restored store gives the same public files
     again_out = tmp_path / "published2"
-    export_published(fresh, again_out, days=90, now=NOW)
+    export_published(fresh, again_out, days=90, now=NOW, market_path=tmp_path / "no_market.csv")
     for name in ("forecasts.csv", "actuals.csv", "scores.csv", "tomorrow.csv", "error_band.csv"):
         a, b = pd.read_csv(out / name), pd.read_csv(again_out / name)
         pd.testing.assert_frame_equal(a.sort_values(list(a.columns)).reset_index(drop=True), b.sort_values(list(b.columns)).reset_index(drop=True))
@@ -91,7 +91,7 @@ def test_import_tolerates_missing_or_empty_files(tmp_path):
 
 def test_import_accepts_scores_written_before_the_flag_was_renamed(tmp_path):
     out = tmp_path / "published"
-    export_published(filled_store(tmp_path / "src.sqlite"), out, days=90, now=NOW)
+    export_published(filled_store(tmp_path / "src.sqlite"), out, days=90, now=NOW, market_path=tmp_path / "no_market.csv")
     scores = out / "scores.csv"
     scores.write_text(scores.read_text().replace("mae_below_baseline", "model_won"))
     store = Store(tmp_path / "db.sqlite")

@@ -15,6 +15,12 @@ machine is asleep or hibernating rather than shut down:
                           runs land at 10:15 and 10:45 Paris, after the 10:00 load
                           forecast deadline and before the 11:15 market window)
   thermo-fr settle        every day at 14:00 local time
+  thermo-fr market publish  every day at 14:30 local time, after the settle: writes
+                          published/market.json from the local store and the traded
+                          prices, commits that one file and pushes it (pull with
+                          rebase first, one retry, never a force push). The workflow
+                          never writes market.json, so the two publishers touch
+                          different files.
   thermo-fr market fetch  weekdays at 11:20 and 11:35 local time (12:20 and 12:35 Paris):
                           collects the EEX day-ahead window for tomorrow (Saturday
                           to Monday on a Friday) with the local, git-ignored
@@ -58,6 +64,7 @@ $settleName = "thermo-fr settle"
 $marketName = "thermo-fr market fetch"
 $outageName = "thermo-fr outage snapshot"
 $fuelName = "thermo-fr fuel snapshot"
+$marketPublishName = "thermo-fr market publish"
 
 function Remove-IfPresent($name) {
     $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
@@ -73,6 +80,7 @@ if ($Remove) {
     Remove-IfPresent $marketName
     Remove-IfPresent $outageName
     Remove-IfPresent $fuelName
+    Remove-IfPresent $marketPublishName
 }
 
 if ($Install) {
@@ -81,6 +89,7 @@ if ($Install) {
     Remove-IfPresent $marketName
     Remove-IfPresent $outageName
     Remove-IfPresent $fuelName
+    Remove-IfPresent $marketPublishName
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
         -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $weekdays = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
@@ -99,6 +108,12 @@ if ($Install) {
     Register-ScheduledTask -TaskName $settleName -Action $settleAction -Trigger $settleTrigger -Settings $settings `
         -Description "thermo-fr: fetch actual day-ahead prices and score the stored forecasts" | Out-Null
     Write-Host "Installed task '$settleName' (daily 14:00 local time)"
+
+    $marketPublishTrigger = New-ScheduledTaskTrigger -Daily -At "14:30"
+    $marketPublishAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr market publish" -WorkingDirectory $repo
+    Register-ScheduledTask -TaskName $marketPublishName -Action $marketPublishAction -Trigger $marketPublishTrigger -Settings $settings `
+        -Description "thermo-fr: write published/market.json from the local store and push that one file (rebase, never force)" | Out-Null
+    Write-Host "Installed task '$marketPublishName' (daily 14:30 local time, after the settle; pushes published/market.json only)"
 
     $marketTriggers = @()
     foreach ($time in @("11:20", "11:35")) {
@@ -134,7 +149,7 @@ if ($Install) {
 }
 
 if ($Show -or $Install) {
-    foreach ($name in @($morningName, $settleName, $marketName, $outageName, $fuelName)) {
+    foreach ($name in @($morningName, $settleName, $marketName, $outageName, $fuelName, $marketPublishName)) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -eq $task) { Write-Host "Task '$name' is not installed"; continue }
         $info = Get-ScheduledTaskInfo -TaskName $name

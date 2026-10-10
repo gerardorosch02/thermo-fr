@@ -1,0 +1,10 @@
+{
+  "source": "EEX French Day-Ahead Base and Peak futures traded before the auction, collected locally; traded prices are not republished.",
+  "scored_days": 0,
+  "min_days_to_show": 20,
+  "counts": "settled delivery days whose published-set forecast was issued before the market window (11:15 Paris on the trade date), scored against the auction result; versions issued later and days without a traded price are not counted, and the backfilled walk-forward record in the README (42 windows) is a separate, out-of-sample reissue, not part of this count",
+  "computed_at_utc": "2026-10-10T15:09:53Z",
+  "note": "Versus the market: collecting data, 0 of 20 days.",
+  "computed_on": "laptop",
+  "carried_through": false
+}

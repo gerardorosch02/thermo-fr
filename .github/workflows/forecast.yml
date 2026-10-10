@@ -18,6 +18,14 @@ name: Day-ahead forecast
 #                refits both models (honest_v2, the default, and honest, the
 #                fallback), commits only the model files and their metadata
 #
+# Two publishers. This workflow commits the public dataset under published/.
+# The laptop commits one file, published/market.json (the aggregates of the
+# forecast against EEX traded prices, which only it holds), through
+# `thermo-fr market publish` after its settle; the publish step here reads
+# that file and copies it into status.json unchanged, and never writes it.
+# Both sides pull with rebase before pushing and never force, and since they
+# touch different files a rebase cannot conflict.
+#
 # Timing. GitHub cron is UTC; Paris is UTC+2 in summer and UTC+1 in winter. The
 # ENTSO-E load forecast is due at 10:00 Paris on the day before delivery and
 # the EEX day-ahead future trades from about 11:15 Paris, so a forecast that can
@@ -114,6 +122,7 @@ jobs:
             git add published/model
           else
             git add published
+            git reset -q -- published/market.json  # the laptop's file: never committed from here
           fi
           if git diff --cached --quiet; then
             echo "nothing to commit"
