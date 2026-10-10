@@ -303,6 +303,42 @@ def cmd_market_evaluate(args) -> None:
         print(f"skipped {skipped['delivery_date']} {skipped['product']}: {skipped['reason']}")
 
 
+def _outage_api(zone: str):
+    from .data.entsoe_rest import EntsoeApi
+
+    return EntsoeApi(zone=zone)
+
+
+def cmd_outage_snapshot(args) -> None:
+    import logging
+
+    from .data.outages import snapshot
+    from .forecast.jobs import setup_logging
+
+    setup_logging("outage-snapshot")
+    log = logging.getLogger("thermo_fr.outages")
+    now = pd.Timestamp(args.now) if args.now else None
+    manifest = snapshot(_outage_api(args.zone), out_dir=Path(args.out), now=now, zone=args.zone, days_back=args.days_back,
+                        days_ahead=args.days_ahead, log=log.info)
+    print(f"Snapshot {manifest['retrieved_at_utc']}: {manifest['documents']} notices in {len(manifest['files'])} file(s) under {args.out} "
+          f"(period {manifest['period_start']} to {manifest['period_end']}, git-ignored)")
+
+
+def cmd_nuclear_availability(args) -> None:
+    from .data.outages import planned_nuclear
+
+    frame = planned_nuclear(args.date, pd.Timestamp(args.as_of), snapshot_dir=Path(args.snapshots), installed_mw=args.installed_mw)
+    if frame.attrs.get("snapshot") is None:
+        print(f"No outage snapshot taken by {args.as_of} under {args.snapshots}; nothing can be said as of that time.")
+        return
+    print(f"Planned nuclear availability for {args.date} as of {args.as_of}, from the snapshot {frame.attrs['snapshot']} "
+          f"({frame.attrs['notice_count']} active nuclear notices):")
+    shown = frame.copy()
+    shown.index = shown.index.tz_convert("Europe/Paris").strftime("%Y-%m-%d %H:%M")
+    print(shown.to_string())
+    print(f"Daily mean unavailable {frame['unavailable_mw'].mean():.0f} MW, available {frame['available_mw'].mean():.0f} MW of {args.installed_mw:,} MW.")
+
+
 def cmd_schedule_step(args) -> None:
     from .forecast.schedule import main as schedule_main
 
@@ -468,6 +504,20 @@ def main(argv=None) -> None:
     meval.add_argument("--feature-set", default="honest_v2")
     meval.add_argument("--bands", nargs="+", type=float, default=[0.0, 1.0, 2.0, 5.0, 10.0], help="no-trade bands in EUR/MWh (in sample)")
     meval.set_defaults(func=cmd_market_evaluate)
+
+    snap = sub.add_parser("outage-snapshot", help="Save today's ENTSO-E unavailability notices of French units, raw and paged (laptop only)")
+    snap.add_argument("--out", default="data/entsoe/outage_snapshots", help="git-ignored folder; the retrieval time is in every file name")
+    snap.add_argument("--zone", default="FR")
+    snap.add_argument("--days-back", type=int, default=1)
+    snap.add_argument("--days-ahead", type=int, default=360, help="the window with --days-back must stay under one year")
+    snap.add_argument("--now", default=None, help="retrieval time to stamp the files with (tests); default the current time")
+    snap.set_defaults(func=cmd_outage_snapshot)
+    avail = sub.add_parser("nuclear-availability", help="Planned nuclear availability for a delivery day as of a time, from the snapshots")
+    avail.add_argument("--date", required=True, help="delivery day, YYYY-MM-DD")
+    avail.add_argument("--as-of", required=True, help="UTC time; only snapshots taken by then are used, e.g. 2026-10-13T08:05:00Z")
+    avail.add_argument("--snapshots", default="data/entsoe/outage_snapshots")
+    avail.add_argument("--installed-mw", type=float, default=63_020.0)
+    avail.set_defaults(func=cmd_nuclear_availability)
 
     sched = sub.add_parser("schedule-step", help="Which step a scheduled GitHub Actions run should perform, from the Paris clock")
     sched.add_argument("--event", required=True)
