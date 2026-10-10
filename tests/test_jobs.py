@@ -285,7 +285,7 @@ def test_v2_model_falls_back_to_the_honest_model_when_its_inputs_are_missing(sto
     rows = store.status_for(DAY)
     fallback = rows[(rows["item"] == "model") & (rows["status"] == "fallback")]
     assert len(fallback) == 1 and "nuclear_d1_early_mw" in fallback.iloc[0]["message"] and "honest.txt" in fallback.iloc[0]["message"]
-    assert "fallback" in store.runs(limit=1).iloc[0]["message"]
+    assert "model: honest_v2.txt needs" in store.runs(limit=1).iloc[0]["message"]
     # the same failure without a usable fallback produces no v2 forecast and an error, never a prediction with missing features
     summary = run(store, table, history, tmp_path, weights, entsoe=entsoe, feature_sets=("honest_v2",), model_file=v2, fallback_model_file=None, now=NOW + pd.Timedelta(hours=2))
     assert summary["status"] == "failed" and any("inputs missing" in e for e in summary["errors"])
