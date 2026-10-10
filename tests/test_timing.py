@@ -101,6 +101,42 @@ def test_same_type_price_lag_is_the_comparable_days_price_published_before_the_g
     assert (lateness(year, "price_lag_same_type") <= pd.Timedelta(hours=-23)).all()
 
 
+def test_nuclear_lags_are_known_before_the_pre_market_issue_time():
+    idx = hours("2024-07-15")  # D-1 is 14 July; Paris is UTC+2
+    assert (issue_times(idx, "nuclear_d2") == pd.Timestamp("2024-07-14T00:00Z")).all()  # 02:00 Paris on D-1
+    assert (issue_times(idx, "nuclear_d1") == pd.Timestamp("2024-07-14T08:00Z")).all()  # 10:00 Paris on D-1
+    premarket = timing.premarket_issue_for(idx)
+    assert (premarket == pd.Timestamp("2024-07-14T08:05Z")).all()
+    assert (issue_times(idx, "nuclear_d1") < premarket).all() and (issue_times(idx, "nuclear_d2") < premarket).all()
+    winter = hours("2024-01-15")
+    assert (issue_times(winter, "nuclear_d1") == pd.Timestamp("2024-01-14T09:00Z")).all()
+    # a D-1 hour ending after the cutoff would be known only after the first run started
+    late = timing._local_clock(delivery_days(winter), -1, timing.NUCLEAR_D1_CUTOFF_HOUR + 2 + timing.NUCLEAR_PUBLICATION_LAG_HOURS)
+    assert (late > timing.premarket_issue_for(winter)).all()
+
+
+def test_neighbour_prices_and_residual_v2_meet_both_deadlines():
+    idx = hours("2024-07-15")
+    assert (issue_times(idx, "neighbour_price_lag1") == issue_times(idx, "price_lag1")).all()
+    # the residual is known with its latest component, the load forecast at 10:00 Paris on D-1
+    assert (issue_times(idx, "residual_v2") == issue_times(idx, "load_forecast")).all()
+    first = hours("2024-07-01")  # at the start of a month the proxy calibration data is later than the nuclear hours but still earlier
+    assert (issue_times(first, "residual_v2") == issue_times(first, "load_forecast")).all()
+    v2 = {"nuclear_d2_mw": "nuclear_d2", "nuclear_d1_early_mw": "nuclear_d1", "price_de_lu_lag1": "neighbour_price_lag1",
+          "residual_v2_mw": "residual_v2", "load_fc_mw": "load_forecast", "wind_proxy_mw": "wind_proxy"}
+    year = pd.DatetimeIndex([h for d in pd.date_range("2025-01-01", "2025-12-31", freq="D") for h in hours(d.strftime("%Y-%m-%d"))])
+    check_point_in_time(year, v2)
+    check_point_in_time(year, v2, deadline="premarket")
+    # the Swiss auction result for D clears before the gate but is not reliably out by the pre-market issue time: never a feature
+    swiss_today = {"price_ch_lag0": "wind_solar_forecast"}
+    with pytest.raises(LookaheadError):
+        check_point_in_time(idx, swiss_today, deadline="premarket")
+    with pytest.raises(LookaheadError, match="pre-market"):
+        check_point_in_time(idx, {"load_fc_mw": "load_forecast", "x": "wind_solar_forecast"}, deadline="premarket")
+    with pytest.raises(ValueError):
+        check_point_in_time(idx, v2, deadline="noon")
+
+
 def test_weather_proxy_is_never_point_in_time():
     idx = hours("2024-07-15")
     assert (lateness(idx, "weather_proxy") > pd.Timedelta(0)).all()

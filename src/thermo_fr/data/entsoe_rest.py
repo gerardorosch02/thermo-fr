@@ -14,11 +14,24 @@ Data items used (codes from the platform's RESTful API guide):
                           one TimeSeries per psrType: B16 solar, B18 wind
                           offshore, B19 wind onshore
 - Actual generation per type documentType A75, processType A16, in_Domain,
-                          psrType B19 (wind onshore), B18 (wind offshore) or
-                          B16 (solar); France reports it in 15-minute steps,
-                          averaged to hourly here. Used only to calibrate the
-                          pre-gate wind and solar proxies
-                          (forecast/wind_proxy.py, forecast/solar_proxy.py).
+                          psrType B19 (wind onshore), B18 (wind offshore),
+                          B16 (solar) or B14 (nuclear); France reports it in
+                          15-minute steps, averaged to hourly here. Wind and
+                          solar calibrate the pre-gate proxies
+                          (forecast/wind_proxy.py, forecast/solar_proxy.py);
+                          nuclear, lagged, is a feature of the v2 set
+                          (forecast/features.py). Checked on 2026-10-10 at
+                          08:51 UTC: the latest nuclear quarter-hour ended
+                          08:00 UTC, so the data arrives within about an hour,
+                          as Regulation 543/2013 Article 16(1)(a) requires.
+- Neighbour day-ahead prices documentType A44 for the zones in EIC (DE-LU,
+                          BE, NL, ES, IT-North, CH); one EntsoeApi per zone.
+- Unavailability of generation and production units (A80, A77) was probed on
+  2026-10-10 and is NOT used: the API returns only the latest revision of
+  each outage document (createdDateTime is that revision's time, no earlier
+  revision is retrievable, and the answer is capped at 200 documents), so
+  the availability known at the issue time cannot be reconstructed for the
+  past. See docs/forecast.md.
 
 Limits, as published by ENTSO-E: at most one year per request for these
 items, at most 400 requests per minute per token, and a ten minute ban after
@@ -55,7 +68,16 @@ from .sources import clip
 
 BASE_URL = "https://web-api.tp.entsoe.eu/api"
 ATTRIBUTION = "ENTSO-E Transparency Platform, https://transparency.entsoe.eu, RESTful API."
-EIC = {"FR": "10YFR-RTE------C"}
+EIC = {
+    "FR": "10YFR-RTE------C",
+    "DE_LU": "10Y1001A1001A82H",
+    "BE": "10YBE----------2",
+    "NL": "10YNL----------L",
+    "ES": "10YES-REE------0",
+    "IT_NORTH": "10Y1001A1001A73I",
+    "CH": "10YCH-SWISSGRIDZ",
+}
+NEIGHBOUR_ZONES = ("DE_LU", "BE", "NL", "ES", "IT_NORTH", "CH")  # GB left ENTSO-E after 2021 and is not used
 FREQ = {"PT60M": "60min", "PT30M": "30min", "PT15M": "15min"}
 PSR_NAMES = {"B16": "solar", "B19": "wind_onshore", "B18": "wind_offshore"}
 NO_DATA_REASON = "999"  # Acknowledgement reason code for "No matching data found"
@@ -236,6 +258,8 @@ class EntsoeApi:
             return {"documentType": "A75", "processType": "A16", "in_Domain": self.eic, "psrType": "B18"}
         if item == "solar_actual":
             return {"documentType": "A75", "processType": "A16", "in_Domain": self.eic, "psrType": "B16"}
+        if item == "nuclear_actual":
+            return {"documentType": "A75", "processType": "A16", "in_Domain": self.eic, "psrType": "B14"}
         raise ValueError(f"Unknown data item {item!r}")
 
     def _download(self, params: dict) -> bytes:
@@ -313,3 +337,8 @@ class EntsoeApi:
         """Actual solar generation in MW, hourly means (NaN where not reported)."""
         parts = self.query("solar_actual", start, end)
         return clip(combine_resolutions(parts), start, end).rename("solar_mw")
+
+    def nuclear_generation_actual(self, start: str, end: str) -> pd.Series:
+        """Actual nuclear generation in MW, hourly means (NaN where not reported)."""
+        parts = self.query("nuclear_actual", start, end)
+        return clip(combine_resolutions(parts), start, end).rename("nuclear_mw")

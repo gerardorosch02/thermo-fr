@@ -64,7 +64,7 @@ def load_published(version: float) -> dict:
             return pd.DataFrame()
 
     status = json.loads((PUBLISHED / "status.json").read_text()) if (PUBLISHED / "status.json").exists() else {}
-    return {
+    out = {
         "status": status,
         "tomorrow": read("tomorrow.csv"),
         "forecasts": read("forecasts.csv"),
@@ -72,6 +72,18 @@ def load_published(version: float) -> dict:
         "scores": read("scores.csv"),
         "band": read("error_band.csv"),
     }
+    # the dataset may carry more than one feature set (the default model's and the fallback's); the app shows the default
+    for key in ("forecasts", "scores"):
+        out[key] = default_set_rows(out[key], status)
+    return out
+
+
+def default_set_rows(frame: pd.DataFrame, status: dict) -> pd.DataFrame:
+    wanted = status.get("feature_set")
+    if frame.empty or not wanted or "feature_set" not in frame:
+        return frame
+    kept = frame[frame["feature_set"] == wanted]
+    return kept.reset_index(drop=True) if len(kept) else frame
 
 
 def published_version() -> float:
@@ -84,6 +96,14 @@ def layout(fig: go.Figure, ytitle: str, xtitle: str) -> go.Figure:
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
                       xaxis=dict(title=xtitle, gridcolor=COLORS["grid"]), yaxis=dict(title=ytitle, gridcolor=COLORS["grid"]))
     return fig
+
+
+def model_label(model: str) -> str:
+    """'gbm:honest_v2.txt' -> 'honest_v2.txt', 'gbm:honest.txt:fallback' -> 'honest.txt (fallback)', 'gbm' -> 'fitted live'."""
+    parts = str(model).split(":")
+    if len(parts) == 1:
+        return "fitted live"
+    return parts[1] + (" (fallback)" if len(parts) > 2 and parts[2] == "fallback" else "")
 
 
 def tomorrow_versions(data: dict) -> dict:
@@ -101,10 +121,14 @@ def tomorrow_versions(data: dict) -> dict:
     headline = rows[rows["issued_at_utc"] == head["issued_at_utc"]]
     flags = premarket_flag(rows)
     later_rows = rows[~flags.to_numpy()]
-    later = (later_rows.groupby("issued_at_utc").agg(daily_mean=("forecast", "mean"), kind=("kind", "first")).reset_index()
-             if not later_rows.empty else pd.DataFrame(columns=["issued_at_utc", "daily_mean", "kind"]))
+    if "model" not in rows:
+        rows["model"] = "gbm"
+        later_rows = later_rows.assign(model="gbm")
+    later = (later_rows.groupby("issued_at_utc").agg(daily_mean=("forecast", "mean"), kind=("kind", "first"), model=("model", "first")).reset_index()
+             if not later_rows.empty else pd.DataFrame(columns=["issued_at_utc", "daily_mean", "kind", "model"]))
     later["issued_paris"] = [pd.Timestamp(t).tz_convert(PARIS).strftime("%Y-%m-%d %H:%M") for t in later["issued_at_utc"]]
-    return {"day": day, "headline": headline, "premarket": bool(head["premarket"]), "later": later}
+    model = str(headline["model"].iloc[0]) if "model" in headline and len(headline) else "gbm"
+    return {"day": day, "headline": headline, "premarket": bool(head["premarket"]), "later": later, "model": model}
 
 
 def tomorrow_table(data: dict) -> pd.DataFrame:
@@ -251,7 +275,11 @@ def main() -> None:
         st.error("No published dataset found. The workflow has not run yet.")
         st.stop()
     written = pd.Timestamp(status["written_at_utc"]).tz_convert(PARIS)
-    st.caption(f"Dataset written {written:%Y-%m-%d %H:%M} Paris. Window: last {status['window_days']} days.")
+    default_model = status.get("default_model_file", "model/honest.txt").split("/")[-1]
+    fallback_model = status.get("fallback_model_file", "").split("/")[-1]
+    st.caption(f"Dataset written {written:%Y-%m-%d %H:%M} Paris. Window: last {status['window_days']} days. Default model {default_model}"
+               + (f", fallback {fallback_model} when one of its inputs is missing" if fallback_model else "")
+               + "; every version below names the model that produced it.")
 
     st.subheader("Tomorrow's forecast")
     by_hour = tomorrow_table(data)
@@ -269,10 +297,12 @@ def main() -> None:
         else:
             st.warning(f"No version was issued before the {MARKET_WINDOW_START} Paris market window on {previous}. This one was issued after "
                        "the market window and is not tradeable; it is shown for information.")
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Delivery day", day)
         c2.metric("Issued (Paris)", issued.strftime("%Y-%m-%d %H:%M"))
         c3.metric("Daily mean forecast", f"{by_hour['forecast'].mean():.1f} EUR/MWh")
+        c4.metric("Model", model_label(versions.get("model", "gbm")), help="gbm:<file> is a stored model; :fallback means the default model's "
+                  "inputs were missing and the fallback model was used; gbm alone is a model fitted live")
         if pd.Timestamp(day) < pd.Timestamp.now(tz=PARIS).normalize().tz_localize(None):
             st.warning(f"The latest published forecast is for {day}, which is in the past. The workflow may not have run today.")
         st.plotly_chart(tomorrow_chart(by_hour, day, previous), use_container_width=True)
@@ -284,8 +314,8 @@ def main() -> None:
         later = versions["later"]
         if versions["premarket"] and not later.empty:
             st.markdown("**Issued after the market window, not tradeable**")
-            st.dataframe(later[["issued_paris", "kind", "daily_mean"]].round(2).rename(
-                columns={"issued_paris": "Issued (Paris)", "kind": "Run kind", "daily_mean": "Daily mean forecast (EUR/MWh)"}),
+            st.dataframe(later[["issued_paris", "kind", "model", "daily_mean"]].round(2).rename(
+                columns={"issued_paris": "Issued (Paris)", "kind": "Run kind", "model": "Model", "daily_mean": "Daily mean forecast (EUR/MWh)"}),
                 hide_index=True, use_container_width=True)
 
     st.subheader("Forecast error, last 30 days (pre-market version of each day)")
@@ -303,7 +333,8 @@ def main() -> None:
         if hist is not None:
             st.plotly_chart(hist, use_container_width=True)
         with st.expander("Daily scores"):
-            st.dataframe(scores[["delivery_day", "issued_at_utc", "hours", "mae", "rmse", "naive_mae", "naive_rmse", "mae_below_baseline"]].round(2),
+            st.dataframe(scores[[c for c in ("delivery_day", "issued_at_utc", "model", "hours", "mae", "rmse", "naive_mae", "naive_rmse",
+                                              "mae_below_baseline") if c in scores]].round(2),
                          hide_index=True, use_container_width=True)
 
     st.subheader("Versus the market")

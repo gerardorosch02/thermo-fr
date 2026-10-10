@@ -6,22 +6,29 @@ import pytest
 
 from thermo_fr.forecast import models
 from thermo_fr.forecast.backtest import evaluate, run_backtest, walk_forward, worst_days
+from thermo_fr.data.entsoe_rest import NEIGHBOUR_ZONES
 from thermo_fr.forecast.features import (
     CALENDAR_STRUCTURE,
     EXTENDED,
+    FEATURES,
     FEATURE_TIMINGS,
+    GATED_SETS,
     HONEST,
     HONEST_BASE,
     HONEST_CALENDAR,
     HONEST_SOLAR,
     HONEST_WIND,
+    NEIGHBOURS,
+    NEIGHBOUR_LAGS,
+    NUCLEAR,
+    RESIDUAL_V2,
     SAME_TYPE_LAGS,
     build_features,
     feature_timings,
 )
 from thermo_fr.data.solar_points import POINT_COLUMNS as SOLAR_POINT_COLUMNS
 from thermo_fr.data.wind_points import POINT_COLUMNS
-from thermo_fr.forecast.inputs import INPUT_COLUMNS
+from thermo_fr.forecast.inputs import INPUT_COLUMNS, NEIGHBOUR_PRICE_COLUMNS
 from thermo_fr.forecast.models import benchmark_predictions, fit_predict
 from thermo_fr.forecast.timing import LookaheadError, check_point_in_time
 
@@ -65,6 +72,10 @@ def synthetic_inputs(start="2023-09-01", end="2024-05-01", issued_from="2024-01-
     for column in SOLAR_POINT_COLUMNS:
         frame.loc[issued, column] = np.clip(radiation[issued] * rng.uniform(0.8, 1.2, issued.sum()), 0, None)
     frame.loc[issued, "solar_proxy_mw"] = np.clip(solar[issued] + rng.normal(0, 200, issued.sum()), 0, None)
+    # actual nuclear generation (slow-moving) and the neighbours' prices (the French price plus a zone offset and noise)
+    frame["nuclear_mw"] = 40_000 + 5_000 * np.sin(np.arange(len(index)) / (24 * 20)) + rng.normal(0, 300, len(index))
+    for i, column in enumerate(NEIGHBOUR_PRICE_COLUMNS):
+        frame[column] = price + 5 * (i + 1) + rng.normal(0, 3, len(index))
     return frame
 
 
@@ -76,6 +87,9 @@ def inputs():
 def test_feature_lists_and_timings_are_consistent():
     assert set(HONEST_BASE) < set(HONEST_WIND) < set(HONEST) < set(EXTENDED)
     assert all(f in FEATURE_TIMINGS for f in EXTENDED)
+    assert all(f in FEATURE_TIMINGS for name in FEATURES for f in FEATURES[name])
+    assert FEATURE_TIMINGS["nuclear_d1_early_mw"] == "nuclear_d1" and FEATURE_TIMINGS["residual_v2_mw"] == "residual_v2"
+    assert all(FEATURE_TIMINGS[f] == "neighbour_price_lag1" for f in NEIGHBOURS)
     assert {"solar_fc_mw", "wind_fc_mw", "residual_load_fc_mw"} == set(EXTENDED) - set(HONEST)
     assert set(HONEST_WIND) - set(HONEST_BASE) == {"wind_proxy_mw"} and FEATURE_TIMINGS["wind_proxy_mw"] == "wind_proxy"
     assert set(HONEST_SOLAR) - set(HONEST_WIND) == {"solar_proxy_mw"} and FEATURE_TIMINGS["solar_proxy_mw"] == "solar_proxy"
@@ -137,6 +151,41 @@ def test_honest_features_pass_the_gate_and_extended_do_not(inputs):
     check_point_in_time(table.X.index, feature_timings("honest"))
     with pytest.raises(LookaheadError):
         check_point_in_time(table.X.index, feature_timings("extended"))
+    for name in ("honest_nuclear", "honest_neighbours", "honest_fund", "honest_v2"):
+        check_point_in_time(table.X.index, feature_timings(name))
+        check_point_in_time(table.X.index, feature_timings(name), deadline="premarket")
+        assert name in GATED_SETS
+
+
+def test_v2_sets_add_nuclear_lags_neighbour_prices_and_the_residual(inputs):
+    v2 = build_features(inputs, "honest_v2")
+    assert set(NUCLEAR) | set(NEIGHBOURS) | set(RESIDUAL_V2) <= set(v2.X) and set(HONEST) < set(v2.X)
+    assert set(build_features(inputs, "honest_nuclear").X) == set(HONEST) | set(NUCLEAR)
+    assert set(build_features(inputs, "honest_neighbours").X) == set(HONEST) | set(NEIGHBOURS)
+    assert set(build_features(inputs, "honest_fund").X) == set(HONEST) | set(NUCLEAR) | set(NEIGHBOURS)
+    ts = pd.Timestamp("2024-02-14T17:00Z")  # 18:00 Paris on 14 February
+    local_day = pd.Timestamp("2024-02-14")
+    paris = inputs.index.tz_convert("Europe/Paris")
+    d2 = inputs["nuclear_mw"][(paris.normalize().tz_localize(None) == local_day - pd.Timedelta(days=2))]
+    assert v2.X.loc[ts, "nuclear_d2_mw"] == pytest.approx(inputs.loc[ts - pd.Timedelta(days=2), "nuclear_mw"])
+    assert v2.X.loc[ts, "nuclear_d2_mean_mw"] == pytest.approx(d2.mean())
+    d1 = inputs["nuclear_mw"][(paris.normalize().tz_localize(None) == local_day - pd.Timedelta(days=1)) & (paris.hour < 8)]
+    assert len(d1) == 8 and v2.X.loc[ts, "nuclear_d1_early_mw"] == pytest.approx(d1.mean())
+    # the early mean uses no D-1 hour at or after 08:00 Paris: perturbing those hours leaves it unchanged
+    perturbed = inputs.copy()
+    late_hours = (paris.normalize().tz_localize(None) == local_day - pd.Timedelta(days=1)) & (paris.hour >= 8)
+    perturbed.loc[late_hours, "nuclear_mw"] += 10_000
+    assert build_features(perturbed, "honest_v2").X.loc[ts, "nuclear_d1_early_mw"] == pytest.approx(d1.mean())
+    for zone in NEIGHBOUR_ZONES:
+        column = f"price_{zone.lower()}_eur_mwh"
+        assert v2.X.loc[ts, f"price_{zone.lower()}_lag1"] == pytest.approx(inputs.loc[ts - pd.Timedelta(days=1), column])
+        assert v2.X.loc[ts, f"spread_{zone.lower()}_lag1"] == pytest.approx(v2.X.loc[ts, "price_lag1"] - inputs.loc[ts - pd.Timedelta(days=1), column])
+    expected = v2.X.loc[ts, "load_fc_mw"] - v2.X.loc[ts, "wind_proxy_mw"] - v2.X.loc[ts, "solar_proxy_mw"] - v2.X.loc[ts, "nuclear_d1_early_mw"]
+    assert v2.X.loc[ts, "residual_v2_mw"] == pytest.approx(expected)
+    # a table saved before the new inputs existed gives NaN features, not an error
+    old = inputs.drop(columns=["nuclear_mw"] + NEIGHBOUR_PRICE_COLUMNS)
+    legacy = build_features(old, "honest_v2")
+    assert legacy.X[NUCLEAR + NEIGHBOUR_LAGS + RESIDUAL_V2].isna().all().all() and legacy.X["price_lag1"].notna().any()
 
 
 def test_rows_are_paris_delivery_hours(inputs):

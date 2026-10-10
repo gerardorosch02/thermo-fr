@@ -6,18 +6,19 @@ The public dashboard (`streamlit_app.py`) reads only the files under `published/
 
 | File | Content |
 |---|---|
-| `published/forecasts.csv` | every honest forecast version of the last 90 days: delivery day, issue time, hour, forecast, same-hour-previous-day baseline, and `premarket` (1 when issued before the 11:15 Paris market window of the day before delivery) |
+| `published/forecasts.csv` | every forecast version of the last 90 days of the default set honest_v2 and the fallback set honest (column feature_set), each with the model that produced it (column model: gbm:honest_v2.txt, gbm:honest.txt:fallback, or gbm for a live fit): delivery day, issue time, hour, forecast, same-hour-previous-day baseline, and `premarket` (1 when issued before the 11:15 Paris market window of the day before delivery) |
 | `published/actuals.csv` | actual day-ahead prices for the same window |
 | `published/scores.csv` | daily MAE and RMSE of each version against actuals and the naive same-hour-previous-day baseline, with `mae_below_baseline` per day |
 | `published/tomorrow.csv` | the headline forecast for the next delivery day: the last version issued before the market window, else the latest |
 | `published/error_band.csv` | backtest error percentiles by hour (the shaded band) |
-| `published/model/honest.txt` | the LightGBM model, refitted on the first weekday of each month (300 trees, 31 leaves, about 0.9 MB; chosen because its holdout MAE is within 0.2 EUR/MWh of the backtest settings) |
+| `published/model/honest.txt` | the fallback LightGBM model (the honest set), refitted on the first weekday of each month (300 trees, 31 leaves, about 0.9 MB; chosen because its holdout MAE is within 0.2 EUR/MWh of the backtest settings) |
 | `published/model/honest.json` | its training period, fit date, feature list and holdout metrics |
 | `published/model/wind_proxy.json` | weights of the wind generation proxy (MW per forecast point), refitted with the model on the trailing year of actual wind generation; the morning run applies them to the fresh point forecasts |
+| `published/model/honest_v2.txt`, `honest_v2.json` | the default model since 2026-10-12: the honest set plus lagged nuclear generation, neighbour prices and a residual load (docs/experiments.md); its metadata lists the features |
 | `published/model/solar_proxy.json` | the same for the solar generation proxy (radiation forecasts at 21 points against actual solar generation) |
 | `published/status.json` | when the dataset was written, the last run, the model summary, the attributions, and under `market` the aggregates of the forecast against EEX traded prices (days scored, hit rate, mean P&L per MWh, model and market error); never a traded price, and only from `MIN_PUBLIC_DAYS` (20) scored days, before which the app says "collecting data, n of 20 days" |
 
-Only the honest feature set is published. The extended set, the data-status panel and the timing log remain in the local database and the local dashboard (`thermo-fr dashboard`).
+Only the honest_v2 and honest feature sets are published; `status.json` names the default model file, the fallback model file and both models' metadata. The extended set, the data-status panel and the timing log remain in the local database and the local dashboard (`thermo-fr dashboard`).
 
 The workflow is stateless: each run imports `published/` into a fresh SQLite store (`thermo-fr import-published`), runs one step, exports again (`thermo-fr publish`) and commits only `published/`. No inputs history is kept in the repository. The daily `morning-run` fetches only the ten days around the next delivery day and predicts with the stored model file. On the first weekday of each month the `refit` step fetches the full history since 2021 with the secret, refits, and commits only `published/model/` (the model file plus metadata with the training period, fit date and holdout metrics). The public dataset keeps at most 90 days of actual prices.
 

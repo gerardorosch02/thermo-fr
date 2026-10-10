@@ -29,6 +29,17 @@ same inputs:
   forecasts and the residual load forecast built from them. ENTSO-E allows
   these until 18:00 on D-1, after the auction, so this set may use late
   information.
+- "honest_nuclear", "honest_neighbours", "honest_fund" and "honest_v2"
+  (branch fundamentals-v2, see docs/experiments.md): the honest set plus
+  lagged actual nuclear generation (same hour of D-2, the D-2 daily mean,
+  and the mean of the D-1 hours ending by 08:00 Paris, the latest known at
+  the pre-market issue time), plus the neighbours' day-ahead prices for D-1
+  (DE-LU, BE, NL, ES, IT-North, CH, same hour) and the French minus
+  neighbour spreads, both groups together, and both groups plus a residual
+  load built from the load forecast, the wind and solar proxies and the
+  latest known nuclear generation (planned nuclear availability as of the
+  issue time could not be reconstructed from ENTSO-E, see timing.py). All
+  of these pass the pre-market deadline as well as the gate.
 
 Weather columns take the as-issued forecast where the archive has it and the
 historical-forecast proxy before that (2021 to early 2024). The `info` table
@@ -46,8 +57,9 @@ import numpy as np
 import pandas as pd
 
 from ..config import LOCAL_TZ
+from ..data.entsoe_rest import NEIGHBOUR_ZONES
 from .daytypes import day_table, same_type_day
-from .timing import delivery_days
+from .timing import NUCLEAR_D1_CUTOFF_HOUR, delivery_days
 
 PEAK_HOURS = range(8, 20)  # EPEX peak block, 08:00 to 20:00 local
 PRICE_LAGS = (1, 2, 7)
@@ -63,6 +75,11 @@ HONEST_SOLAR = HONEST_WIND + ["solar_proxy_mw"]
 HONEST_CALENDAR = HONEST_WIND + CALENDAR_STRUCTURE + SAME_TYPE_LAGS
 HONEST = HONEST_WIND + ["solar_proxy_mw"] + CALENDAR_STRUCTURE + SAME_TYPE_LAGS
 EXTENDED = HONEST + ["solar_fc_mw", "wind_fc_mw", "residual_load_fc_mw"]
+NUCLEAR = ["nuclear_d2_mw", "nuclear_d2_mean_mw", "nuclear_d1_early_mw"]
+NEIGHBOUR_LAGS = [f"price_{z.lower()}_lag1" for z in NEIGHBOUR_ZONES]
+NEIGHBOUR_SPREADS = [f"spread_{z.lower()}_lag1" for z in NEIGHBOUR_ZONES]
+NEIGHBOURS = NEIGHBOUR_LAGS + NEIGHBOUR_SPREADS
+RESIDUAL_V2 = ["residual_v2_mw"]
 FEATURES = {
     "honest": HONEST,
     "honest_wind": HONEST_WIND,
@@ -70,6 +87,10 @@ FEATURES = {
     "honest_solar": HONEST_SOLAR,
     "honest_calendar": HONEST_CALENDAR,
     "extended": EXTENDED,
+    "honest_nuclear": HONEST + NUCLEAR,
+    "honest_neighbours": HONEST + NEIGHBOURS,
+    "honest_fund": HONEST + NUCLEAR + NEIGHBOURS,
+    "honest_v2": HONEST + NUCLEAR + NEIGHBOURS + RESIDUAL_V2,
 }
 FEATURE_SETS = tuple(FEATURES)
 GATED_SETS = tuple(s for s in FEATURES if s != "extended")  # the sets whose every feature passes the 12:00 gate
@@ -92,6 +113,11 @@ FEATURE_TIMINGS = {
     "solar_fc_mw": "wind_solar_forecast",
     "wind_fc_mw": "wind_solar_forecast",
     "residual_load_fc_mw": "wind_solar_forecast",
+    "nuclear_d2_mw": "nuclear_d2",
+    "nuclear_d2_mean_mw": "nuclear_d2",
+    "nuclear_d1_early_mw": "nuclear_d1",
+    **{c: "neighbour_price_lag1" for c in NEIGHBOUR_LAGS + NEIGHBOUR_SPREADS},
+    "residual_v2_mw": "residual_v2",
 }
 
 
@@ -156,6 +182,42 @@ def price_lags(price: pd.Series, calendar: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def same_hour_lag(series: pd.Series, calendar: pd.DataFrame, lag_days: int) -> np.ndarray:
+    """The value of `series` at the same local hour `lag_days` earlier (the autumn repeated hour averaged; a missing spring hour is NaN)."""
+    keyed = pd.DataFrame({"day": calendar["delivery_day"].values, "hour": calendar["hour"].values, "value": series.to_numpy()})
+    table = keyed.groupby(["day", "hour"])["value"].mean()
+    lookup = pd.MultiIndex.from_arrays([keyed["day"] - pd.Timedelta(days=lag_days), keyed["hour"]])
+    return table.reindex(lookup).to_numpy()
+
+
+def nuclear_features(nuclear: pd.Series, calendar: pd.DataFrame) -> pd.DataFrame:
+    """Lagged actual nuclear generation: same hour of D-2, the D-2 daily mean, and the mean of the D-1 hours ending by the cutoff.
+
+    Only hours of D-1 whose local hour is below NUCLEAR_D1_CUTOFF_HOUR enter
+    the early mean (the hour starting at 07:00 ends at 08:00 and is the last
+    one), so the feature is known by 10:00 Paris on D-1 (timing.py).
+    """
+    out = pd.DataFrame(index=nuclear.index)
+    out["nuclear_d2_mw"] = same_hour_lag(nuclear, calendar, 2)
+    keyed = pd.DataFrame({"day": calendar["delivery_day"].values, "hour": calendar["hour"].values, "value": nuclear.to_numpy()})
+    daily = keyed.groupby("day")["value"].mean()
+    out["nuclear_d2_mean_mw"] = daily.reindex(keyed["day"] - pd.Timedelta(days=2)).to_numpy()
+    early = keyed[keyed["hour"] < NUCLEAR_D1_CUTOFF_HOUR].groupby("day")["value"].mean()
+    out["nuclear_d1_early_mw"] = early.reindex(keyed["day"] - pd.Timedelta(days=1)).to_numpy()
+    return out
+
+
+def neighbour_features(hourly: pd.DataFrame, calendar: pd.DataFrame, price_lag1: pd.Series) -> pd.DataFrame:
+    """Neighbours' day-ahead prices for D-1 at the same hour, and the French minus neighbour spread on D-1."""
+    out = pd.DataFrame(index=hourly.index)
+    for zone in NEIGHBOUR_ZONES:
+        column = f"price_{zone.lower()}_eur_mwh"
+        values = same_hour_lag(hourly[column], calendar, 1) if column in hourly else np.full(len(hourly), np.nan)
+        out[f"price_{zone.lower()}_lag1"] = values
+        out[f"spread_{zone.lower()}_lag1"] = price_lag1.to_numpy() - values
+    return out
+
+
 def build_features(hourly: pd.DataFrame, feature_set: str = "honest") -> FeatureTable:
     """Feature table for one feature set from the inputs table of forecast/inputs.py."""
     if feature_set not in FEATURES:
@@ -180,6 +242,14 @@ def build_features(hourly: pd.DataFrame, feature_set: str = "honest") -> Feature
         X["solar_fc_mw"] = hourly["solar_fc_mw"]
         X["wind_fc_mw"] = wind
         X["residual_load_fc_mw"] = hourly["load_fc_mw"] - hourly["solar_fc_mw"] - wind
+    wanted = set(FEATURES[feature_set])
+    if wanted & set(NUCLEAR + RESIDUAL_V2):
+        nuclear = hourly["nuclear_mw"] if "nuclear_mw" in hourly else pd.Series(np.nan, index=hourly.index)
+        X = X.join(nuclear_features(nuclear, calendar))
+    if wanted & set(NEIGHBOURS):
+        X = X.join(neighbour_features(hourly, calendar, X["price_lag1"]))
+    if wanted & set(RESIDUAL_V2):
+        X["residual_v2_mw"] = X["load_fc_mw"] - X["wind_proxy_mw"] - X["solar_proxy_mw"] - X["nuclear_d1_early_mw"]
 
     info = calendar[["delivery_day", "hour", "dow", "holiday", "is_peak"]].copy()
     info["weather_point_in_time"] = point_in_time.to_numpy()

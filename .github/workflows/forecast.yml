@@ -8,10 +8,15 @@ name: Day-ahead forecast
 #
 # Three steps:
 #   morning-run  weekday mornings: fetches the ten days around the next delivery
-#                day and predicts with the stored model published/model/honest.txt
+#                day and predicts with the stored model published/model/honest_v2.txt
+#                (lagged nuclear generation, neighbour prices, residual load; see
+#                docs/experiments.md); if one of its inputs is missing for the day
+#                it predicts with published/model/honest.txt instead and records
+#                the fallback in the data status
 #   settle       daily afternoon: fetches the auction results, scores the forecasts
 #   refit        first weekday of the month: fetches the full history since 2021,
-#                refits, commits only the model file and its metadata
+#                refits both models (honest_v2, the default, and honest, the
+#                fallback), commits only the model files and their metadata
 #
 # Timing. GitHub cron is UTC; Paris is UTC+2 in summer and UTC+1 in winter. The
 # ENTSO-E load forecast is due at 10:00 Paris on the day before delivery and
@@ -89,11 +94,11 @@ jobs:
             settle)
               thermo-fr settle --kind scheduled --db data/forecast.db ;;
             refit)
-              thermo-fr refit-model --start 2021-01-01 --out published/model ;;
+              thermo-fr refit-model --start 2021-01-01 --out published/model --feature-sets honest_v2 honest ;;
             morning-run)
-              test -f published/model/honest.txt || { echo "no stored model: run the refit step first"; exit 1; }
+              test -f published/model/honest_v2.txt || { echo "no stored model: run the refit step first"; exit 1; }
               thermo-fr morning-run --kind scheduled --db data/forecast.db --data data/forecast/inputs.csv \
-                --feature-sets honest --model-file published/model/honest.txt ;;
+                --feature-sets honest_v2 --model-file published/model/honest_v2.txt --fallback-model-file published/model/honest.txt ;;
           esac
 
       - name: Export the public dataset

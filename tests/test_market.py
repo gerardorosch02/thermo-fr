@@ -161,7 +161,7 @@ def test_cli_add_and_evaluate(store, tmp_path, capsys):
     cli.main(args)
     assert "1 row" in capsys.readouterr().out and len(load_market(path)) == 1
     db = str(store.path)
-    cli.main(["market", "evaluate", "--path", str(path), "--db", db])
+    cli.main(["market", "evaluate", "--path", str(path), "--db", db, "--feature-set", "honest"])
     printed = capsys.readouterr().out
     assert "long" in printed and "-9.34" in printed and "hit rate" in printed.lower()
     with pytest.raises(SystemExit):

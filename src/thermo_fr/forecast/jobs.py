@@ -44,8 +44,9 @@ from ..data.solar_points import SolarPointsSource
 from ..data.weather_forecast import OpenMeteoForecastSource
 from ..data.wind_points import WindPointsSource
 from .day import HISTORY_DAYS, forecast_day, merge_inputs
+from .features import FEATURES, build_features
 from .gen_proxy import apply_weights, load_weights
-from .inputs import INPUT_COLUMNS, load_inputs
+from .inputs import INPUT_COLUMNS, NEIGHBOUR_PRICE_COLUMNS, load_inputs
 from .solar_proxy import SOLAR
 from .store import Store, error_band_from_predictions, score_curve, value_hash
 from .timing import delivery_days
@@ -54,11 +55,13 @@ from .wind_proxy import WIND
 log = logging.getLogger("thermo_fr.jobs")
 
 DEFAULT_WEIGHTS_PATH = WIND.default_path
-DEFAULT_MODEL_FILE = Path("published/model/honest.txt")
+DEFAULT_MODEL_FILE = Path("published/model/honest_v2.txt")  # the default model (docs/experiments.md, decision of 2026-10-10)
+FALLBACK_MODEL_FILE = Path("published/model/honest.txt")  # used when a v2 input is missing for the day
 INPUT_SERIES = ["load_fc_mw", "solar_fc_mw", "wind_onshore_fc_mw", "wind_offshore_fc_mw", "temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2",
-                "wind_proxy_mw", "solar_proxy_mw"]
+                "wind_proxy_mw", "solar_proxy_mw", "nuclear_mw"] + NEIGHBOUR_PRICE_COLUMNS
 WEATHER_SERIES = ["temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2"]
-FEATURE_SETS = ("honest", "extended")
+FEATURE_SETS = ("honest_v2", "extended")  # what a morning run produces by default
+BAND_SETS = ("honest_v2", "honest", "extended")  # the sets whose backtest error band is refreshed when a predictions file exists
 
 
 def next_delivery_day(now=None) -> str:
@@ -126,6 +129,8 @@ def fetch_fresh(day: str, cache_dir: Path, store: Store, run_id: int, entsoe=Non
     attempt("load_forecast", lambda: entsoe.load_forecast(start, end), entsoe_revision("load_forecast"))
     attempt("wind_solar_forecast", lambda: entsoe.wind_solar_forecast(start, end), entsoe_revision("wind_solar_forecast"))
     attempt("prices", lambda: entsoe.day_ahead_prices(start, end), entsoe_revision("prices"))
+    attempt("nuclear_actual", lambda: entsoe.nuclear_generation_actual(start, end), entsoe_revision("nuclear_actual"))
+    attempt("neighbour_prices", lambda: entsoe.neighbour_prices(start, end))
     attempt("weather_issued", lambda: weather.fetch(start, end, kinds=("issued",))[WEATHER_SERIES])
     attempt("wind_points", lambda: wind_points.fetch_points(start, end))
     attempt("solar_points", lambda: solar_points.fetch_points(start, end))
@@ -152,7 +157,7 @@ def fetch_fresh(day: str, cache_dir: Path, store: Store, run_id: int, entsoe=Non
 
 def refresh_error_band(store: Store, reports_dir=Path("reports/forecast"), now=None) -> list[str]:
     done = []
-    for feature_set in FEATURE_SETS:
+    for feature_set in BAND_SETS:
         path = Path(reports_dir) / f"predictions_{feature_set}.csv"
         if not path.exists():
             continue
@@ -161,6 +166,15 @@ def refresh_error_band(store: Store, reports_dir=Path("reports/forecast"), now=N
         store.save_error_band(band, source=str(path), now=now)
         done.append(feature_set)
     return done
+
+
+def missing_features(day: str, inputs: pd.DataFrame, feature_set: str) -> list[str]:
+    """The features of the set that have no value at all on the delivery day's rows (an input that did not arrive)."""
+    table = build_features(inputs, feature_set)
+    rows = table.info["delivery_day"] == pd.Timestamp(day).normalize()
+    if not rows.any():
+        return list(FEATURES[feature_set])
+    return [f for f in table.X.columns if table.X.loc[rows, f].isna().all()]
 
 
 def stored_model_feature_set(model_file) -> str:
@@ -177,8 +191,17 @@ def stored_model_feature_set(model_file) -> str:
 def morning_run(store: Store, delivery_day: str | None = None, kind: str = "scheduled", inputs_path=Path("data/forecast/inputs.csv"),
                 cache_dir=Path("data/cache"), reports_dir=Path("reports/forecast"), entsoe=None, weather=None, now=None,
                 feature_sets=FEATURE_SETS, model_file=None, wind_points=None, wind_weights=WIND.default_path, solar_points=None,
-                solar_weights=SOLAR.default_path) -> dict:
+                solar_weights=SOLAR.default_path, fallback_model_file=FALLBACK_MODEL_FILE) -> dict:
     """One morning run. Returns a summary dict; never raises for a source failure.
+
+    If the stored model needs an input that did not arrive for the delivery
+    day (every value of a feature missing on the day's rows), the forecast is
+    made with `fallback_model_file` instead, provided that model does not need
+    the missing features either; the fallback is recorded in data_status
+    under the item "model" with status "fallback", the version's model name
+    ends in ":fallback" and the run finishes as partial. Without a usable
+    fallback that set's forecast is not produced: nothing predicts with
+    missing features.
 
     With `model_file` (a LightGBM file written by refit) the forecast of the
     feature set that model was fitted on is a prediction with that model
@@ -210,8 +233,26 @@ def morning_run(store: Store, delivery_day: str | None = None, kind: str = "sche
         for feature_set in feature_sets:
             try:
                 stored = model_file if feature_set == stored_for else None
-                curve = forecast_day(day, merged, None, log=log.info, feature_set=feature_set, model_file=stored)
-                model_name = "gbm" if stored is None else f"gbm:{Path(stored).name}"
+                predict_set, suffix = feature_set, ""
+                if stored is not None:
+                    missing = missing_features(day, merged, feature_set)
+                    fallback = Path(fallback_model_file) if fallback_model_file is not None else None
+                    usable = fallback is not None and fallback.exists() and fallback.resolve() != Path(stored).resolve()
+                    if missing and usable:
+                        fallback_set = stored_model_feature_set(fallback)
+                        still_missing = [f for f in missing if f in FEATURES[fallback_set]]
+                        if still_missing:
+                            raise ValueError(f"inputs missing for {day}: {', '.join(missing)}; the fallback model {fallback.name} needs "
+                                             f"{', '.join(still_missing)} too")
+                        message = (f"{Path(stored).name} needs {', '.join(missing)}, missing for {day}; predicted with the fallback "
+                                   f"{fallback.name} ({fallback_set}) instead")
+                        log.warning("model: %s", message)
+                        store.record_status(run_id, day, "model", "fallback", message=message, now=now)
+                        stored, predict_set, suffix = fallback, fallback_set, ":fallback"
+                    elif missing:
+                        raise ValueError(f"inputs missing for {day}: {', '.join(missing)}; no fallback model available")
+                curve = forecast_day(day, merged, None, log=log.info, feature_set=predict_set, model_file=stored)
+                model_name = "gbm" if stored is None else f"gbm:{Path(stored).name}{suffix}"
                 forecast_id = store.save_forecast(
                     run_id, day, feature_set, issued_at, model_name, kind, curve.attrs["train_hours"], curve.attrs["passes_gate"], curve
                 )
@@ -231,7 +272,7 @@ def morning_run(store: Store, delivery_day: str | None = None, kind: str = "sche
         summary["errors"].append(message)
         return summary
     status_rows = store.status_for(day)
-    source_errors = status_rows[(status_rows["run_id"] == run_id) & (status_rows["status"] == "error")]
+    source_errors = status_rows[(status_rows["run_id"] == run_id) & (status_rows["status"].isin(["error", "fallback"]))]
     if not summary["forecasts"]:
         status = "failed"
     elif len(source_errors) or len(summary["forecasts"]) < len(feature_sets):

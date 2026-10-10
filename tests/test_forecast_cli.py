@@ -83,7 +83,7 @@ def test_morning_run_defaults_to_the_published_model_and_refit_opts_out(monkeypa
     cli.main(["morning-run", "--db", db, "--logs-dir", str(tmp_path)])
     cli.main(["morning-run", "--db", db, "--logs-dir", str(tmp_path), "--refit"])
     cli.main(["morning-run", "--db", db, "--logs-dir", str(tmp_path), "--model-file", "elsewhere/model.txt"])
-    assert calls[0]["model_file"] == Path("published/model/honest.txt")  # the file the GitHub workflow predicts with
+    assert calls[0]["model_file"] == Path("published/model/honest_v2.txt")  # the file the GitHub workflow predicts with
     assert calls[0]["solar_weights"] == Path("published/model/solar_proxy.json") and calls[0]["wind_weights"] == Path("published/model/wind_proxy.json")
     assert calls[1]["model_file"] is None
     assert calls[2]["model_file"] == Path("elsewhere/model.txt")

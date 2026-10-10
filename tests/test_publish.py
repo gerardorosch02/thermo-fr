@@ -43,7 +43,7 @@ def test_export_writes_the_public_files_for_the_window(tmp_path):
     forecasts = pd.read_csv(out / "forecasts.csv")
     assert set(forecasts["delivery_day"]) == set(DAYS)  # June is outside the 90-day window, extended is never exported
     assert forecasts.groupby("delivery_day")["issued_at_utc"].nunique().eq(2).all()
-    assert list(forecasts.columns) == ["delivery_day", "issued_at_utc", "kind", "train_hours", "premarket", "timestamp_utc", "hour", "forecast", "naive_day"]
+    assert list(forecasts.columns) == ["delivery_day", "issued_at_utc", "kind", "train_hours", "feature_set", "model", "premarket", "timestamp_utc", "hour", "forecast", "naive_day"]
     flags = forecasts.groupby("delivery_day")["premarket"].first()
     assert flags["2026-10-07"] == 0 and flags[["2026-10-08", "2026-10-09", "2026-10-10"]].eq(1).all()  # the fixture issues the first day on the day itself
     tomorrow = pd.read_csv(out / "tomorrow.csv")

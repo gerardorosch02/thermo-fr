@@ -11,7 +11,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..config import BIDDING_ZONE
-from .entsoe_rest import ATTRIBUTION, EntsoeApi
+from .entsoe_rest import ATTRIBUTION, NEIGHBOUR_ZONES, EntsoeApi
 
 
 class EntsoeSource:
@@ -23,6 +23,8 @@ class EntsoeSource:
     def __init__(self, api_key: str | None = None, zone: str = BIDDING_ZONE, cache_dir=Path("data/cache/entsoe"), **options):
         self.api = EntsoeApi(api_key=api_key, zone=zone, cache_dir=cache_dir, **options)
         self.zone = zone
+        self._api_key, self._cache_dir, self._options = api_key, cache_dir, options
+        self._neighbours: dict[str, EntsoeApi] = {}
 
     @property
     def details(self) -> dict:
@@ -51,3 +53,22 @@ class EntsoeSource:
     def solar_generation_actual(self, start: str, end: str) -> pd.Series:
         """Actual solar generation in MW, hourly means."""
         return self.api.solar_generation_actual(start, end)
+
+    def nuclear_generation_actual(self, start: str, end: str) -> pd.Series:
+        """Actual nuclear generation in MW, hourly means."""
+        return self.api.nuclear_generation_actual(start, end)
+
+    def neighbour_prices(self, start: str, end: str, zones=NEIGHBOUR_ZONES) -> pd.DataFrame:
+        """Day-ahead prices of the neighbouring zones, hourly means, one column price_<zone>_eur_mwh each (zone in lower case)."""
+        columns = {}
+        for zone in zones:
+            if zone not in self._neighbours:
+                self._neighbours[zone] = EntsoeApi(api_key=self._api_key, zone=zone, cache_dir=self._cache_dir, **self._options)
+            api = self._neighbours[zone]
+            columns[neighbour_price_column(zone)] = api.day_ahead_prices(start, end)
+            self.api.details[f"prices_{zone}"] = api.details.get("prices", [])
+        return pd.DataFrame(columns)
+
+
+def neighbour_price_column(zone: str) -> str:
+    return f"price_{zone.lower()}_eur_mwh"
