@@ -3,7 +3,7 @@
 Install or remove the Windows Task Scheduler entries for the thermo-fr forecast jobs.
 
 .DESCRIPTION
-Creates three tasks that run as the current user, with "run task as soon as
+Creates four tasks that run as the current user, with "run task as soon as
 possible after a scheduled start is missed" and "wake the computer to run this
 task" turned on. Waking only works if Windows allows wake timers (Power Options,
 Sleep, Allow wake timers: Enable, for both plugged in and on battery) and the
@@ -21,6 +21,12 @@ machine is asleep or hibernating rather than shut down:
                           collector module; the second trigger is the single
                           retry and stores nothing the first one already has.
                           This task runs here only, never in GitHub Actions.
+  thermo-fr outage snapshot  weekdays at 09:00 and Saturday and Sunday at 10:00 local
+                          time: saves the ENTSO-E unavailability notices of French
+                          units (raw, paged) under data/entsoe/outage_snapshots/,
+                          before the pre-market runs, so that planned nuclear
+                          availability can later be rebuilt as of any time.
+                          Laptop only.
 
 Each task starts python -m thermo_fr <command> --kind scheduled in the repository
 directory. The jobs read ENTSOE_API_KEY from the user's environment, so the
@@ -45,6 +51,7 @@ if ($Python -eq "") { $Python = (Get-Command python).Source }
 $morningName = "thermo-fr morning-run"
 $settleName = "thermo-fr settle"
 $marketName = "thermo-fr market fetch"
+$outageName = "thermo-fr outage snapshot"
 
 function Remove-IfPresent($name) {
     $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
@@ -58,12 +65,14 @@ if ($Remove) {
     Remove-IfPresent $morningName
     Remove-IfPresent $settleName
     Remove-IfPresent $marketName
+    Remove-IfPresent $outageName
 }
 
 if ($Install) {
     Remove-IfPresent $morningName
     Remove-IfPresent $settleName
     Remove-IfPresent $marketName
+    Remove-IfPresent $outageName
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
         -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $weekdays = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
@@ -91,13 +100,22 @@ if ($Install) {
     Register-ScheduledTask -TaskName $marketName -Action $marketAction -Trigger $marketTriggers -Settings $settings `
         -Description "thermo-fr: collect the EEX day-ahead trading window for tomorrow with the local collector (laptop only)" | Out-Null
     Write-Host "Installed task '$marketName' (weekdays 11:20 and 11:35 local time, 12:20 and 12:35 Paris)"
+
+    $outageTriggers = @(
+        (New-ScheduledTaskTrigger -Weekly -DaysOfWeek $weekdays -At "09:00"),
+        (New-ScheduledTaskTrigger -Weekly -DaysOfWeek @("Saturday", "Sunday") -At "10:00")
+    )
+    $outageAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr outage-snapshot" -WorkingDirectory $repo
+    Register-ScheduledTask -TaskName $outageName -Action $outageAction -Trigger $outageTriggers -Settings $settings `
+        -Description "thermo-fr: save today's ENTSO-E unavailability notices of French units (raw snapshot, laptop only)" | Out-Null
+    Write-Host "Installed task '$outageName' (weekdays 09:00, weekends 10:00 local time)"
     Write-Host "Python: $Python"
     Write-Host "Working directory: $repo"
     Write-Host "Machine time zone: $((Get-TimeZone).Id) (the times above are local; London time is intended)"
 }
 
 if ($Show -or $Install) {
-    foreach ($name in @($morningName, $settleName, $marketName)) {
+    foreach ($name in @($morningName, $settleName, $marketName, $outageName)) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -eq $task) { Write-Host "Task '$name' is not installed"; continue }
         $info = Get-ScheduledTaskInfo -TaskName $name

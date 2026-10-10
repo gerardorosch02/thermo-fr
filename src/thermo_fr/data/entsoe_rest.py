@@ -269,6 +269,10 @@ class EntsoeApi:
             raise EntsoeApiError(self._scrub(ack_reason(str(exc)))) from None
         return response.content
 
+    def download_raw(self, params: dict) -> bytes:
+        """The raw answer for arbitrary query parameters (the token is added here and scrubbed from errors); never cached."""
+        return self._download(params)
+
     def fetch_chunk(self, item: str, start: pd.Timestamp, end: pd.Timestamp) -> bytes:
         """Raw XML for [start, end), from the cache when the window is fully in the past."""
         fmt = "%Y%m%d%H%M"
