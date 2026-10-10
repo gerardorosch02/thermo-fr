@@ -3,7 +3,7 @@
 Install or remove the Windows Task Scheduler entries for the thermo-fr forecast jobs.
 
 .DESCRIPTION
-Creates four tasks that run as the current user, with "run task as soon as
+Creates five tasks that run as the current user, with "run task as soon as
 possible after a scheduled start is missed" and "wake the computer to run this
 task" turned on. Waking only works if Windows allows wake timers (Power Options,
 Sleep, Allow wake timers: Enable, for both plugged in and on battery) and the
@@ -27,6 +27,11 @@ machine is asleep or hibernating rather than shut down:
                           before the pre-market runs, so that planned nuclear
                           availability can later be rebuilt as of any time.
                           Laptop only.
+  thermo-fr fuel snapshot  every day at 22:15 local time (after the 22:00 CET evening
+                          publication all year): the private collector local\fuel_fetch.py
+                          saves the day's gas and carbon prices as a dated snapshot
+                          under data/ (git-ignored). Laptop only; the module is not
+                          part of the repository.
 
 Each task starts python -m thermo_fr <command> --kind scheduled in the repository
 directory. The jobs read ENTSOE_API_KEY from the user's environment, so the
@@ -52,6 +57,7 @@ $morningName = "thermo-fr morning-run"
 $settleName = "thermo-fr settle"
 $marketName = "thermo-fr market fetch"
 $outageName = "thermo-fr outage snapshot"
+$fuelName = "thermo-fr fuel snapshot"
 
 function Remove-IfPresent($name) {
     $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
@@ -66,6 +72,7 @@ if ($Remove) {
     Remove-IfPresent $settleName
     Remove-IfPresent $marketName
     Remove-IfPresent $outageName
+    Remove-IfPresent $fuelName
 }
 
 if ($Install) {
@@ -73,6 +80,7 @@ if ($Install) {
     Remove-IfPresent $settleName
     Remove-IfPresent $marketName
     Remove-IfPresent $outageName
+    Remove-IfPresent $fuelName
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
         -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $weekdays = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
@@ -109,13 +117,24 @@ if ($Install) {
     Register-ScheduledTask -TaskName $outageName -Action $outageAction -Trigger $outageTriggers -Settings $settings `
         -Description "thermo-fr: save today's ENTSO-E unavailability notices of French units (raw snapshot, laptop only)" | Out-Null
     Write-Host "Installed task '$outageName' (weekdays 09:00, weekends 10:00 local time)"
+
+    $fuelScript = Join-Path $repo "local\fuel_fetch.py"
+    if (Test-Path $fuelScript) {
+        $fuelTrigger = New-ScheduledTaskTrigger -Daily -At "22:15"
+        $fuelAction = New-ScheduledTaskAction -Execute $Python -Argument "`"$fuelScript`"" -WorkingDirectory $repo
+        Register-ScheduledTask -TaskName $fuelName -Action $fuelAction -Trigger $fuelTrigger -Settings $settings `
+            -Description "thermo-fr: private collector, daily snapshot of gas and carbon prices (laptop only)" | Out-Null
+        Write-Host "Installed task '$fuelName' (daily 22:15 local time)"
+    } else {
+        Write-Host "Skipped task '$fuelName': no local\fuel_fetch.py on this machine"
+    }
     Write-Host "Python: $Python"
     Write-Host "Working directory: $repo"
     Write-Host "Machine time zone: $((Get-TimeZone).Id) (the times above are local; London time is intended)"
 }
 
 if ($Show -or $Install) {
-    foreach ($name in @($morningName, $settleName, $marketName, $outageName)) {
+    foreach ($name in @($morningName, $settleName, $marketName, $outageName, $fuelName)) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -eq $task) { Write-Host "Task '$name' is not installed"; continue }
         $info = Get-ScheduledTaskInfo -TaskName $name

@@ -137,6 +137,26 @@ def test_neighbour_prices_and_residual_v2_meet_both_deadlines():
         check_point_in_time(idx, v2, deadline="noon")
 
 
+def test_fuel_price_rules_for_the_private_collector():
+    summer, winter = hours("2024-07-15"), hours("2024-01-15")
+    # the end-of-day indices for gas day D-1 are known from 22:00 CET on D-2, the same UTC hour all year
+    assert (issue_times(summer, "fuel_index_lag1") == pd.Timestamp("2024-07-13T21:00Z")).all()
+    assert (issue_times(winter, "fuel_index_lag1") == pd.Timestamp("2024-01-13T21:00Z")).all()
+    assert (issue_times(summer, "fuel_index_lag1") < timing.premarket_issue_for(summer)).all()
+    # the index for gas day D itself would be published on the evening of D-1, after the gate: never a feature
+    same_day = timing.fuel_index_lag1_issue(summer) + pd.Timedelta(days=1)
+    assert (same_day > gate_for(summer)).all()
+    # the morning trades are taken up to the issue time, so the feature is known exactly then and passes the pre-market check
+    assert (issue_times(summer, "fuel_morning_trades") == timing.premarket_issue_for(summer)).all()
+    rules = {"gas_index_lag1": "fuel_index_lag1", "carbon_index_lag1": "fuel_index_lag1", "gas_front_month_morning": "fuel_morning_trades"}
+    check_point_in_time(summer.append(winter), rules)
+    check_point_in_time(summer.append(winter), rules, deadline="premarket")
+    # a trade one minute after the issue time would be late for the pre-market deadline
+    late = {"x": "wind_solar_forecast"}
+    with pytest.raises(LookaheadError):
+        check_point_in_time(summer, late, deadline="premarket")
+
+
 def test_weather_proxy_is_never_point_in_time():
     idx = hours("2024-07-15")
     assert (lateness(idx, "weather_proxy") > pd.Timedelta(0)).all()
