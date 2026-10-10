@@ -403,7 +403,9 @@ def main() -> None:
                                         ("value_perfect", "perfect foresight", COLORS["actual"])):
                 fig.add_trace(go.Scatter(x=daily["delivery_day"], y=daily[column].cumsum(), name=name, mode="lines", line=dict(color=color)))
             st.plotly_chart(layout(fig, "Cumulative battery value (EUR)", "Delivery day"), use_container_width=True)
-    elif not backtest:
+    elif backtest:
+        st.caption("The live record starts with the first settled day forecast by the default model (honest_v2); none has settled yet.")
+    else:
         st.info("No shape and battery results published yet.")
     st.caption("Aggregates and the live daily values only; no traded prices appear here.")
 

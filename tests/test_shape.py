@@ -124,6 +124,35 @@ def test_walk_forward_shape_beats_a_reversed_benchmark_on_synthetic_data(monkeyp
     assert with_level.predictions.loc[day, "base_model"].iloc[0] == pytest.approx(table.X.loc[with_level.predictions.index[day], "price_lag7"].mean())
 
 
+def test_paired_comparison_and_block_bootstrap():
+    from thermo_fr.forecast.shape import block_bootstrap_mean, daily_shape_mae, paired_comparison, paired_report
+
+    rng = np.random.default_rng(3)
+    model = rng.normal(10, 5, 200)
+    daily = pd.DataFrame({"value_model": model, "value_d1": model - 2 + rng.normal(0, 1, 200), "value_same_type": model + rng.normal(0, 3, 200)})
+    clear = paired_comparison(daily, "value_model", "value_d1", resamples=2000)
+    assert clear["days"] == 200 and 1.5 < clear["mean_difference"] < 2.5 and clear["ci95_low"] > 0 and clear["distinguishable_from_zero"]
+    assert clear["share_model_wins"] > 0.9
+    noisy = paired_comparison(daily, "value_model", "value_same_type", resamples=2000)
+    assert noisy["ci95_low"] < 0 < noisy["ci95_high"] and not noisy["distinguishable_from_zero"]
+    low, high = block_bootstrap_mean(np.zeros(30))
+    assert low == 0.0 and high == 0.0
+    assert np.isnan(block_bootstrap_mean(np.array([]))[0])
+    # a block bootstrap on an autocorrelated series is wider than an i.i.d. one
+    series = np.cumsum(rng.normal(0, 1, 300)) * 0.1 + rng.normal(0, 1, 300)
+    wide = block_bootstrap_mean(series, block=7, resamples=2000)
+    narrow = block_bootstrap_mean(series, block=1, resamples=2000)
+    assert (wide[1] - wide[0]) > (narrow[1] - narrow[0])
+    frame = pd.concat([day_frame([10, 5, 0, 0, 5, 10, 20, 40, 60, 60, 50, 45, 40, 40, 45, 50, 60, 80, 90, 80, 60, 40, 30, 20],
+                                 model=[v + 3 for v in range(24)], d1=list(range(24)), day=d) for d in ("2026-10-13", "2026-10-14")])
+    frame["shape_same_type"] = frame["shape_d1"]
+    shape_daily = daily_shape_mae(frame)
+    assert list(shape_daily.columns) == ["delivery_day", "shape_mae_model", "shape_mae_d1", "shape_mae_same_type"] and len(shape_daily) == 2
+    report = paired_report(pd.DataFrame({"value_model": [5.0, 6.0], "value_d1": [4.0, 7.0], "value_same_type": [1.0, 1.0]}), shape_daily, resamples=200)
+    assert set(report) == {"battery_value", "shape_mae"} and set(report["battery_value"]) == {"d1", "same_type"}
+    assert report["battery_value"]["same_type"]["mean_difference"] == 4.5 and report["shape_mae"]["d1"]["days"] == 2
+
+
 def test_live_record_from_the_store(tmp_path):
     store = Store(tmp_path / "db.sqlite")
     day = "2026-10-13"

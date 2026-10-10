@@ -236,6 +236,63 @@ def evaluate_shape(predictions: pd.DataFrame, strict_only: bool = True) -> dict:
             "shape": shape, "battery": battery["summary"], "battery_daily": battery["daily"]}
 
 
+def block_bootstrap_mean(values: np.ndarray, block: int = 7, resamples: int = 5000, seed: int = 0, level: float = 0.95) -> tuple[float, float]:
+    """Percentile interval for the mean of a daily series from a moving-block bootstrap (blocks of `block` consecutive days).
+
+    Each resample concatenates ceil(n / block) blocks drawn with replacement from every window of `block` consecutive values,
+    truncated to n, and takes its mean; the interval is the central `level` share of those means. Serial dependence within a
+    week is kept inside the blocks, which is why a plain i.i.d. bootstrap would be too narrow here.
+    """
+    values = np.asarray(values, dtype=float)
+    values = values[~np.isnan(values)]
+    n = len(values)
+    if n == 0:
+        return float("nan"), float("nan")
+    block = max(1, min(block, n))
+    rng = np.random.default_rng(seed)
+    starts = np.arange(n - block + 1)
+    per = int(np.ceil(n / block))
+    picks = rng.choice(starts, size=(resamples, per), replace=True)
+    offsets = np.arange(block)
+    index = (picks[:, :, None] + offsets[None, None, :]).reshape(resamples, -1)[:, :n]
+    means = values[index].mean(axis=1)
+    alpha = (1 - level) / 2
+    return float(np.quantile(means, alpha)), float(np.quantile(means, 1 - alpha))
+
+
+def paired_comparison(daily: pd.DataFrame, model: str, benchmark: str, block: int = 7, resamples: int = 5000, seed: int = 0) -> dict:
+    """Mean daily difference model minus benchmark, its moving-block bootstrap interval, and the share of days the model wins."""
+    pair = daily[[model, benchmark]].dropna()
+    diff = (pair[model] - pair[benchmark]).to_numpy()
+    low, high = block_bootstrap_mean(diff, block=block, resamples=resamples, seed=seed)
+    return {"days": int(len(diff)), "mean_difference": round(float(diff.mean()), 2), "ci95_low": round(low, 2), "ci95_high": round(high, 2),
+            "share_model_wins": round(float((diff > 0).mean()), 3), "share_ties": round(float((diff == 0).mean()), 3),
+            "distinguishable_from_zero": bool(low > 0 or high < 0)}
+
+
+def daily_shape_mae(frame: pd.DataFrame, methods=("model", "d1", "same_type")) -> pd.DataFrame:
+    """One row per delivery day with the hourly shape MAE of each method (lower is better)."""
+    frame = frame.dropna(subset=["actual_shape"])
+    out = {}
+    for method in methods:
+        column = f"shape_{method}"
+        err = (frame[column] - frame["actual_shape"]).abs()
+        out[f"shape_mae_{method}"] = err.groupby(frame["delivery_day"].to_numpy()).mean()
+    daily = pd.DataFrame(out)
+    daily.index.name = "delivery_day"
+    return daily.reset_index()
+
+
+def paired_report(battery_daily: pd.DataFrame, shape_daily: pd.DataFrame, benchmarks=("d1", "same_type"), **kw) -> dict:
+    """Battery value (model minus benchmark, higher is better) and shape MAE (benchmark minus model, so that positive favours the model)."""
+    out = {"battery_value": {}, "shape_mae": {}}
+    for bench in benchmarks:
+        out["battery_value"][bench] = paired_comparison(battery_daily, "value_model", f"value_{bench}", **kw)
+        reversed_frame = shape_daily.rename(columns={f"shape_mae_{bench}": "bench", "shape_mae_model": "model"})
+        out["shape_mae"][bench] = paired_comparison(reversed_frame, "bench", "model", **kw)  # benchmark minus model: positive = model better
+    return out
+
+
 def live_frame(curve: pd.DataFrame, actual: pd.Series, delivery_day: str) -> pd.DataFrame:
     """A stored forecast version (columns forecast, naive_day) and the day's actual prices as one scoring frame (model and D-1 only)."""
     frame = pd.DataFrame(index=curve.index)

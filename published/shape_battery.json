@@ -84,7 +84,50 @@
           "losing_days": 10
         }
       },
-      "written_at_utc": "2026-10-10T10:14:05Z"
+      "written_at_utc": "2026-10-10T10:14:05Z",
+      "paired": {
+        "method": "moving-block bootstrap, block 7 days, 5,000 resamples, 95% percentile interval",
+        "battery_value": {
+          "d1": {
+            "days": 865,
+            "mean_difference": 10.04,
+            "ci95_low": 7.84,
+            "ci95_high": 12.37,
+            "share_model_wins": 0.486,
+            "share_ties": 0.221,
+            "distinguishable_from_zero": true
+          },
+          "same_type": {
+            "days": 862,
+            "mean_difference": 7.91,
+            "ci95_low": 6.14,
+            "ci95_high": 10.1,
+            "share_model_wins": 0.454,
+            "share_ties": 0.242,
+            "distinguishable_from_zero": true
+          }
+        },
+        "shape_mae": {
+          "d1": {
+            "days": 865,
+            "mean_difference": 4.59,
+            "ci95_low": 4.02,
+            "ci95_high": 5.19,
+            "share_model_wins": 0.768,
+            "share_ties": 0.0,
+            "distinguishable_from_zero": true
+          },
+          "same_type": {
+            "days": 865,
+            "mean_difference": 3.77,
+            "ci95_low": 3.26,
+            "ci95_high": 4.32,
+            "share_model_wins": 0.74,
+            "share_ties": 0.0,
+            "distinguishable_from_zero": true
+          }
+        }
+      }
     },
     "holdout": {
       "label": "holdout",
@@ -145,7 +188,50 @@
           "losing_days": 0
         }
       },
-      "written_at_utc": "2026-10-10T10:14:59Z"
+      "written_at_utc": "2026-10-10T10:14:59Z",
+      "paired": {
+        "method": "moving-block bootstrap, block 7 days, 5,000 resamples, 95% percentile interval",
+        "battery_value": {
+          "d1": {
+            "days": 102,
+            "mean_difference": -8.28,
+            "ci95_low": -20.08,
+            "ci95_high": -2.17,
+            "share_model_wins": 0.343,
+            "share_ties": 0.324,
+            "distinguishable_from_zero": true
+          },
+          "same_type": {
+            "days": 102,
+            "mean_difference": -9.42,
+            "ci95_low": -19.72,
+            "ci95_high": -1.08,
+            "share_model_wins": 0.382,
+            "share_ties": 0.324,
+            "distinguishable_from_zero": true
+          }
+        },
+        "shape_mae": {
+          "d1": {
+            "days": 102,
+            "mean_difference": 0.73,
+            "ci95_low": -2.51,
+            "ci95_high": 2.91,
+            "share_model_wins": 0.451,
+            "share_ties": 0.0,
+            "distinguishable_from_zero": false
+          },
+          "same_type": {
+            "days": 102,
+            "mean_difference": -0.41,
+            "ci95_low": -3.98,
+            "ci95_high": 2.14,
+            "share_model_wins": 0.471,
+            "share_ties": 0.0,
+            "distinguishable_from_zero": false
+          }
+        }
+      }
     }
   },
   "live": {
