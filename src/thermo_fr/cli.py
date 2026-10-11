@@ -249,34 +249,64 @@ def cmd_market_paste(args) -> None:
           f"O {row.open} H {row.high} L {row.low} C {row.close} VWAP {row.vwap}; {len(frame)} row(s) in {args.path} (git-ignored, never published)")
 
 
+def market_publish(store, out, market_path, repo, branch: str = "main", kind: str = "manual", push: bool = True, log=None, now=None,
+                   runner=None) -> dict:
+    """Write published/market.json and push that one file; the outcome is recorded as a run in the store, failures included.
+
+    The run row (command market-publish) is what the local dashboard shows, so a failed push is visible there and in the day's log
+    file instead of disappearing in Task Scheduler's history.
+    """
+    import logging
+
+    from .forecast.gitsync import GitSyncError, commit_and_push
+    from .forecast.publish import write_market_file
+
+    log = log or logging.getLogger("thermo_fr.market")
+    run_id = store.start_run("market-publish", kind, None, now=now)
+    try:
+        section = write_market_file(store, Path(out), Path(market_path))
+        if section is None:
+            message = f"no traded prices in {market_path}: market.json not written, nothing to push"
+            log.warning(message)
+            store.finish_run(run_id, "skipped", message, now=now)
+            return {"status": "skipped", "message": message}
+        written = f"market.json: {section['scored_days']} scored day(s), computed {section.get('computed_at_utc')}"
+        log.info(written)
+        if not push:
+            store.finish_run(run_id, "ok", f"{written}; not pushed (--no-push)", now=now)
+            return {"status": "ok", "message": written, "section": section}
+        result = commit_and_push(Path(repo), [Path(out) / "market.json"], f"Market aggregates {pd.Timestamp.now(tz='UTC'):%Y-%m-%dT%H:%MZ}",
+                                 branch=branch, log=log.info, **({"runner": runner} if runner is not None else {}))
+        if result["pushed"]:
+            message = f"{written}; pushed to origin/{branch} on attempt {result['attempts']} as {result['identity']}"
+        else:
+            message = f"{written}; unchanged since the last publish, nothing to commit"
+        store.finish_run(run_id, "ok", message, now=now)
+        return {"status": "ok", "message": message, "section": section, **result}
+    except (GitSyncError, OSError, ValueError) as exc:
+        message = f"market publish failed: {exc}"
+        log.error(message)
+        store.finish_run(run_id, "failed", message, now=now)
+        return {"status": "failed", "message": message}
+
+
 def cmd_market_publish(args) -> None:
     """Laptop only: write published/market.json from the local store and traded prices, commit that one file and push it (rebase, no force)."""
     import logging
 
-    from .forecast.gitsync import GitSyncError, commit_and_push
     from .forecast.jobs import setup_logging
-    from .forecast.publish import write_market_file
     from .forecast.store import Store
 
     setup_logging("market-publish")
     log = logging.getLogger("thermo_fr.market")
     store = Store(Path(args.db))
     try:
-        section = write_market_file(store, Path(args.out), Path(args.path))
+        result = market_publish(store, args.out, args.path, args.repo, branch=args.branch, kind=args.kind, push=not args.no_push, log=log)
     finally:
         store.close()
-    if section is None:
-        print(f"No traded prices in {args.path}: market.json not written, nothing to push.")
-        return
-    print(f"published/market.json: {section['scored_days']} scored day(s), computed {section.get('computed_at_utc')}")
-    if args.no_push:
-        return
-    try:
-        result = commit_and_push(Path(args.repo), [Path(args.out) / "market.json"], f"Market aggregates {pd.Timestamp.now(tz='UTC'):%Y-%m-%dT%H:%MZ}",
-                                 branch=args.branch, log=log.info)
-    except GitSyncError as exc:
-        raise SystemExit(f"market publish: {exc}")
-    print("pushed" if result["pushed"] else "nothing to commit")
+    print(f"{result['status']}: {result['message']}")
+    if result["status"] == "failed":
+        raise SystemExit(1)
 
 
 def cmd_market_fetch(args) -> None:
@@ -618,6 +648,7 @@ def main(argv=None) -> None:
     mpub.add_argument("--repo", default=".")
     mpub.add_argument("--branch", default="main")
     mpub.add_argument("--no-push", action="store_true", help="write the file only")
+    mpub.add_argument("--kind", default="manual", choices=("scheduled", "manual", "test"), help="recorded with the run in the local store")
     mpub.set_defaults(func=cmd_market_publish)
     meval = mkt_sub.add_parser("evaluate", help="score every stored market row with the forecast that was live before its window")
     meval.add_argument("--path", default="data/market/eex_fr_da.csv")

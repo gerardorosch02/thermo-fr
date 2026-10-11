@@ -346,6 +346,15 @@ def main() -> None:
     # 4. Versus the market
     st.subheader(f"Versus the market: EEX day-ahead futures traded before the auction ({feature_set})")
     mkt = market_panel(db, version, q.db_version(q.MARKET_PATH), feature_set)
+    last_publish = mkt.get("last_publish")
+    if last_publish is None:
+        st.caption("Market publish: no run recorded yet (the scheduled `thermo-fr market publish` pushes published/market.json daily at 14:30).")
+    elif last_publish["status"] == "failed":
+        st.error(f"Market publish {last_publish['started_at_utc']} ({last_publish['kind']}) failed: {last_publish['message']}")
+    elif last_publish["status"] == "skipped":
+        st.warning(f"Market publish {last_publish['started_at_utc']} ({last_publish['kind']}) skipped: {last_publish['message']}")
+    else:
+        st.caption(f"Market publish {last_publish['started_at_utc']} ({last_publish['kind']}): {last_publish['status']}, {last_publish['message']}")
     if not mkt["rows"]:
         st.info(f"No traded prices recorded. The scheduled `thermo-fr market fetch` collects them, or add a day with `thermo-fr market paste` "
                 f"or `thermo-fr market add`; rows are kept in {mkt['path']}, which is git-ignored and never published.")

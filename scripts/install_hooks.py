@@ -4,7 +4,9 @@ Usage: python scripts/install_hooks.py
 
 Local only: the hook lives in .git/hooks, which git never commits, and nothing in the GitHub Actions workflow refers to it. The hook
 runs `python -m pytest -q` from the repository root with the interpreter that ran this installer; a non-zero exit blocks the commit. To
-commit without the suite in an emergency, git's own --no-verify still works, and that choice shows in the terminal.
+commit without the suite in an emergency, git's own --no-verify still works, and that choice shows in the terminal. The one automated
+commit made on this machine, `thermo-fr market publish` (published/market.json, a generated data file), uses --no-verify by design:
+the hook is for code commits.
 """
 
 import os

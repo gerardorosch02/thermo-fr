@@ -20,7 +20,11 @@ machine is asleep or hibernating rather than shut down:
                           prices, commits that one file and pushes it (pull with
                           rebase first, one retry, never a force push). The workflow
                           never writes market.json, so the two publishers touch
-                          different files.
+                          different files. The commit carries the identity of the
+                          repository's local git config, skips the pre-commit hook
+                          (a one-file data commit, not code) and its outcome is
+                          recorded as a run in the local store, shown on the
+                          dashboard's market panel; failures are logged there too.
   thermo-fr market fetch  weekdays at 11:20 and 11:35 local time (12:20 and 12:35 Paris):
                           collects the EEX day-ahead window for tomorrow (Saturday
                           to Monday on a Friday) with the local, git-ignored
@@ -110,7 +114,7 @@ if ($Install) {
     Write-Host "Installed task '$settleName' (daily 14:00 local time)"
 
     $marketPublishTrigger = New-ScheduledTaskTrigger -Daily -At "14:30"
-    $marketPublishAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr market publish" -WorkingDirectory $repo
+    $marketPublishAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr market publish --kind scheduled" -WorkingDirectory $repo
     Register-ScheduledTask -TaskName $marketPublishName -Action $marketPublishAction -Trigger $marketPublishTrigger -Settings $settings `
         -Description "thermo-fr: write published/market.json from the local store and push that one file (rebase, never force)" | Out-Null
     Write-Host "Installed task '$marketPublishName' (daily 14:30 local time, after the settle; pushes published/market.json only)"

@@ -184,12 +184,25 @@ def flag_for(row) -> str:
     return "ok"
 
 
+def last_publish_run(store, command: str = "market-publish") -> dict | None:
+    """The most recent run of the laptop's market publish, so a failed push shows on the dashboard instead of only in Task Scheduler."""
+    runs = store.runs(limit=200)
+    mine = runs[runs["command"] == command] if len(runs) else runs
+    if mine.empty:
+        return None
+    row = mine.iloc[0]
+    return {"status": row["status"] or "running", "message": row["message"] or "", "started_at_utc": row["started_at_utc"],
+            "finished_at_utc": row["finished_at_utc"], "kind": row["kind"]}
+
+
 def market_panel(path, feature_set: str = "honest_v2", market_path=MARKET_PATH) -> dict:
     """The forecast against EEX traded prices, day by day, from the local file (collected, pasted or typed; never published)."""
     rows = load_market(market_path)
+    last_publish = _with_store(path, last_publish_run)
     if rows.empty:
-        return {"rows": 0, "path": str(market_path)}
+        return {"rows": 0, "path": str(market_path), "last_publish": last_publish}
     out = _with_store(path, lambda store: evaluate_market(store, rows, feature_set=feature_set))
+    out["last_publish"] = last_publish
     out["rows"] = int(len(rows))
     out["path"] = str(market_path)
     out["sources"] = rows["source"].value_counts().to_dict()
