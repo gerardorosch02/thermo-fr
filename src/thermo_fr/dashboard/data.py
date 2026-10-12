@@ -155,7 +155,8 @@ def performance_panel(path, feature_set: str, days: int = 30) -> dict:
 def status_panel(path, delivery_day: str) -> dict:
     def read(store: Store):
         return {"latest": store.latest_status(delivery_day), "history": store.status_for(delivery_day),
-                "timing": store.timing_log(), "summary": store.timing_summary(), "runs": store.runs(limit=12)}
+                "timing": store.timing_log(), "summary": store.timing_summary(), "runs": store.runs(limit=12),
+                "last_dispatch": last_publish_run(store, "dispatch")}
 
     out = _with_store(path, read)
     latest = out["latest"]
@@ -185,7 +186,7 @@ def flag_for(row) -> str:
 
 
 def last_publish_run(store, command: str = "market-publish") -> dict | None:
-    """The most recent run of the laptop's market publish, so a failed push shows on the dashboard instead of only in Task Scheduler."""
+    """The most recent run of one laptop command (market publish, dispatch), so a failure shows on the dashboard, not only in Task Scheduler."""
     runs = store.runs(limit=200)
     mine = runs[runs["command"] == command] if len(runs) else runs
     if mine.empty:

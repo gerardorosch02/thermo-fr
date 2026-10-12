@@ -16,7 +16,15 @@ version is issued after the market window and the dashboards label it so.
 
 GitHub starts scheduled workflows late at busy times, often by five to fifteen
 minutes, which is why two pre-market crons sit about 25 minutes apart in each
-season instead of one.
+season instead of one. In October 2026 the delay reached four to five hours and
+the morning crons were dropped altogether, so the pre-market run is now
+triggered by the laptop (`thermo-fr dispatch`, a workflow_dispatch at 10:05 and
+10:30 Paris) with the crons kept as a backup. A dispatched morning-run is
+decided by the same clock rule as a cron: skipped before the load forecast
+deadline, pre-market inside the window, and from 11:00 Paris a late run for
+information only, whose version the dashboards label "issued after the market
+window, not tradeable"; a later version never replaces a pre-market one, since
+the headline is the last version issued before the window (market.headline_version).
 """
 
 import argparse
@@ -44,7 +52,15 @@ def decide(now_utc: dt.datetime, event: str, schedule: str = "", dispatch_step: 
         now_utc = now_utc.replace(tzinfo=dt.timezone.utc)
     paris = now_utc.astimezone(PARIS)
     if event == "workflow_dispatch":
-        return dispatch_step or "morning-run", "manual dispatch"
+        step = dispatch_step or "morning-run"
+        if step != "morning-run":
+            return step, "manual dispatch"
+        clock = paris.time()
+        if clock < PREMARKET_WINDOW[0]:
+            return "skip", f"dispatched at {paris:%H:%M} Paris, before the 10:00 load forecast deadline"
+        if clock >= PREMARKET_WINDOW[1]:
+            return "morning-run", f"dispatched late run for information at {paris:%H:%M} Paris, after the market window"
+        return "morning-run", f"dispatched pre-market run at {paris:%H:%M} Paris"
     if schedule == SETTLE_CRON:
         return "settle", "daily settlement"
     if schedule == REFIT_CRON:

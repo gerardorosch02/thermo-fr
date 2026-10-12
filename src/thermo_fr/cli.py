@@ -480,6 +480,27 @@ def cmd_shape_backtest(args) -> None:
     print(f"  perfect foresight {result['battery']['perfect_eur_per_day']} EUR/day over {result['battery']['days']} days")
 
 
+def cmd_dispatch(args) -> None:
+    """Laptop only: trigger the GitHub Actions forecast workflow (workflow_dispatch) and record the outcome in the local store."""
+    import logging
+
+    from .forecast.dispatch import dispatch_and_record
+    from .forecast.jobs import setup_logging
+    from .forecast.store import Store
+
+    setup_logging("dispatch")
+    log = logging.getLogger("thermo_fr.dispatch")
+    store = Store(Path(args.db))
+    try:
+        result = dispatch_and_record(store, Path(args.repo), step=args.step, kind=args.kind, ref=args.ref, gh=args.gh, log=log,
+                                     wait_s=args.wait)
+    finally:
+        store.close()
+    print(f"{result['status']}: {result['message']}")
+    if result["status"] == "failed":
+        raise SystemExit(1)
+
+
 def cmd_schedule_step(args) -> None:
     from .forecast.schedule import main as schedule_main
 
@@ -649,6 +670,17 @@ def main(argv=None) -> None:
     mpub.add_argument("--branch", default="main")
     mpub.add_argument("--no-push", action="store_true", help="write the file only")
     mpub.add_argument("--kind", default="manual", choices=("scheduled", "manual", "test"), help="recorded with the run in the local store")
+
+    disp = sub.add_parser("dispatch", help="laptop only: trigger the GitHub Actions forecast workflow (gh workflow run, no secret on the "
+                                           "command line); the workflow decides from the Paris clock whether the run is pre-market or late")
+    disp.add_argument("--step", default="morning-run", choices=("morning-run", "settle", "refit"))
+    disp.add_argument("--ref", default="main")
+    disp.add_argument("--repo", default=".")
+    disp.add_argument("--db", default="data/forecast.db")
+    disp.add_argument("--gh", default="gh", help="the GitHub CLI executable")
+    disp.add_argument("--wait", type=float, default=45.0, help="seconds to wait for the run to appear")
+    disp.add_argument("--kind", default="manual", choices=("scheduled", "manual", "test"), help="recorded with the run in the local store")
+    disp.set_defaults(func=cmd_dispatch)
     mpub.set_defaults(func=cmd_market_publish)
     meval = mkt_sub.add_parser("evaluate", help="score every stored market row with the forecast that was live before its window")
     meval.add_argument("--path", default="data/market/eex_fr_da.csv")

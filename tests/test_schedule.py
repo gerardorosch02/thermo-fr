@@ -49,8 +49,29 @@ def test_late_run_settle_refit_and_dispatch():
     assert decide(utc("2026-08-03T02:01:00"), "schedule", REFIT_CRON)[0] == "refit"
     assert first_weekday_of_month(dt.date(2026, 8, 20)) == dt.date(2026, 8, 3)
     assert decide(utc("2026-07-15T15:00:00"), "workflow_dispatch", "", "settle") == ("settle", "manual dispatch")
-    assert decide(utc("2026-07-15T15:00:00"), "workflow_dispatch", "")[0] == "morning-run"
+    step, reason = decide(utc("2026-07-15T15:00:00"), "workflow_dispatch", "")
+    assert step == "morning-run" and "after the market window" in reason
     assert decide(utc("2026-07-15T15:00:00"), "schedule", "0 0 * * *")[0] == "skip"
+
+
+def test_a_dispatched_morning_run_follows_the_same_clock_rule_as_a_cron_all_year():
+    # summer: 10:05 Paris is 08:05 UTC; winter: 09:05 UTC. The laptop dispatches at 09:05 and 09:30 London, 10:05 and 10:30 Paris
+    for day, offset in (("2026-07-15", 2), ("2026-01-15", 1), ("2026-10-26", 1), ("2026-03-30", 2)):
+        def at(hh, mm):
+            return utc(f"{day}T{hh - offset:02d}:{mm:02d}:00")
+        assert decide(at(10, 0), "workflow_dispatch", "", "morning-run")[0] == "skip"  # before the load forecast deadline
+        step, reason = decide(at(10, 6), "workflow_dispatch", "", "morning-run")
+        assert step == "morning-run" and reason == "dispatched pre-market run at 10:06 Paris"
+        assert decide(at(10, 31), "workflow_dispatch", "", "morning-run")[0] == "morning-run"
+        assert decide(at(10, 59), "workflow_dispatch", "", "morning-run")[1].startswith("dispatched pre-market")
+        step, reason = decide(at(11, 0), "workflow_dispatch", "", "morning-run")
+        assert step == "morning-run" and "after the market window" in reason  # information only, labelled by the dashboards
+        step, reason = decide(at(12, 10), "workflow_dispatch", "", "morning-run")
+        assert step == "morning-run" and "12:10 Paris, after the market window" in reason
+        # the same moments decided for a cron give the same step, except that a cron at or after 11:00 is skipped (the late cron covers it)
+        for hh, mm in ((10, 6), (10, 31), (10, 59)):
+            assert decide(at(hh, mm), "schedule", PREMARKET_CRONS[0])[0] == decide(at(hh, mm), "workflow_dispatch", "", "morning-run")[0]
+        assert decide(at(10, 0), "schedule", PREMARKET_CRONS[0])[0] == "skip"
 
 
 def test_cli_prints_github_output_lines(capsys):

@@ -14,6 +14,14 @@ machine is asleep or hibernating rather than shut down:
                           London time, so 08:00 to 12:30 Paris: the 09:15 and 09:45
                           runs land at 10:15 and 10:45 Paris, after the 10:00 load
                           forecast deadline and before the 11:15 market window)
+  thermo-fr dispatch forecast  weekdays at 09:05 and 09:30 local time (10:05 and 10:30 Paris,
+                          all year, since London and Paris change clocks together): runs
+                          `gh workflow run` so the GitHub Actions pre-market forecast starts
+                          on time; GitHub's own crons were delivered hours late or dropped
+                          and stay in the workflow only as a backup. gh uses its stored
+                          login, no secret is on the command line, and each dispatch is
+                          recorded as a run in the local store (red on the dashboard when
+                          it fails).
   thermo-fr settle        every day at 14:00 local time
   thermo-fr market publish  every day at 14:30 local time, after the settle: writes
                           published/market.json from the local store and the traded
@@ -69,6 +77,7 @@ $marketName = "thermo-fr market fetch"
 $outageName = "thermo-fr outage snapshot"
 $fuelName = "thermo-fr fuel snapshot"
 $marketPublishName = "thermo-fr market publish"
+$dispatchName = "thermo-fr dispatch forecast"
 
 function Remove-IfPresent($name) {
     $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
@@ -85,6 +94,7 @@ if ($Remove) {
     Remove-IfPresent $outageName
     Remove-IfPresent $fuelName
     Remove-IfPresent $marketPublishName
+    Remove-IfPresent $dispatchName
 }
 
 if ($Install) {
@@ -94,6 +104,7 @@ if ($Install) {
     Remove-IfPresent $outageName
     Remove-IfPresent $fuelName
     Remove-IfPresent $marketPublishName
+    Remove-IfPresent $dispatchName
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
         -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $weekdays = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
@@ -106,6 +117,15 @@ if ($Install) {
     Register-ScheduledTask -TaskName $morningName -Action $morningAction -Trigger $morningTriggers -Settings $settings `
         -Description "thermo-fr: fetch tomorrow's day-ahead inputs, log their timing and store the price forecasts" | Out-Null
     Write-Host "Installed task '$morningName' (weekdays 07:00, 08:00, 09:15, 09:45, 10:30, 11:30 local time)"
+
+    $dispatchTriggers = @()
+    foreach ($time in @("09:05", "09:30")) {
+        $dispatchTriggers += New-ScheduledTaskTrigger -Weekly -DaysOfWeek $weekdays -At $time
+    }
+    $dispatchAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr dispatch --step morning-run --kind scheduled" -WorkingDirectory $repo
+    Register-ScheduledTask -TaskName $dispatchName -Action $dispatchAction -Trigger $dispatchTriggers -Settings $settings `
+        -Description "thermo-fr: trigger the GitHub Actions pre-market forecast run (gh workflow run; the GitHub crons are a backup)" | Out-Null
+    Write-Host "Installed task '$dispatchName' (weekdays 09:05 and 09:30 local time, 10:05 and 10:30 Paris)"
 
     $settleTrigger = New-ScheduledTaskTrigger -Daily -At "14:00"
     $settleAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr settle --kind scheduled" -WorkingDirectory $repo
@@ -153,7 +173,7 @@ if ($Install) {
 }
 
 if ($Show -or $Install) {
-    foreach ($name in @($morningName, $settleName, $marketName, $outageName, $fuelName, $marketPublishName)) {
+    foreach ($name in @($morningName, $dispatchName, $settleName, $marketName, $outageName, $fuelName, $marketPublishName)) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -eq $task) { Write-Host "Task '$name' is not installed"; continue }
         $info = Get-ScheduledTaskInfo -TaskName $name

@@ -30,22 +30,28 @@ name: Day-ahead forecast
 # ENTSO-E load forecast is due at 10:00 Paris on the day before delivery and
 # the EEX day-ahead future trades from about 11:15 Paris, so a forecast that can
 # be scored against the market must be issued between 10:05 and 11:00 Paris.
-# Four pre-market crons fire (08:10, 08:35, 09:10, 09:35 UTC) and
-# `thermo-fr schedule-step` keeps only the ones that start inside that window
-# in the current season (08:10 and 08:35 UTC in summer, 09:10 and 09:35 UTC in
-# winter); the others are skipped. Two runs about 25 minutes apart cover the
-# late starts GitHub gives scheduled workflows. One later run at 10:30 UTC
-# (12:30 Paris in summer, 11:30 in winter) is kept for information only; the
-# dashboards label its version "issued after the market window, not
-# tradeable". Settle runs at 13:15 UTC daily; the refit cron fires on the 1st,
-# 2nd and 3rd at 02:00 UTC and proceeds only on the first weekday of the month.
+# The pre-market run is triggered by the laptop: `thermo-fr dispatch` sends a
+# workflow_dispatch (step=morning-run) at 10:05 and 10:30 Paris on weekdays,
+# because GitHub's schedule trigger is not reliable enough for a deadline (on
+# 10 and 11 October 2026 the settle cron ran four to five hours late and the
+# morning crons never ran). The four pre-market crons (08:10, 08:35, 09:10,
+# 09:35 UTC) stay as a backup. `thermo-fr schedule-step` applies one clock rule
+# to cron and dispatch alike: a morning-run that starts before 10:05 Paris is
+# skipped, one inside 10:05 to 11:00 is the pre-market run, and a dispatch from
+# 11:00 (or the 10:30 UTC cron) runs for information only; the dashboards label
+# that version "issued after the market window, not tradeable" and it never
+# replaces a pre-market version, because the headline of a day is the last
+# version issued before the window. A version's issue time is the run's wall
+# clock, never a scheduled time. Settle runs at 13:15 UTC daily (a late settle
+# is harmless); the refit cron fires on the 1st, 2nd and 3rd at 02:00 UTC and
+# proceeds only on the first weekday of the month.
 
 on:
   schedule:
-    - cron: "10 8 * * 1-5"    # pre-market run, summer (10:10 Paris); skipped in winter
-    - cron: "35 8 * * 1-5"    # pre-market run, summer (10:35 Paris); skipped in winter
-    - cron: "10 9 * * 1-5"    # pre-market run, winter (10:10 Paris); skipped in summer
-    - cron: "35 9 * * 1-5"    # pre-market run, winter (10:35 Paris); skipped in summer
+    - cron: "10 8 * * 1-5"    # backup pre-market run, summer (10:10 Paris); skipped in winter
+    - cron: "35 8 * * 1-5"    # backup pre-market run, summer (10:35 Paris); skipped in winter
+    - cron: "10 9 * * 1-5"    # backup pre-market run, winter (10:10 Paris); skipped in summer
+    - cron: "35 9 * * 1-5"    # backup pre-market run, winter (10:35 Paris); skipped in summer
     - cron: "30 10 * * 1-5"   # later run, information only (after the market window)
     - cron: "15 13 * * *"     # settle
     - cron: "0 2 1-3 * *"     # refit, on the first weekday of the month only

@@ -461,6 +461,15 @@ def main() -> None:
                 st.warning(f"{item}: {row['flag']}" + (f" ({row['message'][:120]})" if row["message"] else ""))
         st.dataframe(table.rename(columns={"first_seen_paris": "first seen (Paris)", "minutes_before_gate": "minutes before gate",
                                            "checked_at_utc": "last checked (UTC)"}), use_container_width=True)
+    dispatch = status.get("last_dispatch")
+    st.markdown("**Forecast dispatch** (the scheduled `thermo-fr dispatch` at 09:05 and 09:30 London triggers the GitHub Actions pre-market run; "
+                "the GitHub crons are a backup)")
+    if dispatch is None:
+        st.info("No dispatch recorded yet.")
+    elif dispatch["status"] == "failed":
+        st.error(f"Dispatch {dispatch['started_at_utc']} ({dispatch['kind']}) failed: {dispatch['message']}")
+    else:
+        st.success(f"Dispatch {dispatch['started_at_utc']} ({dispatch['kind']}): {dispatch['message']}")
     st.markdown("**Market data collection** (the scheduled `thermo-fr market fetch`; raw responses and the log stay on this machine)")
     fetch_log = fetch_log_panel(q.db_version(q.FETCH_LOG_PATH))
     if fetch_log["entries"].empty:
