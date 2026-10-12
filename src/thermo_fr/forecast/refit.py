@@ -121,7 +121,23 @@ def refit_sets(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_sets=("h
         if i == 0 and probabilistic:
             log(f"Fitting the quantile and event models for {feature_set} ...")
             metas[feature_set]["probabilistic"] = fit_probabilistic(build_features(hourly, feature_set), feature_set, out_dir, log=log)
+            metas[feature_set]["calibration"] = refit_calibration(out_dir, feature_set, log=log)
     return metas
+
+
+def refit_calibration(out_dir, feature_set: str, published_dir=None, log=print) -> dict | None:
+    """Refit the negative-price calibration on the pairs archive plus the settled live versions published since (docs/experiments.md, 2026-10-12).
+
+    `published_dir` defaults to the parent of the model directory (published/model -> published/). Without a pairs archive next to the models
+    nothing is fitted: the archive is built once from the walk-forward predictions with `thermo-fr prob-calibration-build`.
+    """
+    from .calibration import build_calibration, calibration_paths
+
+    out = Path(out_dir)
+    if not calibration_paths(out, feature_set)["pairs"].exists():
+        log(f"calibration: no pairs archive for {feature_set} under {out}; the probability stays uncalibrated until prob-calibration-build has run")
+        return None
+    return build_calibration(out, feature_set, archives=(), published_dir=Path(published_dir) if published_dir is not None else out.parent, log=log)
 
 
 def fetch_and_refit(start: str, end: str, out_dir=DEFAULT_MODEL_DIR, cache_dir=Path("data/cache"), csv_dir=Path("data/csv"),

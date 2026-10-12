@@ -443,6 +443,89 @@ def cmd_prob_low_end(args) -> None:
     print(f"written to {path}")
 
 
+def cmd_prob_calibration_build(args) -> None:
+    """Laptop, once: build the out-of-sample pairs archive from the walk-forward predictions and fit the live calibration next to the models."""
+    from .forecast.calibration import build_calibration
+
+    meta = build_calibration(Path(args.model_dir), args.feature_set, archives=[Path(a) for a in args.archives], published_dir=Path(args.published) if args.published else None)
+    if meta is None:
+        raise SystemExit("no pairs: nothing written")
+    print(f"{args.feature_set}: calibration fitted on {meta['pairs_hours']:,} out-of-sample hours ({meta['pairs_events']} negative) through {meta['last_day']}; "
+          f"{len(meta['breakpoints']['x'])} breakpoints written to {Path(args.model_dir) / (args.feature_set + '_calibration.json')}")
+
+
+def cmd_prob_recalibrate(args) -> None:
+    """Walk-forward isotonic recalibration of the negative-price probability on the saved predictions (docs/experiments.md, 2026-10-12)."""
+    from .forecast import calibration as cal
+    from .forecast.inputs import load_inputs
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    raw_sel = pd.read_parquet(args.raw)
+    ready_sel = pd.read_parquet(args.ready)
+    months = sorted(set(ready_sel["delivery_day"].dt.to_period("M")))
+    calibrated, fits = cal.walk_forward_calibration(raw_sel, months, min_history_months=args.min_history, log=print)
+    scored = ready_sel.join(calibrated, how="left")
+    result = cal.evaluate_recalibration(scored)
+    result["fits"] = fits
+    (out / "recalibration_selection.json").write_text(json.dumps(result, indent=2, default=str))
+    _print_recalibration("selection", result)
+    if args.holdout_raw and args.holdout_ready:
+        if not result["accepted"] and not args.force_holdout:
+            print("Not accepted on the selection window: the holdout is not evaluated (pre-registered rule).")
+        else:
+            raw_hold = pd.read_parquet(args.holdout_raw)
+            ready_hold = pd.read_parquet(args.holdout_ready)
+            combined = pd.concat([raw_sel, raw_hold]).sort_index()
+            combined = combined[~combined.index.duplicated(keep="last")]
+            hold_months = sorted(set(ready_hold["delivery_day"].dt.to_period("M")))
+            cal_hold, fits_hold = cal.walk_forward_calibration(combined, hold_months, min_history_months=args.min_history, log=print)
+            scored_hold = ready_hold.join(cal_hold, how="left")
+            hold_result = cal.evaluate_recalibration(scored_hold)
+            hold_result["fits"] = fits_hold
+            (out / "recalibration_holdout.json").write_text(json.dumps(hold_result, indent=2, default=str))
+            _print_recalibration("holdout", hold_result)
+    if args.publish:
+        path = Path(args.publish)
+        existing = json.loads(path.read_text()) if path.exists() else {}
+        for label, name in (("selection", "recalibration_selection.json"), ("holdout", "recalibration_holdout.json")):
+            record_path = out / name
+            if label in existing and record_path.exists():
+                r = json.loads(record_path.read_text())
+                existing[label]["recalibration"] = {k: r[k] for k in ("hours", "events", "first_day", "last_day", "accepted", "rule") if k in r}
+                for part in ("raw", "calibrated"):
+                    if part in r:
+                        existing[label]["recalibration"][part] = {k: r[part][k] for k in ("brier", "bss_vs_clim", "bss_vs_last7", "mace", "mean_forecast",
+                                                                                            "reliability", "low_end_bins") if k in r[part]}
+        path.write_text(json.dumps(existing, indent=2, default=str))
+        print(f"aggregates written under 'recalibration' in {path}")
+    if args.data:
+        hourly = load_inputs(Path(args.data))
+        raws = [raw_sel] + ([pd.read_parquet(args.holdout_raw)] if args.holdout_raw else [])
+        table = cal.yearly_diagnostic(hourly["price_eur_mwh"], pd.concat(raws))
+        table.to_csv(out / "recalibration_yearly.csv", index=False)
+        print("Yearly diagnostic (Paris calendar years): share of negative hours in the auction prices, mean raw forecast where predictions exist")
+        print(table.to_string(index=False))
+
+
+def _print_recalibration(label: str, r: dict) -> None:
+    print(f"Recalibration, {label} window, {r.get('first_day')} to {r.get('last_day')}: {r['hours']:,} strict hours, {r['events']} negative "
+          f"(base rate {100 * r.get('base_rate', 0):.2f}%)")
+    if "raw" not in r:
+        return
+    print(f"{'':12s} {'Brier':>9s} {'BSS clim':>9s} {'BSS last7':>10s} {'MACE':>8s} {'MACE w':>8s} {'mean p':>8s}")
+    for label2 in ("raw", "calibrated"):
+        m = r[label2]
+        print(f"{label2:12s} {m['brier']:9.5f} {m['bss_vs_clim']:9.4f} {m['bss_vs_last7']:10.4f} {m['mace']['unweighted']:8.4f} {m['mace']['weighted']:8.4f} "
+              f"{100 * m['mean_forecast']:7.2f}%")
+    print(f"accepted: {r['accepted']} ({r['rule']})")
+    print("low-end bins of the calibrated probability (edges 0, 1, 5, 10%):")
+    for row in r["calibrated"]["low_end_bins"]:
+        mf = "n/a" if row["mean_forecast"] is None else f"{100 * row['mean_forecast']:.2f}%"
+        ob = "n/a" if row["observed_rate"] is None else f"{100 * row['observed_rate']:.2f}%"
+        print(f"  {row['bin']:>10s} hours {row['hours']:>6d} negative {row['negative_hours']:>4d} mean forecast {mf:>7s} observed {ob:>7s}")
+
+
 def cmd_prob_backtest(args) -> None:
     """Walk-forward of the quantile and event models; writes reports/prob and the aggregates file the public app reads."""
     from .forecast import probabilistic as pb
@@ -768,6 +851,27 @@ def main(argv=None) -> None:
     ple.add_argument("--min-events", type=int, default=10, help="a selection bin with fewer negative hours is merged with its neighbour")
     ple.add_argument("--publish", default="published/probabilistic_backtest.json")
     ple.set_defaults(func=cmd_prob_low_end)
+
+    prc = sub.add_parser("prob-recalibrate", help="walk-forward isotonic recalibration of the negative-price probability on the saved predictions; "
+                                                  "the holdout only when the selection window accepts (docs/experiments.md, 2026-10-12)")
+    prc.add_argument("--raw", default="reports/prob/prob_raw_selection.parquet")
+    prc.add_argument("--ready", default="reports/prob/prob_ready_selection.parquet")
+    prc.add_argument("--holdout-raw", default="reports/prob/prob_raw_holdout.parquet")
+    prc.add_argument("--holdout-ready", default="reports/prob/prob_ready_holdout.parquet")
+    prc.add_argument("--data", default="data/forecast/inputs.csv", help="for the yearly diagnostic; '' to skip")
+    prc.add_argument("--min-history", type=int, default=12, help="months of out-of-sample history a month needs before it is calibrated")
+    prc.add_argument("--force-holdout", action="store_true", help="evaluate the holdout even when the selection window rejects (not the rule)")
+    prc.add_argument("--out", default="reports/prob")
+    prc.add_argument("--publish", default="published/probabilistic_backtest.json", help="aggregates of the recalibration; '' to skip")
+    prc.set_defaults(func=cmd_prob_recalibrate)
+
+    pcb = sub.add_parser("prob-calibration-build", help="laptop, once: build the out-of-sample pairs archive from the walk-forward predictions and fit the "
+                                                        "live negative-price calibration next to the models (the monthly refit then extends it)")
+    pcb.add_argument("--archives", nargs="+", default=["reports/prob/prob_raw_selection.parquet", "reports/prob/prob_raw_holdout.parquet"])
+    pcb.add_argument("--model-dir", default="published/model")
+    pcb.add_argument("--published", default="published", help="settled live versions after the archives' last day are added from here; '' to skip")
+    pcb.add_argument("--feature-set", default="honest_v2")
+    pcb.set_defaults(func=cmd_prob_calibration_build)
 
     shp = sub.add_parser("shape-backtest", help="Walk-forward of the shape model (price minus the day's base) with the battery backtest")
     shp.add_argument("--data", default="data/forecast/inputs.csv")

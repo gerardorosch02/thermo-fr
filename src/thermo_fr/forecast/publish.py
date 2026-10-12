@@ -19,9 +19,12 @@ Files written by `export_published`:
     error_band.csv     backtest error percentiles by hour (the dashboard's shaded band until the quantile band is made the default)
     market.json        the market aggregates, written only on the laptop (where the traded prices are) by `thermo-fr market publish`, which
                        commits and pushes that one file; the workflow never writes it and copies it into status.json unchanged
-    probabilistic.csv  per version and hour of the published sets: the probability of a negative price (the quantile band and the spike
-                       probability are computed and stored locally every day but not published, under evaluation);
+    probabilistic.csv  per version and hour of the published sets: the probability of a negative price, calibrated (p_negative) with the
+                       raw classifier output alongside (p_negative_raw) and a flag (calibrated); the quantile band and the spike probability
+                       are computed and stored locally every day but not published, under evaluation);
                        tomorrow_probabilistic.csv the headline version's rows
+    model/honest_v2_calibration.json, model/honest_v2_calibration_pairs.csv  the isotonic calibration of the negative-price probability
+                       (breakpoints, fit date, pairs) and the out-of-sample pairs it is fitted on, refitted monthly (calibration.py)
     probabilistic_backtest.json  aggregates of the negative-price backtest on the selection window and the holdout, written by
                        `thermo-fr prob-backtest`
     model/honest_v2.txt   the default LightGBM model, refitted monthly by the workflow (see refit.py)
@@ -45,6 +48,7 @@ import pandas as pd
 
 from .market import DEFAULT_PATH as MARKET_PATH
 from .market import MIN_PUBLIC_DAYS
+from .calibration import load_calibration, public_calibration
 from .probabilistic import live_calibration
 from .shape import live_shape_record
 from .market import evaluate as evaluate_market
@@ -75,10 +79,11 @@ def probabilistic_status(store: Store, out_dir) -> dict:
     """Live calibration of the published set's probabilistic forecasts (aggregates only) plus a pointer to the backtest aggregates."""
     out = Path(out_dir)
     live = live_calibration(store.probabilistic_settled(PUBLIC_FEATURE_SET))
-    public_live = {k: live[k] for k in ("days", "hours", "negative") if k in live}  # the band and the spike stay local, under evaluation
+    public_live = {k: live[k] for k in ("days", "hours", "negative", "negative_calibrated_hours") if k in live}  # the band and the spike stay local
     meta_path = out / "model" / f"{PUBLIC_FEATURE_SET}_probabilistic.json"
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
     return {"live": public_live, "backtest_file": PROB_BACKTEST_FILE if (out / PROB_BACKTEST_FILE).exists() else None,
+            "calibration": public_calibration(load_calibration(out / "model", PUBLIC_FEATURE_SET)),
             "model": {k: meta.get(k) for k in ("fitted_at_utc", "train_from", "train_to") if k in meta} if meta else {},
             "public_components": ["negative"],
             "definitions": {"negative": "probability that the hour's price is below zero, from a classifier on the same inputs as the point "
@@ -278,15 +283,18 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
 
     # public: the negative-price probability only; the quantile band and the spike probability stay in the local store, under evaluation
     prob = pd.read_sql_query(
-        "SELECT f.delivery_day, f.issued_at_utc, f.feature_set, p.timestamp_utc, p.p_negative"
+        "SELECT f.delivery_day, f.issued_at_utc, f.feature_set, p.timestamp_utc, p.p_negative AS p_negative_raw, p.p_negative_cal"
         " FROM forecast_prob p JOIN forecasts f ON f.forecast_id = p.forecast_id"
         f" WHERE f.feature_set IN ({sets_sql}) AND f.delivery_day >= ? ORDER BY f.delivery_day, f.issued_at_utc, p.timestamp_utc",
         store.conn, params=(*PUBLIC_FEATURE_SETS, cutoff),
     )
     if len(prob):
         prob["hour"] = pd.to_datetime(prob["timestamp_utc"], utc=True).dt.tz_convert("Europe/Paris").dt.hour  # the public app groups by Paris hour
+        prob["calibrated"] = prob["p_negative_cal"].notna().astype(int)
+        prob["p_negative"] = prob["p_negative_cal"].fillna(prob["p_negative_raw"])  # what the public app shows: calibrated where it exists
     else:
-        prob["hour"] = pd.Series(dtype=int)
+        prob["hour"], prob["calibrated"], prob["p_negative"] = pd.Series(dtype=int), pd.Series(dtype=int), pd.Series(dtype=float)
+    prob = prob[["delivery_day", "issued_at_utc", "feature_set", "timestamp_utc", "p_negative", "p_negative_raw", "calibrated", "hour"]]
     prob.to_csv(out / "probabilistic.csv", index=False)
     if not tomorrow.empty and len(prob):
         head_prob = prob[(prob["delivery_day"] == latest_day) & (prob["issued_at_utc"] == headline["issued_at_utc"])
@@ -406,8 +414,12 @@ def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
             for fid, group in merged.groupby("forecast_id"):
                 if not store.probabilistic_curve(int(fid)).empty:
                     continue
-                frame = group.set_index(pd.to_datetime(group["timestamp_utc"], utc=True)).reindex(
-                    columns=["q10", "q50", "q90", "lo", "hi", "p_negative", "p_spike", "spike_threshold"])  # public files carry p_negative only
+                g = group.copy()
+                if "p_negative_raw" in g:  # files written since the calibration: p_negative is the calibrated value, the raw one sits alongside
+                    g["p_negative_cal"] = g["p_negative"].where(g.get("calibrated", 1) == 1)
+                    g["p_negative"] = g["p_negative_raw"]
+                frame = g.set_index(pd.to_datetime(g["timestamp_utc"], utc=True)).reindex(
+                    columns=["q10", "q50", "q90", "lo", "hi", "p_negative", "p_spike", "spike_threshold", "p_negative_cal"])  # public files carry the probability only
                 frame["conformal_margin"] = (frame["q10"] - frame["lo"]).round(4)
                 store.save_probabilistic(int(fid), frame)
                 summary["probabilistic_versions"] += 1

@@ -407,7 +407,8 @@ from pathlib import Path  # noqa: E402
 
 PROB_PARTS = ("q10", "q50", "q90", "negative", "spike")
 REFIT_PROB_PARAMS = {"n_estimators": 300, "num_leaves": 31}  # the same small models as the published point model
-PROB_COLUMNS = ["q10", "q50", "q90", "lo", "hi", "p_negative", "p_spike", "spike_threshold", "conformal_margin"]
+PROB_COLUMNS = ["q10", "q50", "q90", "lo", "hi", "p_negative", "p_spike", "spike_threshold", "conformal_margin"]  # what predict_probabilistic returns
+STORED_PROB_COLUMNS = PROB_COLUMNS + ["p_negative_cal"]  # plus the calibrated negative-price probability (calibration.py); the raw one stays in p_negative
 
 
 def prob_paths(model_dir, feature_set: str) -> dict:
@@ -542,10 +543,13 @@ def live_margin(settled: pd.DataFrame, min_days: int = 20, alpha: float = ALPHA)
 
 def live_calibration(settled: pd.DataFrame) -> dict:
     """Aggregates only: coverage and width of the stored 10-90 band, Brier scores and reliability of the event probabilities on settled days."""
-    frame = settled.dropna(subset=["actual"])
+    frame = settled.dropna(subset=["actual"]).copy()
     out = {"days": int(frame["delivery_day"].nunique()) if len(frame) else 0, "hours": int(len(frame))}
     if frame.empty:
         return out
+    if "p_negative_cal" in frame and frame["p_negative_cal"].notna().any():  # the published probability is the calibrated one where it exists
+        out["negative_calibrated_hours"] = int(frame["p_negative_cal"].notna().sum())
+        frame["p_negative"] = frame["p_negative_cal"].fillna(frame["p_negative"])
     band = frame.dropna(subset=["lo", "hi"])
     if len(band):
         y = band["actual"].to_numpy()

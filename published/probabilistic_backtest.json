@@ -124,7 +124,225 @@
         "low_end_merge_note": "no bin merged"
       }
     },
-    "written_at_utc": "2026-10-10T11:55:47Z"
+    "written_at_utc": "2026-10-10T11:55:47Z",
+    "recalibration": {
+      "hours": 20752,
+      "events": 1264,
+      "first_day": "2024-02-17",
+      "last_day": "2026-06-30",
+      "accepted": true,
+      "rule": "calibrated Brier below raw, Brier skill above zero against climatology and against the last 7 days, unweighted MACE below raw; strict rows of the window",
+      "raw": {
+        "brier": 0.032829,
+        "bss_vs_clim": 0.2256,
+        "bss_vs_last7": 0.2403,
+        "mace": {
+          "unweighted": 0.1177,
+          "weighted": 0.02585,
+          "bins_used": 10
+        },
+        "mean_forecast": 0.04322,
+        "reliability": [
+          {
+            "bin": "0.0-0.1",
+            "n": 19354,
+            "mean_forecast": 0.0023,
+            "observed_frequency": 0.0204
+          },
+          {
+            "bin": "0.1-0.2",
+            "n": 231,
+            "mean_forecast": 0.1417,
+            "observed_frequency": 0.3723
+          },
+          {
+            "bin": "0.2-0.3",
+            "n": 138,
+            "mean_forecast": 0.2473,
+            "observed_frequency": 0.3986
+          },
+          {
+            "bin": "0.3-0.4",
+            "n": 98,
+            "mean_forecast": 0.3521,
+            "observed_frequency": 0.5102
+          },
+          {
+            "bin": "0.4-0.5",
+            "n": 89,
+            "mean_forecast": 0.4486,
+            "observed_frequency": 0.5843
+          },
+          {
+            "bin": "0.5-0.6",
+            "n": 89,
+            "mean_forecast": 0.555,
+            "observed_frequency": 0.4944
+          },
+          {
+            "bin": "0.6-0.7",
+            "n": 91,
+            "mean_forecast": 0.6493,
+            "observed_frequency": 0.5385
+          },
+          {
+            "bin": "0.7-0.8",
+            "n": 91,
+            "mean_forecast": 0.7518,
+            "observed_frequency": 0.6923
+          },
+          {
+            "bin": "0.8-0.9",
+            "n": 149,
+            "mean_forecast": 0.8489,
+            "observed_frequency": 0.6913
+          },
+          {
+            "bin": "0.9-1.0",
+            "n": 422,
+            "mean_forecast": 0.9667,
+            "observed_frequency": 0.872
+          }
+        ],
+        "low_end_bins": [
+          {
+            "bin": "below 1%",
+            "lower": 0.0,
+            "upper": 0.01,
+            "hours": 18312,
+            "negative_hours": 203,
+            "mean_forecast": 0.0005,
+            "observed_rate": 0.01109,
+            "merged_from": []
+          },
+          {
+            "bin": "1% to 5%",
+            "lower": 0.01,
+            "upper": 0.05,
+            "hours": 811,
+            "negative_hours": 127,
+            "mean_forecast": 0.02314,
+            "observed_rate": 0.1566,
+            "merged_from": []
+          },
+          {
+            "bin": "5% to 10%",
+            "lower": 0.05,
+            "upper": 0.1,
+            "hours": 231,
+            "negative_hours": 64,
+            "mean_forecast": 0.07162,
+            "observed_rate": 0.27706,
+            "merged_from": []
+          }
+        ]
+      },
+      "calibrated": {
+        "brier": 0.030592,
+        "bss_vs_clim": 0.2784,
+        "bss_vs_last7": 0.2921,
+        "mace": {
+          "unweighted": 0.02918,
+          "weighted": 0.0042,
+          "bins_used": 10
+        },
+        "mean_forecast": 0.06291,
+        "reliability": [
+          {
+            "bin": "0.0-0.1",
+            "n": 18029,
+            "mean_forecast": 0.011,
+            "observed_frequency": 0.0098
+          },
+          {
+            "bin": "0.1-0.2",
+            "n": 984,
+            "mean_forecast": 0.1435,
+            "observed_frequency": 0.1382
+          },
+          {
+            "bin": "0.2-0.3",
+            "n": 346,
+            "mean_forecast": 0.2577,
+            "observed_frequency": 0.289
+          },
+          {
+            "bin": "0.3-0.4",
+            "n": 258,
+            "mean_forecast": 0.3526,
+            "observed_frequency": 0.3333
+          },
+          {
+            "bin": "0.4-0.5",
+            "n": 188,
+            "mean_forecast": 0.4697,
+            "observed_frequency": 0.5053
+          },
+          {
+            "bin": "0.5-0.6",
+            "n": 185,
+            "mean_forecast": 0.5294,
+            "observed_frequency": 0.4757
+          },
+          {
+            "bin": "0.6-0.7",
+            "n": 245,
+            "mean_forecast": 0.648,
+            "observed_frequency": 0.6694
+          },
+          {
+            "bin": "0.7-0.8",
+            "n": 198,
+            "mean_forecast": 0.7347,
+            "observed_frequency": 0.6818
+          },
+          {
+            "bin": "0.8-0.9",
+            "n": 106,
+            "mean_forecast": 0.849,
+            "observed_frequency": 0.8208
+          },
+          {
+            "bin": "0.9-1.0",
+            "n": 213,
+            "mean_forecast": 0.9678,
+            "observed_frequency": 0.9249
+          }
+        ],
+        "low_end_bins": [
+          {
+            "bin": "below 1%",
+            "lower": 0.0,
+            "upper": 0.01,
+            "hours": 13783,
+            "negative_hours": 17,
+            "mean_forecast": 0.00194,
+            "observed_rate": 0.00123,
+            "merged_from": []
+          },
+          {
+            "bin": "1% to 5%",
+            "lower": 0.01,
+            "upper": 0.05,
+            "hours": 3770,
+            "negative_hours": 113,
+            "mean_forecast": 0.03546,
+            "observed_rate": 0.02997,
+            "merged_from": []
+          },
+          {
+            "bin": "5% to 10%",
+            "lower": 0.05,
+            "upper": 0.1,
+            "hours": 476,
+            "negative_hours": 46,
+            "mean_forecast": 0.07803,
+            "observed_rate": 0.09664,
+            "merged_from": []
+          }
+        ]
+      }
+    }
   },
   "holdout": {
     "label": "holdout",
@@ -251,6 +469,224 @@
         "low_end_merge_note": "no bin merged"
       }
     },
-    "written_at_utc": "2026-10-10T11:55:48Z"
+    "written_at_utc": "2026-10-10T11:55:48Z",
+    "recalibration": {
+      "hours": 2448,
+      "events": 158,
+      "first_day": "2026-07-01",
+      "last_day": "2026-10-10",
+      "accepted": true,
+      "rule": "calibrated Brier below raw, Brier skill above zero against climatology and against the last 7 days, unweighted MACE below raw; strict rows of the window",
+      "raw": {
+        "brier": 0.033741,
+        "bss_vs_clim": 0.367,
+        "bss_vs_last7": 0.4107,
+        "mace": {
+          "unweighted": 0.20277,
+          "weighted": 0.03225,
+          "bins_used": 10
+        },
+        "mean_forecast": 0.0323,
+        "reliability": [
+          {
+            "bin": "0.0-0.1",
+            "n": 2305,
+            "mean_forecast": 0.0032,
+            "observed_frequency": 0.0239
+          },
+          {
+            "bin": "0.1-0.2",
+            "n": 34,
+            "mean_forecast": 0.1443,
+            "observed_frequency": 0.3529
+          },
+          {
+            "bin": "0.2-0.3",
+            "n": 18,
+            "mean_forecast": 0.2477,
+            "observed_frequency": 0.6667
+          },
+          {
+            "bin": "0.3-0.4",
+            "n": 14,
+            "mean_forecast": 0.3478,
+            "observed_frequency": 0.5
+          },
+          {
+            "bin": "0.4-0.5",
+            "n": 10,
+            "mean_forecast": 0.4519,
+            "observed_frequency": 1.0
+          },
+          {
+            "bin": "0.5-0.6",
+            "n": 13,
+            "mean_forecast": 0.5659,
+            "observed_frequency": 0.9231
+          },
+          {
+            "bin": "0.6-0.7",
+            "n": 6,
+            "mean_forecast": 0.6437,
+            "observed_frequency": 0.6667
+          },
+          {
+            "bin": "0.7-0.8",
+            "n": 15,
+            "mean_forecast": 0.7632,
+            "observed_frequency": 0.8667
+          },
+          {
+            "bin": "0.8-0.9",
+            "n": 11,
+            "mean_forecast": 0.8505,
+            "observed_frequency": 1.0
+          },
+          {
+            "bin": "0.9-1.0",
+            "n": 22,
+            "mean_forecast": 0.9541,
+            "observed_frequency": 1.0
+          }
+        ],
+        "low_end_bins": [
+          {
+            "bin": "below 1%",
+            "lower": 0.0,
+            "upper": 0.01,
+            "hours": 2132,
+            "negative_hours": 25,
+            "mean_forecast": 0.00049,
+            "observed_rate": 0.01173,
+            "merged_from": []
+          },
+          {
+            "bin": "1% to 5%",
+            "lower": 0.01,
+            "upper": 0.05,
+            "hours": 129,
+            "negative_hours": 18,
+            "mean_forecast": 0.02442,
+            "observed_rate": 0.13953,
+            "merged_from": []
+          },
+          {
+            "bin": "5% to 10%",
+            "lower": 0.05,
+            "upper": 0.1,
+            "hours": 44,
+            "negative_hours": 12,
+            "mean_forecast": 0.0705,
+            "observed_rate": 0.27273,
+            "merged_from": []
+          }
+        ]
+      },
+      "calibrated": {
+        "brier": 0.030512,
+        "bss_vs_clim": 0.4276,
+        "bss_vs_last7": 0.4671,
+        "mace": {
+          "unweighted": 0.11874,
+          "weighted": 0.01038,
+          "bins_used": 10
+        },
+        "mean_forecast": 0.05527,
+        "reliability": [
+          {
+            "bin": "0.0-0.1",
+            "n": 2092,
+            "mean_forecast": 0.0083,
+            "observed_frequency": 0.0086
+          },
+          {
+            "bin": "0.1-0.2",
+            "n": 132,
+            "mean_forecast": 0.1402,
+            "observed_frequency": 0.1515
+          },
+          {
+            "bin": "0.2-0.3",
+            "n": 88,
+            "mean_forecast": 0.2544,
+            "observed_frequency": 0.2386
+          },
+          {
+            "bin": "0.3-0.4",
+            "n": 33,
+            "mean_forecast": 0.3623,
+            "observed_frequency": 0.3939
+          },
+          {
+            "bin": "0.4-0.5",
+            "n": 23,
+            "mean_forecast": 0.4666,
+            "observed_frequency": 0.6087
+          },
+          {
+            "bin": "0.5-0.6",
+            "n": 29,
+            "mean_forecast": 0.5495,
+            "observed_frequency": 0.8276
+          },
+          {
+            "bin": "0.6-0.7",
+            "n": 9,
+            "mean_forecast": 0.6543,
+            "observed_frequency": 0.8889
+          },
+          {
+            "bin": "0.7-0.8",
+            "n": 23,
+            "mean_forecast": 0.7139,
+            "observed_frequency": 0.913
+          },
+          {
+            "bin": "0.8-0.9",
+            "n": 12,
+            "mean_forecast": 0.8193,
+            "observed_frequency": 1.0
+          },
+          {
+            "bin": "0.9-1.0",
+            "n": 7,
+            "mean_forecast": 0.9062,
+            "observed_frequency": 1.0
+          }
+        ],
+        "low_end_bins": [
+          {
+            "bin": "below 1%",
+            "lower": 0.0,
+            "upper": 0.01,
+            "hours": 1718,
+            "negative_hours": 1,
+            "mean_forecast": 0.00117,
+            "observed_rate": 0.00058,
+            "merged_from": []
+          },
+          {
+            "bin": "1% to 5%",
+            "lower": 0.01,
+            "upper": 0.05,
+            "hours": 316,
+            "negative_hours": 13,
+            "mean_forecast": 0.03381,
+            "observed_rate": 0.04114,
+            "merged_from": []
+          },
+          {
+            "bin": "5% to 10%",
+            "lower": 0.05,
+            "upper": 0.1,
+            "hours": 58,
+            "negative_hours": 4,
+            "mean_forecast": 0.07947,
+            "observed_rate": 0.06897,
+            "merged_from": []
+          }
+        ]
+      }
+    }
   }
 }

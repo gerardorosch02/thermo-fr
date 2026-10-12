@@ -65,7 +65,7 @@ def test_store_round_trip_and_live_margin(tmp_path):
         store.save_score(fid, d, "honest_v2", pd.Timestamp(day - pd.Timedelta(days=1)).strftime("%Y-%m-%dT08:00:00Z"), score_curve(curve, actual))
         frames.append(fid)
     back = store.probabilistic_curve(frames[0])
-    assert list(back.columns) == pb.PROB_COLUMNS and len(back) == 24 and back["conformal_margin"].iloc[0] == 2.0
+    assert list(back.columns) == pb.STORED_PROB_COLUMNS and len(back) == 24 and back["conformal_margin"].iloc[0] == 2.0
     settled = store.probabilistic_settled("honest_v2", days=90)
     assert settled["delivery_day"].nunique() == 25 and settled["actual"].notna().all()
     margin = pb.live_margin(settled, min_days=20)

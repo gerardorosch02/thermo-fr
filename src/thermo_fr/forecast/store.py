@@ -105,10 +105,14 @@ class Store:
         self._migrate()
 
     def _migrate(self) -> None:
-        """Rename the scores column of databases written before the wording change (model_won)."""
+        """Rename the scores column of databases written before the wording change (model_won); add the calibrated probability column."""
         columns = [r[1] for r in self.conn.execute("PRAGMA table_info(scores)")]
         if "model_won" in columns and "mae_below_baseline" not in columns:
             self.conn.execute("ALTER TABLE scores RENAME COLUMN model_won TO mae_below_baseline")
+            self.conn.commit()
+        prob_columns = [r[1] for r in self.conn.execute("PRAGMA table_info(forecast_prob)")]
+        if "p_negative_cal" not in prob_columns:
+            self.conn.execute("ALTER TABLE forecast_prob ADD COLUMN p_negative_cal REAL")  # the raw probability stays in p_negative
             self.conn.commit()
 
     def close(self) -> None:
@@ -278,8 +282,8 @@ class Store:
 
     def save_probabilistic(self, forecast_id: int, frame: pd.DataFrame) -> None:
         """The quantiles, conformal band and event probabilities of a version (index: valid hour UTC)."""
-        columns = ["q10", "q50", "q90", "lo", "hi", "p_negative", "p_spike", "spike_threshold", "conformal_margin"]
-        rows = [(int(forecast_id), iso(ts), *[None if pd.isna(row[c]) else float(row[c]) for c in columns]) for ts, row in frame.iterrows()]
+        columns = ["q10", "q50", "q90", "lo", "hi", "p_negative", "p_spike", "spike_threshold", "conformal_margin", "p_negative_cal"]
+        rows = [(int(forecast_id), iso(ts), *[None if c not in row or pd.isna(row[c]) else float(row[c]) for c in columns]) for ts, row in frame.iterrows()]
         self.conn.executemany(
             "INSERT OR REPLACE INTO forecast_prob (forecast_id, timestamp_utc, " + ", ".join(columns) + ") VALUES (?, ?, " + ", ".join("?" * len(columns)) + ")",
             rows,
@@ -288,7 +292,7 @@ class Store:
 
     def probabilistic_curve(self, forecast_id: int) -> pd.DataFrame:
         frame = pd.read_sql_query(
-            "SELECT timestamp_utc, q10, q50, q90, lo, hi, p_negative, p_spike, spike_threshold, conformal_margin FROM forecast_prob"
+            "SELECT timestamp_utc, q10, q50, q90, lo, hi, p_negative, p_spike, spike_threshold, conformal_margin, p_negative_cal FROM forecast_prob"
             " WHERE forecast_id = ? ORDER BY timestamp_utc", self.conn, params=(int(forecast_id),))
         frame["timestamp_utc"] = pd.to_datetime(frame["timestamp_utc"], utc=True)
         return frame.set_index("timestamp_utc")
@@ -306,7 +310,7 @@ class Store:
             curve["delivery_day"] = row["delivery_day"]
             frames.append(curve)
         return pd.concat(frames) if frames else pd.DataFrame(columns=["q10", "q50", "q90", "lo", "hi", "p_negative", "p_spike", "spike_threshold",
-                                                                          "conformal_margin", "actual", "delivery_day"])
+                                                                          "conformal_margin", "p_negative_cal", "actual", "delivery_day"])
 
     def forecast_versions(self, delivery_day: str, feature_set: str | None = None) -> pd.DataFrame:
         query = "SELECT * FROM forecasts WHERE delivery_day = ?"

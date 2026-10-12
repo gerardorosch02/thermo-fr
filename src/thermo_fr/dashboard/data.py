@@ -89,7 +89,8 @@ def forecast_panel(path, delivery_day: str, feature_set: str, actual_day: str) -
         hourly_prob = prob.copy()
         hourly_prob["hour"] = hourly_prob.index.tz_convert(LOCAL_TZ).hour
         agg = hourly_prob.groupby("hour").agg(lo=("lo", "mean"), q10=("q10", "mean"), q50=("q50", "mean"), q90=("q90", "mean"), hi=("hi", "mean"),
-                                              p_negative=("p_negative", "mean"), p_spike=("p_spike", "mean"), spike_threshold=("spike_threshold", "first")).reset_index()
+                                              p_negative=("p_negative", "mean"), p_negative_cal=("p_negative_cal", "mean"), p_spike=("p_spike", "mean"),
+                                              spike_threshold=("spike_threshold", "first")).reset_index()
         by_hour = by_hour.merge(agg, on="hour", how="left")
     out["by_hour"] = by_hour
     return out
@@ -98,9 +99,11 @@ def forecast_panel(path, delivery_day: str, feature_set: str, actual_day: str) -
 def calibration_panel(path, feature_set: str = "honest_v2", backtest_path=Path("published/probabilistic_backtest.json")) -> dict:
     import json
 
+    from ..forecast.calibration import load_calibration, public_calibration
+
     backtest = json.loads(Path(backtest_path).read_text()) if Path(backtest_path).exists() else {}
     live = _with_store(path, lambda store: live_calibration(store.probabilistic_settled(feature_set)))
-    return {"backtest": backtest, "live": live}
+    return {"backtest": backtest, "live": live, "calibration": public_calibration(load_calibration(Path(backtest_path).parent / "model", feature_set))}
 
 
 def daily_inputs(frame: pd.DataFrame) -> dict:

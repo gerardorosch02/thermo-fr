@@ -45,6 +45,7 @@ from ..data.weather_forecast import OpenMeteoForecastSource
 from ..data.wind_points import WindPointsSource
 from .day import HISTORY_DAYS, forecast_day, merge_inputs
 from .features import FEATURES, build_features
+from .calibration import apply_calibration, load_calibration
 from .probabilistic import live_margin, load_probabilistic, predict_probabilistic, spike_threshold_for_day
 from .gen_proxy import apply_weights, load_weights
 from .inputs import INPUT_COLUMNS, NEIGHBOUR_PRICE_COLUMNS, load_inputs
@@ -183,10 +184,17 @@ def probabilistic_curve(store: Store, run_id: int, day: str, forecast_id: int, f
         threshold = spike_threshold_for_day(inputs, day)
         margin = live_margin(store.probabilistic_settled(feature_set))
         frame = predict_probabilistic(models, table.X[rows], threshold, margin)
+        calibration = load_calibration(model_dir, feature_set)
+        if calibration is not None:
+            frame["p_negative_cal"] = apply_calibration(calibration, frame["p_negative"].to_numpy(dtype=float))
+            calibrated = f"negative-price probability calibrated (isotonic, {calibration['pairs_hours']:,} out-of-sample hours through {calibration['last_day']})"
+        else:
+            frame["p_negative_cal"] = float("nan")
+            calibrated = "negative-price probability uncalibrated (no calibration file)"
         store.save_probabilistic(forecast_id, frame)
         source = "live (last settled days)" if margin is not None else "metadata (initial)"
         store.record_status(run_id, day, "probabilistic", "present", hours=int(len(frame)),
-                            message=f"10-90 band margin {frame['conformal_margin'].iloc[0]:.2f} from {source}; spike threshold {threshold:.1f}", now=now)
+                            message=f"10-90 band margin {frame['conformal_margin'].iloc[0]:.2f} from {source}; spike threshold {threshold:.1f}; {calibrated}", now=now)
         return True
     except Exception as exc:  # noqa: BLE001
         message = f"{exc.__class__.__name__}: {exc}"
