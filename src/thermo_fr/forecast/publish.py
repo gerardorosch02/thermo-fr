@@ -9,11 +9,11 @@ Files written by `export_published`:
 
     forecasts.csv      forecast versions of the last `days` days (honest_v2, the default, and honest, the fallback, told apart by
                        the feature_set column; the model column names the file that produced each version): delivery day,
-                       issue time, hour, forecast, the same-hour-previous-day baseline and
-                       `premarket` (1 when issued before the 11:15 Paris market window of D-1)
-    actuals.csv        actual day-ahead prices for the same window
-    scores.csv         daily MAE and RMSE of each version against actuals and the naive baseline,
-                       with the same `premarket` flag
+                       issue time, hour, forecast and `premarket` (1 when issued before the 11:15 Paris market window of D-1)
+    actuals.csv        actual day-ahead prices (the auction result) for the same window
+    scores.csv         daily MAE and RMSE of each version against the auction result, with the same `premarket` flag. Since
+                       2026-10-12 no same-hour-previous-day figure is published: the EEX traded price (market.json) is the only
+                       benchmark of the level forecast; the store still computes that figure internally for the backtests
     tomorrow.csv       the headline forecast of the default model for the next delivery day, hourly: the last
                        version issued before the market window, else the latest
     error_band.csv     backtest error percentiles by hour (the dashboard's shaded band until the quantile band is made the default)
@@ -114,9 +114,11 @@ MARKET_FILE = "market.json"  # written only where the traded prices are (the lap
 def _premarket(frame: pd.DataFrame):
     return premarket_flag(frame["delivery_day"], frame["issued_at_utc"])
 
-LIVE_RECORD_RULE = ("Each delivery day counts once, scored on the last version issued before the market window opened (11:15 Paris on the day "
-                    "before); a day whose versions were all issued later is listed as late only and not scored. The headline is the current "
-                    "default model from its first pre-market day; the earlier days of the previous set are a separate row.")
+LIVE_RECORD_RULE = ("Each delivery day counts once, scored against the auction result on the last version issued before the market window "
+                    "opened (11:15 Paris on the day before); a day whose versions were all issued later is listed as late only and not scored. "
+                    "The record is the current default model from its first pre-market day; the earlier days of the previous set are a "
+                    "separate row. It states the model's own error only: the EEX traded price, in the Versus the market panel, is the one "
+                    "benchmark of the level forecast.")
 
 
 def _record_for(rows: pd.DataFrame, feature_set: str, days: int) -> tuple[dict, pd.DataFrame]:
@@ -134,14 +136,14 @@ def _record_for(rows: pd.DataFrame, feature_set: str, days: int) -> tuple[dict, 
         recent = table.tail(days)
         out.update({"first_premarket_day": str(table["delivery_day"].iloc[0]), "last_premarket_day": str(table["delivery_day"].iloc[-1]),
                     "days_in_window": int(len(recent)), "model_mae": round(float(recent["mae"].mean()), 2),
-                    "baseline_mae": round(float(recent["naive_mae"].mean()), 2),
-                    "share_below_baseline": round(float(recent["mae_below_baseline"].fillna(0).astype(float).mean()), 3)})
+                    "model_rmse": round(float(recent["rmse"].mean()), 2) if "rmse" in recent else None,
+                    "scored_against": "the auction result; the EEX traded price is the only benchmark (Versus the market)"})
     return out, table
 
 
 def live_record(scores: pd.DataFrame, default_set: str = "honest_v2", previous_set: str = "honest", days: int = 30) -> tuple[dict, dict]:
     """The public live record: (record, tables). record["default"] is the headline, record["previous"] the earlier set's own row or None."""
-    needed = {"delivery_day", "issued_at_utc", "feature_set", "mae", "naive_mae", "mae_below_baseline"}
+    needed = {"delivery_day", "issued_at_utc", "feature_set", "mae"}
     empty = {"feature_set": default_set, "days": 0, "late_only_days": [], "window_days": days, "status": "collecting data"}
     if scores is None or scores.empty or not needed <= set(scores.columns):
         return {"default": empty, "previous": None, "min_days_to_show": 1, "rule": LIVE_RECORD_RULE}, {"default": pd.DataFrame(), "previous": pd.DataFrame()}
@@ -196,10 +198,28 @@ def market_status(store: Store, market_path=MARKET_PATH, previous: dict | None =
         if previous and previous.get("computed_at_utc"):
             return {**previous, "carried_through": True,
                     "carried_note": "this machine holds no traded prices; the aggregates are the last ones computed on the laptop"}
-        return {"scored_days": 0, "min_days_to_show": MIN_PUBLIC_DAYS, "note": "No traded prices recorded yet.",
-                "counts": "settled delivery days whose published-set forecast was issued before the market window, scored against the auction"}
+        return {"scored_days": 0, "scored_windows": 0, "min_days_to_show": MIN_PUBLIC_DAYS, "note": "No traded prices recorded yet.",
+                "benchmark": "the only benchmark of the level forecast: the window VWAP of the traded future, scored at the auction result",
+                "counts": "windows of settled delivery days whose published pre-market version was issued before the market window, scored "
+                          "against the auction result"}
     result = evaluate_market(PublishedVersions(store), rows, feature_set=PUBLIC_FEATURE_SET)
     return {**public_summary(result), "computed_on": "laptop", "carried_through": False}
+
+
+INTERNAL_COMPARISON_KEYS = ("naive_mae", "naive_rmse", "naive_day", "mae_below_baseline")  # computed for the backtests, never published
+
+
+def public_model_meta(meta: dict | None, keys) -> dict:
+    """The model metadata for status.json without the internal same-hour-previous-day figures of the recent check and the holdout."""
+    if not meta:
+        return {}
+    out = {}
+    for key in keys:
+        value = meta.get(key)
+        if isinstance(value, dict):
+            value = {k: v for k, v in value.items() if k not in INTERNAL_COMPARISON_KEYS}
+        out[key] = value
+    return out
 
 
 def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None, last_run: dict | None = None,
@@ -217,7 +237,7 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
         store.conn, params=(*PUBLIC_FEATURE_SETS, cutoff),
     )
     values = pd.read_sql_query(
-        "SELECT v.forecast_id, v.timestamp_utc, v.hour, v.forecast, v.naive_day FROM forecast_values v"
+        "SELECT v.forecast_id, v.timestamp_utc, v.hour, v.forecast FROM forecast_values v"
         f" JOIN forecasts f ON f.forecast_id = v.forecast_id WHERE f.feature_set IN ({sets_sql}) AND f.delivery_day >= ?",
         store.conn, params=(*PUBLIC_FEATURE_SETS, cutoff),
     )
@@ -233,7 +253,7 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
     actuals.to_csv(out / "actuals.csv", index=False)
 
     scores = pd.read_sql_query(
-        "SELECT delivery_day, issued_at_utc, feature_set, hours, mae, rmse, naive_mae, naive_rmse, mae_below_baseline, settled_at_utc"
+        "SELECT delivery_day, issued_at_utc, feature_set, hours, mae, rmse, settled_at_utc"
         f" FROM scores WHERE feature_set IN ({sets_sql}) AND delivery_day >= ? ORDER BY delivery_day, issued_at_utc",
         store.conn, params=(*PUBLIC_FEATURE_SETS, cutoff),
     )
@@ -316,20 +336,20 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
         "actual_days": int(actuals["delivery_day"].nunique()) if len(actuals) else 0,
         "scored_versions": int(len(scores)),
         "live_record": live_record(scores, PUBLIC_FEATURE_SET, FALLBACK_FEATURE_SET)[0],
-        "model": {k: model_meta.get(k) for k in ("feature_set", "model_file", "fitted_at_utc", "train_from", "train_to", "train_hours",
-                                                 "recent_check", "frozen_holdout", "features")} if model_meta else {},
-        "fallback_model": {k: fallback_meta.get(k) for k in ("feature_set", "model_file", "fitted_at_utc", "train_from", "train_to",
-                                                             "train_hours", "recent_check", "frozen_holdout")} if fallback_meta else {},
+        "model": public_model_meta(model_meta, ("feature_set", "model_file", "fitted_at_utc", "train_from", "train_to", "train_hours",
+                                               "recent_check", "frozen_holdout", "features")),
+        "fallback_model": public_model_meta(fallback_meta, ("feature_set", "model_file", "fitted_at_utc", "train_from", "train_to",
+                                                            "train_hours", "recent_check", "frozen_holdout")),
         "last_run": last_run or {},
         "market": market_status(store, market_path, previous=read_market_file(out) or previous_status.get("market")),
         "shape_battery": shape_status(store, out),
         "probabilistic": probabilistic_status(store, out),
         "attributions": ATTRIBUTIONS,
-        "note": "Forecasts use only information available at 12:00 Paris time on the day before delivery. "
-                "Forecast error is measured against a naive same-hour-previous-day baseline (the spot auction result of the "
-                "previous day); trading value is measured against EEX French day-ahead futures traded before the auction, "
-                "as aggregates under \"market\" once enough days are recorded. Traded prices are not republished. "
-                "Historical errors are shown as context, not as a probability forecast.",
+        "note": "Forecasts use only information available at 12:00 Paris time on the day before delivery. The level forecast has one "
+                "benchmark: the EEX French day-ahead future traded before the auction, scored at the auction result, as aggregates "
+                "under \"market\" once enough windows are recorded (hit rate, mean P&L per MWh, model and market error, window count). "
+                "Forecast error (MAE) is the model's own error against the auction result, with no other comparison. Traded prices are "
+                "not republished. Historical errors are shown as context, not as a probability forecast.",
     }
     (out / "status.json").write_text(json.dumps(status, indent=2))
     return status
@@ -353,7 +373,7 @@ def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
             for (day, issued, kind, train_hours, feature_set, model), group in forecasts.groupby(keys, sort=True):
                 if not store.forecast_versions(day, feature_set).query("issued_at_utc == @issued").empty:
                     continue
-                curve = group.set_index("timestamp_utc")[["hour", "forecast", "naive_day"]].sort_index()
+                curve = group.set_index("timestamp_utc")[[c for c in ("hour", "forecast", "naive_day") if c in group]].sort_index()
                 store.save_forecast(None, day, feature_set, pd.Timestamp(issued), str(model), str(kind), int(train_hours), True, curve)
                 summary["forecast_versions"] += 1
     actuals_path = src / "actuals.csv"
@@ -371,9 +391,10 @@ def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
         versions = pd.read_sql_query("SELECT forecast_id, delivery_day, issued_at_utc, feature_set FROM forecasts", store.conn)
         merged = scores.merge(versions, on=["delivery_day", "issued_at_utc", "feature_set"], how="inner")
         for _, r in merged.iterrows():
+            below = r.get("mae_below_baseline")  # files written before 2026-10-12 carried the internal comparison columns
             store.save_score(int(r["forecast_id"]), r["delivery_day"], r["feature_set"], r["issued_at_utc"], {
-                "hours": r["hours"], "mae": r["mae"], "rmse": r["rmse"], "naive_mae": r["naive_mae"], "naive_rmse": r["naive_rmse"],
-                "mae_below_baseline": None if pd.isna(r["mae_below_baseline"]) else bool(r["mae_below_baseline"]),
+                "hours": r["hours"], "mae": r["mae"], "rmse": r["rmse"], "naive_mae": r.get("naive_mae"), "naive_rmse": r.get("naive_rmse"),
+                "mae_below_baseline": None if below is None or pd.isna(below) else bool(below),
             }, now=pd.Timestamp(r["settled_at_utc"]) if isinstance(r["settled_at_utc"], str) else None)
             summary["scores"] += 1
     prob_path = src / "probabilistic.csv"

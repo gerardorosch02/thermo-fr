@@ -39,7 +39,7 @@ def test_refit_writes_model_and_metadata_with_holdout_metrics(tmp_path, table):
     assert meta["features"][0] == "hour" and "load_fc_mw" in meta["features"] and "wind_fc_mw" not in meta["features"]
     check = meta["recent_check"]
     assert check["from"] == "2024-03-02" and check["to"] == "2024-03-31" and check["hours"] == 30 * 24 - 1
-    assert check["mae"] < check["naive_mae"]  # the synthetic price is learnable
+    assert check["mae"] > 0 and "naive_mae" not in check and "naive_mae" not in meta["frozen_holdout"]  # the model's own error only
     assert check["excluded_from_stored_fit"] is False and "not the frozen holdout" in check["note"]
     assert meta["frozen_holdout"]["mae"] == 26.23 and "docs/experiments.md" in meta["frozen_holdout"]["source"]  # honest, copied from the log
     assert "params" in meta and meta["params"]["n_estimators"] == 40

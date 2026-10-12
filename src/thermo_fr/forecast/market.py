@@ -439,8 +439,11 @@ def public_summary(result: dict, min_days: int = MIN_PUBLIC_DAYS) -> dict:
     """What the public dataset may carry: aggregates only, and only from min_days scored days; never a traded price."""
     s = result["summary"]
     out = {"source": "EEX French Day-Ahead Base and Peak futures traded before the auction, collected locally; "
-                     "traded prices are not republished.", "scored_days": s["scored_days"], "min_days_to_show": min_days,
-           "counts": "settled delivery days whose published pre-market version of the default set (the version shown on the public site, "
+                     "traded prices are not republished.", "scored_days": s["scored_days"], "scored_windows": s["scored_days"],
+           "min_days_to_show": min_days,
+           "benchmark": "the only benchmark of the level forecast: the window VWAP of the traded future, scored at the auction result",
+           "counts": "windows (one per delivery day and product, base or peak) of settled delivery days whose published pre-market version "
+                     "of the default set (the version shown on the public site, "
                      "read from published/forecasts.csv on main) was issued before the market window (11:15 Paris on the trade date), scored "
                      "against the auction result; days whose published versions were all issued later, days with only a local version on "
                      "the collecting machine, and days without a traded price are not counted; the backfilled walk-forward record in the "

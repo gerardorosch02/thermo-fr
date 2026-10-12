@@ -72,7 +72,7 @@ def forecast_panel(path, delivery_day: str, feature_set: str, actual_day: str) -
         return out
     table = curve.reset_index()
     table["hour"] = table["hour"].astype(int)
-    by_hour = table.groupby("hour").agg(forecast=("forecast", "mean"), naive_day=("naive_day", "mean")).reset_index()
+    by_hour = table.groupby("hour").agg(forecast=("forecast", "mean")).reset_index()
     for name, series in (("actual_other", out["actual_other"]), ("actual_own", out["actual_own"])):
         if len(series):
             hourly = pd.DataFrame({"hour": series.index.tz_convert(LOCAL_TZ).hour, name: series.to_numpy()})
@@ -145,11 +145,8 @@ def performance_panel(path, feature_set: str, days: int = 30) -> dict:
     if not scores.empty:
         scores = scores.sort_values("delivery_day").copy()
         scores["rolling_mae"] = scores["mae"].rolling(7, min_periods=1).mean()
-        scores["rolling_naive_mae"] = scores["naive_mae"].rolling(7, min_periods=1).mean()
-        out["scores"] = scores
-        out["share_below_baseline"] = float(scores["mae_below_baseline"].fillna(0).mean())
-        out["mae"] = float(scores["mae"].mean())
-        out["naive_mae"] = float(scores["naive_mae"].mean())
+        out["scores"] = scores.drop(columns=[c for c in ("naive_mae", "naive_rmse", "mae_below_baseline") if c in scores])
+        out["mae"] = float(scores["mae"].mean())  # against the auction result; the EEX traded price is the only benchmark
     return out
 
 

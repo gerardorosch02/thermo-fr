@@ -72,7 +72,8 @@ def test_performance_panel_rolls_scores(db):
     s.save_score(fid, TODAY, "honest", "2026-10-06T07:00:00Z", {"hours": 24, "mae": 5.0, "rmse": 6.0, "naive_mae": 7.0, "naive_rmse": 8.0, "mae_below_baseline": True})
     s.close()
     panel = q.performance_panel(db, "honest")
-    assert panel["share_below_baseline"] == 1.0 and panel["mae"] == 5.0 and panel["naive_mae"] == 7.0
+    assert panel["mae"] == 5.0 and "naive_mae" not in panel and "share_below_baseline" not in panel
+    assert not {"naive_mae", "naive_rmse", "mae_below_baseline"} & set(panel["scores"].columns)
     assert panel["scores"]["rolling_mae"].iloc[0] == 5.0 and len(panel["hourly"]) == 24
     assert q.performance_panel(db, "extended")["scores"].empty
 

@@ -1,5 +1,7 @@
 """The public live record: pre-market days of the default set only, late-only days excluded and listed, previous model split off."""
 
+import json
+
 import pandas as pd
 
 from thermo_fr.forecast import publish
@@ -32,12 +34,13 @@ def test_headline_counts_pre_market_days_of_the_default_set_only_and_lists_late_
     head = record["default"]
     assert head["status"] == "ok" and head["feature_set"] == "honest_v2"
     assert head["first_premarket_day"] == "2026-10-14" and head["days"] == 2 and head["days_in_window"] == 2
-    assert head["model_mae"] == 25.0 and head["baseline_mae"] == 30.0 and head["share_below_baseline"] == 0.5  # (16 + 34) / 2: the last pre-market versions
+    assert head["model_mae"] == 25.0 and "baseline_mae" not in head and "share_below_baseline" not in head  # (16 + 34) / 2: the last pre-market versions
+    assert "naive" not in json.dumps(record).lower() and "baseline" not in json.dumps(record).lower()
     assert [d["delivery_day"] for d in head["late_only_days"]] == ["2026-10-13"] and head["late_only_days"][0]["versions"] == 1
     assert tables["default"]["issued_at_utc"].tolist() == ["2026-10-13T08:31:00Z", "2026-10-14T08:06:00Z"]
     previous = record["previous"]
     assert previous["feature_set"] == "honest" and previous["days"] == 2 and previous["first_premarket_day"] == "2026-10-09"
-    assert previous["model_mae"] == 39.0 and previous["baseline_mae"] == 42.5  # (28 + 50) / 2 and (40 + 45) / 2
+    assert previous["model_mae"] == 39.0  # (28 + 50) / 2
     assert [d["delivery_day"] for d in previous["late_only_days"]] == ["2026-10-08"]
     assert "late only" in record["rule"] and record["min_days_to_show"] == 1
 

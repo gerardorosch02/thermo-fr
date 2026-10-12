@@ -6,9 +6,9 @@ The public dashboard (`streamlit_app.py`) reads only the files under `published/
 
 | File | Content |
 |---|---|
-| `published/forecasts.csv` | every forecast version of the last 90 days of the default set honest_v2 and the fallback set honest (column feature_set), each with the model that produced it (column model: gbm:honest_v2.txt, gbm:honest.txt:fallback, or gbm for a live fit): delivery day, issue time, hour, forecast, same-hour-previous-day baseline, and `premarket` (1 when issued before the 11:15 Paris market window of the day before delivery) |
+| `published/forecasts.csv` | every forecast version of the last 90 days of the default set honest_v2 and the fallback set honest (column feature_set), each with the model that produced it (column model: gbm:honest_v2.txt, gbm:honest.txt:fallback, or gbm for a live fit): delivery day, issue time, hour, forecast and `premarket` (1 when issued before the 11:15 Paris market window of the day before delivery) |
 | `published/actuals.csv` | actual day-ahead prices for the same window |
-| `published/scores.csv` | daily MAE and RMSE of each version against actuals and the naive same-hour-previous-day baseline, with `mae_below_baseline` per day |
+| `published/scores.csv` | daily MAE and RMSE of each version against the auction result, with the `premarket` flag; since 2026-10-12 no same-hour-previous-day column (the EEX traded price in `market.json` is the only benchmark of the level forecast) |
 | `published/tomorrow.csv` | the headline forecast for the next delivery day: the last version issued before the market window, else the latest |
 | `published/error_band.csv` | backtest error percentiles by hour (the shaded band) |
 | `published/model/honest.txt` | the fallback LightGBM model (the honest set), refitted on the first weekday of each month (300 trees, 31 leaves, about 0.9 MB; chosen because its holdout MAE is within 0.2 EUR/MWh of the backtest settings) |

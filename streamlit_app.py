@@ -47,9 +47,11 @@ def headline_versions(frame: pd.DataFrame) -> pd.DataFrame:
 def _premarket(frame: pd.DataFrame):
     return premarket_flag(frame).to_numpy()
 
-LIVE_RECORD_RULE = ("Each delivery day counts once, scored on the last version issued before the market window opened (11:15 Paris on the day "
-                    "before); a day whose versions were all issued later is listed as late only and not scored. The headline is the current "
-                    "default model from its first pre-market day; the earlier days of the previous set are a separate row.")
+LIVE_RECORD_RULE = ("Each delivery day counts once, scored against the auction result on the last version issued before the market window "
+                    "opened (11:15 Paris on the day before); a day whose versions were all issued later is listed as late only and not scored. "
+                    "The record is the current default model from its first pre-market day; the earlier days of the previous set are a "
+                    "separate row. It states the model's own error only: the EEX traded price, in the Versus the market panel, is the one "
+                    "benchmark of the level forecast.")
 
 
 def _record_for(rows: pd.DataFrame, feature_set: str, days: int) -> tuple[dict, pd.DataFrame]:
@@ -67,14 +69,14 @@ def _record_for(rows: pd.DataFrame, feature_set: str, days: int) -> tuple[dict, 
         recent = table.tail(days)
         out.update({"first_premarket_day": str(table["delivery_day"].iloc[0]), "last_premarket_day": str(table["delivery_day"].iloc[-1]),
                     "days_in_window": int(len(recent)), "model_mae": round(float(recent["mae"].mean()), 2),
-                    "baseline_mae": round(float(recent["naive_mae"].mean()), 2),
-                    "share_below_baseline": round(float(recent["mae_below_baseline"].fillna(0).astype(float).mean()), 3)})
+                    "model_rmse": round(float(recent["rmse"].mean()), 2) if "rmse" in recent else None,
+                    "scored_against": "the auction result; the EEX traded price is the only benchmark (Versus the market)"})
     return out, table
 
 
 def live_record(scores: pd.DataFrame, default_set: str = "honest_v2", previous_set: str = "honest", days: int = 30) -> tuple[dict, dict]:
     """The public live record: (record, tables). record["default"] is the headline, record["previous"] the earlier set's own row or None."""
-    needed = {"delivery_day", "issued_at_utc", "feature_set", "mae", "naive_mae", "mae_below_baseline"}
+    needed = {"delivery_day", "issued_at_utc", "feature_set", "mae"}
     empty = {"feature_set": default_set, "days": 0, "late_only_days": [], "window_days": days, "status": "collecting data"}
     if scores is None or scores.empty or not needed <= set(scores.columns):
         return {"default": empty, "previous": None, "min_days_to_show": 1, "rule": LIVE_RECORD_RULE}, {"default": pd.DataFrame(), "previous": pd.DataFrame()}
@@ -199,7 +201,7 @@ def tomorrow_table(data: dict) -> pd.DataFrame:
     if not versions:
         return pd.DataFrame()
     tomorrow = versions["headline"]
-    by_hour = tomorrow.groupby("hour").agg(forecast=("forecast", "mean"), naive_day=("naive_day", "mean")).reset_index()
+    by_hour = tomorrow.groupby("hour").agg(forecast=("forecast", "mean")).reset_index()
     day = versions["day"]
     previous = (pd.Timestamp(day) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     actuals = data["actuals"]
@@ -226,8 +228,6 @@ def tomorrow_chart(by_hour: pd.DataFrame, day: str, previous: str) -> go.Figure:
                                     ("band_p25", "band_p75", BAND[1], "Historical error, 25th to 75th pct")):
             fig.add_trace(go.Scatter(x=pd.concat([x, x[::-1]]), y=pd.concat([by_hour[hi], by_hour[lo][::-1]]), fill="toself",
                                      fillcolor=color, line=dict(width=0), name=name, hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=x, y=by_hour["naive_day"], name=f"Same hour on {previous} (baseline)", mode="lines",
-                             line=dict(color=COLORS["benchmark"], width=2, dash="dash")))
     if by_hour["actual_today"].notna().any():
         fig.add_trace(go.Scatter(x=x, y=by_hour["actual_today"], name=f"Actual price on {previous}", mode="lines",
                                  line=dict(color=COLORS["actual"], width=2)))
@@ -244,19 +244,14 @@ def daily_scores(data: dict, days: int = 30) -> pd.DataFrame:
         return scores
     latest = headline_rows(scores).sort_values("delivery_day").tail(days).copy()  # each day's pre-market version where one exists
     latest["rolling_mae"] = latest["mae"].rolling(7, min_periods=1).mean()
-    latest["rolling_naive_mae"] = latest["naive_mae"].rolling(7, min_periods=1).mean()
     return latest
 
 
 def performance_chart(scores: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["naive_mae"], name="Baseline daily MAE", marker_color=COLORS["benchmark"], opacity=0.5))
-    fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["mae"], name="Model daily MAE", marker_color=COLORS["forecast"]))
-    fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_naive_mae"], name="Baseline, 7-day rolling", mode="lines",
-                             line=dict(color=COLORS["benchmark"], width=2, dash="dash")))
+    fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["mae"], name="Model daily MAE against the auction result", marker_color=COLORS["forecast"]))
     fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_mae"], name="Model, 7-day rolling", mode="lines",
                              line=dict(color=COLORS["ink"], width=2)))
-    fig.update_layout(barmode="group")
     fig = layout(fig, "MAE, EUR/MWh", "Delivery day")
     fig.update_xaxes(type="category", tickangle=-45)
     return fig
@@ -276,21 +271,23 @@ def history_chart(data: dict, days: int = 30) -> go.Figure | None:
     joined = joined[joined["delivery_day"].isin(last_days)]
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=joined["t"], y=joined["price"], name="Actual price", mode="lines", line=dict(color=COLORS["actual"], width=2)))
-    fig.add_trace(go.Scatter(x=joined["t"], y=joined["forecast"], name="Forecast (latest version)", mode="lines", line=dict(color=COLORS["forecast"], width=2)))
-    fig.add_trace(go.Scatter(x=joined["t"], y=joined["naive_day"], name="Baseline", mode="lines", line=dict(color=COLORS["benchmark"], width=1, dash="dash")))
+    fig.add_trace(go.Scatter(x=joined["t"], y=joined["forecast"], name="Forecast (pre-market version)", mode="lines", line=dict(color=COLORS["forecast"], width=2)))
     return layout(fig, "EUR/MWh", "Delivery hour (Paris time)")
 
 
-# The backfilled trading record, scored as a walk-forward (see the repository's docs/forecast.md); aggregates only,
-# the traded prices themselves are not republished. Updated by hand when the record is re-scored.
+# The walk-forward trading record of the default model honest_v2, reissued over the 42 windows of the market-fetch record (docs/experiments.md,
+# holdout row of 2026-10-10; docs/forecast.md); aggregates only, the traded prices themselves are not republished. Updated by hand when the
+# record is re-scored. It is labelled walk-forward, not live: the live record is status.json's "market" section.
 # The shaded band on tomorrow's chart is the backtest error band. The quantile band exists in the local store, under evaluation, and is
 # not published; this constant stays "backtest" (the public dataset carries no quantile columns, so no other value would work).
 BAND_SOURCE = "backtest"
 
 MARKET_RECORD = {
-    "period": "delivery days 2026-08-29 to 2026-10-10",
+    "model": "honest_v2", "period": "delivery days 2026-08-29 to 2026-10-10",
     "windows": 42, "base_windows": 38, "peak_windows": 4,
-    "hit_rate": 0.29, "mean_pnl_per_mwh": -2.5, "model_mae": 27.0, "market_mae": 5.1, "share_model_beats_market": 0.12,
+    "hit_rate": 0.33, "mean_pnl_per_mwh": -2.43, "model_mae": 28.5, "market_mae": 5.1, "share_model_beats_market": 0.07,
+    "base_only": "38 windows, 37% hit rate, -1.99 EUR/MWh per window",
+    "source": "docs/experiments.md, holdout row of 2026-10-10",
     "reason": "The model reacts to large moves about two days late, because its price lags carry yesterday's level into "
               "tomorrow's forecast, while the market reprices the same morning.",
 }
@@ -307,9 +304,11 @@ actual generation), the calendar (weekday, public holidays, bridge days, the day
 and the prices of the previous days (D-1, D-2, D-7 and the most recent day of the same type), which also stand in for gas and
 carbon costs. ENTSO-E's own wind and solar forecasts are not used, because the platform allows them until 18:00 on D-1.
 
-**Model.** Gradient boosting (LightGBM) fitted on all history before the delivery day. Results are reported as forecast
-error (mean absolute error, MAE, in EUR/MWh) against a naive baseline: the price of the same hour on the previous day. In a
-walk-forward backtest over 2024 and 2025 the model's MAE was about 15.5 EUR/MWh and the baseline's about 21.
+**Model.** Gradient boosting (LightGBM) fitted on all history before the delivery day. The level forecast has one benchmark:
+the EEX French day-ahead future traded before the auction, scored at the auction result (the "Versus the market" panel at the
+top). Its own error is reported as the mean absolute error (MAE, in EUR/MWh) against the auction result, with no other
+comparison. Model variants are still chosen by their strict-backtest MAE on 2024 to mid-2026 (about 15.7 EUR/MWh for the
+current set), because the EEX history is too short to select on; that figure is a selection criterion, not a benchmark.
 
 **Error band.** The shaded band around tomorrow's curve is the forecast plus the 10th to 90th (and 25th to 75th) percentile
 of the model's signed error at the same hour in that backtest. It describes how wrong the model has been at that hour in
@@ -318,12 +317,11 @@ the past; it is not a probability forecast for tomorrow.
 **Updates.** A GitHub Actions workflow publishes the forecast on weekday mornings and scores it against the
 published prices every afternoon. Source code, method and backtest: the repository linked above.
 
-**Limitations.** Two measurements give two different answers. On forecast error the model beats the naive baseline, the spot
-auction result of the same hour on the previous day. Against EEX French day-ahead futures traded before the auction it loses
-(the "Versus the market" panel): over 42 windows the direction implied by the forecast had a 29% hit rate and a mean P&L of
--2.5 EUR/MWh per window, and the forecast's error against the auction was 27.0 EUR/MWh where the traded price's was 5.1. The
-model reacts to large moves about two days late, because its price lags carry yesterday's level into tomorrow's forecast,
-while the market reprices the same morning. The error band is the model's
+**Limitations.** Against EEX French day-ahead futures traded before the auction the model loses (the "Versus the market"
+panel): over 42 walk-forward windows the direction implied by the forecast had a 33% hit rate and a mean P&L of -2.43 EUR/MWh
+per window, and the forecast's error against the auction was 28.5 EUR/MWh where the traded price's was 5.1. The model reacts
+to large moves about two days late, because its price lags carry yesterday's level into tomorrow's forecast, while the market
+reprices the same morning. The error band is the model's
 past error distribution, not a probability forecast. Errors are largest on days with regime changes (cold snaps,
 price collapses, days after holidays), which is also where a forecast matters most. A known weakness is the top 5% price
 hours, typically cold, calm winter evenings when gas sets the price: the generation proxies improve the error elsewhere but
@@ -349,6 +347,53 @@ def main() -> None:
                + (f", fallback {fallback_model} when one of its inputs is missing" if fallback_model else "")
                + "; every version below names the model that produced it.")
 
+    # 1. The headline: the forecast against the EEX traded price, the only benchmark of the level forecast
+    st.subheader("Versus the market: the forecast against the EEX French day-ahead future traded before the auction")
+    r = MARKET_RECORD
+    market = status.get("market") or {}
+    needed = int(market.get("min_days_to_show", 20))
+    live_windows = int(market.get("scored_windows", market.get("scored_days", 0)) or 0)
+    if live_windows >= needed and "hit_rate" in market:
+        st.markdown(f"## Live record, {live_windows} windows")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Windows scored", live_windows)
+        c2.metric("Hit rate", f"{100 * market['hit_rate']:.0f}%")
+        c3.metric("Mean P&L per MWh", f"{market['mean_pnl_per_mwh']:+.2f} EUR")
+        c4.metric("Model vs market error", f"{market['model_mae']:.1f} vs {market['market_mae']:.1f} EUR/MWh")
+        st.caption("Live: the pre-market version published on this site against the traded VWAP of the EEX French day-ahead future "
+                   "(11:15 to 12:00 Paris on the trade date), long when above, short when below, settled at the auction result. Market prices "
+                   "come from EEX and are not republished here; only these aggregates are.")
+    else:
+        st.markdown(f"## Versus the market: collecting data, {live_windows} of {needed}")
+        st.caption("What this counts: windows (one per delivery day and product) of settled delivery days whose pre-market version of the default "
+                   "model was published on this site before the EEX trading window (11:15 Paris on the trade date) and for which a traded price "
+                   "was recorded; versions issued later are not counted. The traded prices live on the author's machine, which computes these "
+                   "aggregates; the automated updates carry them through unchanged"
+                   + (f" (last computed {market['computed_at_utc'][:10]})" if market.get("computed_at_utc") else "") + ".")
+    st.markdown(f"**Walk-forward record, not live.** {r['model']}, the default model, reissued over {r['windows']} windows ({r['base_windows']} base, "
+                f"{r['peak_windows']} peak; {r['period']}): hit rate {100 * r['hit_rate']:.0f}%, mean P&L {r['mean_pnl_per_mwh']:+.2f} EUR/MWh per "
+                f"window, model error against the auction {r['model_mae']:.1f} EUR/MWh where the traded VWAP's was {r['market_mae']:.1f}; the "
+                f"model's error was the smaller one on {100 * r['share_model_beats_market']:.0f}% of windows. Base contract alone: {r['base_only']}. "
+                f"{r['reason']}")
+    st.caption("How a window is scored: the forecast issued before the window against the window's VWAP of the EEX French Day-Ahead Base or "
+               "Peak future, 11:15 to 12:00 Paris on the trade date; long when the forecast is above, short when below; P&L per MWh is the "
+               "auction result minus the entry, times the direction. The walk-forward reissues each day with a model fitted only on earlier "
+               f"data, or with the version actually issued before the window where one existed ({r['source']}). Traded prices come from EEX and "
+               "are not republished; only aggregates appear here. Since 2026-10-12 the EEX traded price is the only benchmark of the level "
+               "forecast: no same-hour-previous-day comparison is shown or published.")
+    default_set = status.get("feature_set", "honest_v2")
+    previous_set = status.get("fallback_model_file", "model/honest.txt").split("/")[-1].replace(".txt", "")
+    record, tables = live_record(data.get("scores_all", data["scores"]), default_set, previous_set)
+    head = record["default"]
+    if head["status"] == "ok":
+        st.markdown(f"Model error against the auction result, live: MAE {head['model_mae']:.2f} EUR/MWh over {head['days_in_window']} settled "
+                    f"day(s) with a pre-market {default_set} version (since {head['first_premarket_day']}). The model's own error, with no other "
+                    "comparison; the panel below has the daily values.")
+    else:
+        st.caption(f"Model error against the auction result, live: collecting data, no settled delivery day with a pre-market {default_set} "
+                   "version yet.")
+
+    # 2. Tomorrow's forecast
     st.subheader("Tomorrow's forecast")
     by_hour = tomorrow_table(data)
     versions = tomorrow_versions(data)
@@ -377,8 +422,8 @@ def main() -> None:
         if "band_p10" in by_hour:
             st.caption("Shaded band: historical error of this model at each hour in the 2024 to 2025 backtest, not a probability forecast.")
         with st.expander("Hourly values"):
-            st.dataframe(by_hour[["hour", "forecast", "naive_day", "actual_today"]].round(2).rename(
-                columns={"naive_day": "baseline", "actual_today": f"actual {previous}"}), hide_index=True, use_container_width=True)
+            st.dataframe(by_hour[["hour", "forecast", "actual_today"]].round(2).rename(columns={"actual_today": f"actual {previous}"}),
+                         hide_index=True, use_container_width=True)
         later = versions["later"]
         if versions["premarket"] and not later.empty:
             st.markdown("**Issued after the market window, not tradeable**")
@@ -386,11 +431,8 @@ def main() -> None:
                 columns={"issued_paris": "Issued (Paris)", "kind": "Run kind", "model": "Model", "daily_mean": "Daily mean forecast (EUR/MWh)"}),
                 hide_index=True, use_container_width=True)
 
-    default_set = status.get("feature_set", "honest_v2")
-    previous_set = status.get("fallback_model_file", "model/honest.txt").split("/")[-1].replace(".txt", "")
-    record, tables = live_record(data.get("scores_all", data["scores"]), default_set, previous_set)
-    head = record["default"]
-    st.subheader(f"Forecast error, last 30 days: default model {default_set}, pre-market version of each day")
+    # 3. The model's own error against the auction result (no other comparison)
+    st.subheader(f"Forecast error against the auction result, last 30 days: default model {default_set}, pre-market version of each day")
     st.caption(record["rule"])
     if head["status"] != "ok":
         st.info(f"Collecting data: no settled delivery day with a pre-market {default_set} version yet. The first scheduled pre-market run "
@@ -400,12 +442,9 @@ def main() -> None:
     else:
         scores = tables["default"].tail(30).copy()
         scores["rolling_mae"] = scores["mae"].rolling(7, min_periods=1).mean()
-        scores["rolling_naive_mae"] = scores["naive_mae"].rolling(7, min_periods=1).mean()
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2 = st.columns(2)
         c1.metric("Days settled", head["days_in_window"], help=f"pre-market {default_set} days since {head['first_premarket_day']}, last 30")
-        c2.metric("Model MAE", f"{head['model_mae']:.2f} EUR/MWh")
-        c3.metric("Baseline MAE (same hour D-1)", f"{head['baseline_mae']:.2f} EUR/MWh")
-        c4.metric("Days with lower MAE than the baseline", f"{100 * head['share_below_baseline']:.0f}%")
+        c2.metric("Model MAE against the auction", f"{head['model_mae']:.2f} EUR/MWh")
         if late_only_text(head):
             st.warning(late_only_text(head))
         st.plotly_chart(performance_chart(scores), use_container_width=True)
@@ -413,55 +452,25 @@ def main() -> None:
         if hist is not None:
             st.plotly_chart(hist, use_container_width=True)
         with st.expander("Daily scores"):
-            st.dataframe(scores[[c for c in ("delivery_day", "issued_at_utc", "model", "hours", "mae", "rmse", "naive_mae", "naive_rmse",
-                                              "mae_below_baseline") if c in scores]].round(2),
+            st.dataframe(scores[[c for c in ("delivery_day", "issued_at_utc", "model", "hours", "mae", "rmse") if c in scores]].round(2),
                          hide_index=True, use_container_width=True)
     previous = record.get("previous")
     if previous:
         if previous["days"]:
             st.markdown(f"**Previous model ({previous_set} set, {previous['first_premarket_day']} to {previous['last_premarket_day']}, before the "
-                        f"default model's first pre-market day)**: {previous['days']} day(s) settled with a pre-market version, model MAE "
-                        f"{previous['model_mae']:.2f} EUR/MWh, baseline MAE {previous['baseline_mae']:.2f}, lower than the baseline on "
-                        f"{100 * previous['share_below_baseline']:.0f}% of days. Its versions include models fitted live before the stored "
-                        f"model file existed (model column \"gbm\"). {late_only_text(previous)}")
+                        f"default model's first pre-market day)**: {previous['days']} day(s) settled with a pre-market version, MAE against the "
+                        f"auction {previous['model_mae']:.2f} EUR/MWh. Its versions include models fitted live before the stored model file "
+                        f"existed (model column \"gbm\"). {late_only_text(previous)}")
         else:
             st.markdown(f"**Previous model ({previous_set} set)**: no day with a pre-market version. {late_only_text(previous)}")
         with st.expander(f"Daily scores, previous model ({previous_set})"):
             prev_table = tables["previous"]
-            st.dataframe(prev_table[[c for c in ("delivery_day", "issued_at_utc", "model", "hours", "mae", "rmse", "naive_mae", "naive_rmse",
-                                                   "mae_below_baseline") if c in prev_table]].round(2), hide_index=True, use_container_width=True)
-
-    st.subheader("Versus the market")
-    r = MARKET_RECORD
-    st.markdown(f"**The model beats the naive baseline on forecast error and loses against the traded price.** Over {r['windows']} windows "
-                f"({r['base_windows']} base, {r['peak_windows']} peak; {r['period']}) the direction implied by the forecast against the EEX "
-                f"French day-ahead future's 11:15 to 12:00 Paris VWAP, settled at the auction result, had a hit rate of {100 * r['hit_rate']:.0f}% "
-                f"and a mean P&L of {r['mean_pnl_per_mwh']:+.1f} EUR/MWh per window. The forecast's error against the auction was "
-                f"{r['model_mae']:.1f} EUR/MWh where the traded price's was {r['market_mae']:.1f}; the forecast's error was the smaller one on "
-                f"{100 * r['share_model_beats_market']:.0f}% of windows. {r['reason']}")
-    st.caption("Backfilled record scored as a walk-forward: each day with a model fitted only on data before it, or with the version "
-               "actually issued before the window where one existed. Traded prices come from EEX and are not republished; the live "
-               "record below grows one weekday at a time.")
-    market = status.get("market") or {}
-    if market.get("scored_days", 0) and "hit_rate" in market:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Days scored", int(market["scored_days"]))
-        c2.metric("Hit rate", f"{100 * market['hit_rate']:.0f}%")
-        c3.metric("Mean P&L per MWh", f"{market['mean_pnl_per_mwh']:+.2f} EUR")
-        c4.metric("Model vs market error", f"{market['model_mae']:.1f} vs {market['market_mae']:.1f} EUR/MWh")
-        st.caption("Trading value: the forecast issued before the EEX trading window against the traded VWAP of the French day-ahead "
-                   "future, long when above, short when below, settled at the auction result. Market prices come from EEX and are not "
-                   "republished here; only these aggregates are.")
-    else:
-        needed = int(market.get("min_days_to_show", 20))
-        st.markdown(f"**Live record: collecting data, {int(market.get('scored_days', 0))} of {needed} days.**")
-        st.caption("What this counts: settled delivery days whose forecast from the default model was published before the EEX trading "
-                   "window (11:15 Paris on the trade date) and for which a traded price was recorded; versions issued later are not counted, "
-                   "and the 42 backfilled walk-forward windows above are a separate reissue record, not part of this count. The traded "
-                   "prices live on the author's machine, which computes these aggregates; the automated updates carry them through unchanged"
-                   + (f" (last computed {market['computed_at_utc'][:10]})" if market.get("computed_at_utc") else "") + ".")
+            st.dataframe(prev_table[[c for c in ("delivery_day", "issued_at_utc", "model", "hours", "mae", "rmse") if c in prev_table]].round(2),
+                         hide_index=True, use_container_width=True)
 
     st.subheader("Negative-price probability and its calibration")
+    st.caption("This panel has no EEX equivalent: a probability of a negative price is compared with its own reference frequencies "
+               "(climatology and the last 7 days), shown here only, below the market headline above.")
     prob = data.get("prob_tomorrow", pd.DataFrame())
     prob_status = status.get("probabilistic") or {}
     if not prob.empty and "p_negative" in prob:
@@ -504,6 +513,8 @@ def main() -> None:
                "A quantile band and a spike probability are computed and stored every day but are under evaluation and not shown here.")
 
     st.subheader("Shape and battery value")
+    st.caption("This panel has no EEX equivalent: the shape of the day is compared with its own references (yesterday's shape and the "
+               "same-type day's shape) and valued with a battery, shown here only, below the market headline above.")
     shape = data.get("shape") or {}
     backtest = shape.get("backtest") or {}
     if backtest:

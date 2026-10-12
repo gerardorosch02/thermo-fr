@@ -11,7 +11,8 @@ from thermo_fr.forecast.publish import MARKET_FILE, export_published, write_mark
 from thermo_fr.forecast.store import Store
 
 # what the file may carry: counts, definitions, stamps, and (from MIN_PUBLIC_DAYS days) five aggregates; never a row or a price
-ALWAYS = {"source", "scored_days", "min_days_to_show", "counts", "versions", "computed_at_utc", "computed_on", "carried_through"}
+ALWAYS = {"source", "scored_days", "scored_windows", "min_days_to_show", "counts", "versions", "benchmark", "computed_at_utc", "computed_on",
+          "carried_through"}
 BELOW_MIN = ALWAYS | {"note"}
 AGGREGATES = {"hit_rate", "mean_pnl_per_mwh", "model_mae", "market_mae", "share_model_beats_market"}
 PER_DAY_COLUMNS = ("forecast", "entry_vwap", "entry_close", "auction", "pnl_per_mwh", "pnl_per_mwh_close", "cumulative_pnl_per_mwh",

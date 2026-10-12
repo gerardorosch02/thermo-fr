@@ -128,7 +128,7 @@ def cmd_forecast(args) -> None:
     out.mkdir(parents=True, exist_ok=True)
     curve.to_csv(out / f"day_{args.date}.csv")
     forecast_day_chart(curve, args.date, out / f"day_{args.date}.png", "honest")
-    shown = curve[["hour", "forecast", "naive_day", "actual", "load_fc_mw", "temp_c"]]
+    shown = curve[["hour", "forecast", "actual", "load_fc_mw", "temp_c"]]
     print(f"Day-ahead price forecast for {args.date} (EUR/MWh), information as of 12:00 Paris the day before:")
     print(shown.to_string(index=False, na_rep=""))
     print(f"Saved {out / f'day_{args.date}.csv'} and {out / f'day_{args.date}.png'}")
@@ -205,7 +205,7 @@ def cmd_refit_model(args) -> None:
         check = meta.get("recent_check") or {}
         print(f"{feature_set}: model fitted on {meta['train_hours']:,} hours ({meta['train_from']} to {meta['train_to']}), saved as "
               f"{meta['model_file']} under {args.out}; recent check (last days, not excluded from the stored fit) MAE {check.get('mae')} "
-              f"against benchmark {check.get('naive_mae')}")
+              f"against the auction result")
 
 
 def cmd_import_published(args) -> None:

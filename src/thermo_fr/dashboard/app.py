@@ -110,8 +110,6 @@ def forecast_chart(by_hour: pd.DataFrame, feature_set: str, today: str, has_band
                                     ("band_p25", "band_p75", dark, "Historical error, 25th to 75th pct")):
             fig.add_trace(go.Scatter(x=pd.concat([x, x[::-1]]), y=pd.concat([by_hour[hi], by_hour[lo][::-1]]), fill="toself",
                                      fillcolor=color, line=dict(width=0), name=name, hoverinfo="skip"))
-    fig.add_trace(go.Scatter(x=x, y=by_hour["naive_day"], name="Same hour previous day (baseline)", mode="lines",
-                             line=dict(color=COLORS["benchmark"], width=2, dash="dash")))
     if by_hour["actual_other"].notna().any():
         fig.add_trace(go.Scatter(x=x, y=by_hour["actual_other"], name=f"Actual price today ({today})", mode="lines",
                                  line=dict(color=COLORS["actual"], width=2)))
@@ -141,13 +139,9 @@ def temperature_chart(hourly: pd.DataFrame) -> go.Figure:
 
 def performance_chart(scores: pd.DataFrame, feature_set: str) -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["naive_mae"], name="Baseline daily MAE", marker_color=COLORS["benchmark"], opacity=0.5))
-    fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["mae"], name=f"Model daily MAE ({feature_set})", marker_color=COLORS[feature_set]))
-    fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_naive_mae"], name="Baseline, 7-day rolling", mode="lines",
-                             line=dict(color=COLORS["benchmark"], width=2, dash="dash")))
+    fig.add_trace(go.Bar(x=scores["delivery_day"], y=scores["mae"], name=f"Model daily MAE against the auction ({feature_set})", marker_color=COLORS[feature_set]))
     fig.add_trace(go.Scatter(x=scores["delivery_day"], y=scores["rolling_mae"], name="Model, 7-day rolling", mode="lines",
                              line=dict(color="#0b0b0b", width=2)))
-    fig.update_layout(barmode="group")
     fig = base_layout(fig, "MAE, EUR/MWh", "Delivery day")
     fig.update_xaxes(type="category", dtick=None, tickangle=-45)  # delivery days are labels, not a time axis
     return fig
@@ -158,7 +152,6 @@ def hourly_history_chart(hourly: pd.DataFrame, feature_set: str) -> go.Figure:
     x = hourly.index.tz_convert("Europe/Paris")
     fig.add_trace(go.Scatter(x=x, y=hourly["actual"], name="Actual price", mode="lines", line=dict(color=COLORS["actual"], width=2)))
     fig.add_trace(go.Scatter(x=x, y=hourly["forecast"], name=f"Forecast ({feature_set})", mode="lines", line=dict(color=COLORS[feature_set], width=2)))
-    fig.add_trace(go.Scatter(x=x, y=hourly["naive_day"], name="Baseline", mode="lines", line=dict(color=COLORS["benchmark"], width=1, dash="dash")))
     fig = base_layout(fig, "EUR/MWh", "Delivery hour (Paris time)")
     fig.update_xaxes(dtick=None)
     return fig
@@ -262,8 +255,7 @@ def main() -> None:
         else:
             st.caption("No error band: run the backtest (thermo-fr forecast-backtest) so morning-run can derive it.")
         with st.expander("Hourly table"):
-            show = panel["by_hour"][["hour", "forecast", "naive_day", "actual_other"]].rename(
-                columns={"naive_day": "baseline (D-1)", "actual_other": f"actual {today}"})
+            show = panel["by_hour"][["hour", "forecast", "actual_other"]].rename(columns={"actual_other": f"actual {today}"})
             st.dataframe(show.round(2), hide_index=True, use_container_width=True)
         later = panel.get("later")
         if later is not None and not later.empty and meta.get("premarket"):
@@ -325,26 +317,8 @@ def main() -> None:
         st.dataframe(shown.rename(columns={"quantity": "Quantity", "first": "First run", "latest": "Latest run", "change": "Change"}),
                      hide_index=True, use_container_width=True)
 
-    # 3. Recent performance
-    st.subheader(f"Forecast error, last 30 settled days ({feature_set}, pre-market version of each day)")
-    perf = performance_panel(db, version, feature_set)
-    if perf["scores"].empty:
-        st.info("No settled forecasts yet. The settle job runs at 14:00 London time after the auction results are out.")
-    else:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Days settled", int(len(perf["scores"])))
-        c2.metric("Model MAE", f"{perf['mae']:.2f} EUR/MWh")
-        c3.metric("Baseline MAE (same hour D-1)", f"{perf['naive_mae']:.2f} EUR/MWh")
-        c4.metric("Days with lower MAE than the baseline", f"{100 * perf['share_below_baseline']:.0f}%")
-        st.plotly_chart(performance_chart(perf["scores"], feature_set), use_container_width=True)
-        if not perf["hourly"].empty:
-            st.plotly_chart(hourly_history_chart(perf["hourly"], feature_set), use_container_width=True)
-        with st.expander("Daily scores"):
-            st.dataframe(perf["scores"][["delivery_day", "issued_at_utc", "hours", "mae", "rmse", "naive_mae", "naive_rmse", "mae_below_baseline"]].round(2),
-                         hide_index=True, use_container_width=True)
-
-    # 4. Versus the market
-    st.subheader(f"Versus the market: EEX day-ahead futures traded before the auction ({feature_set})")
+    # 3. Versus the market: the headline
+    st.subheader(f"Versus the market: EEX day-ahead futures traded before the auction ({feature_set}); the only benchmark of the level forecast")
     mkt = market_panel(db, version, q.db_version(q.MARKET_PATH), feature_set)
     last_publish = mkt.get("last_publish")
     if last_publish is None:
@@ -366,7 +340,7 @@ def main() -> None:
                    + (f", computed {public['computed_at_utc']}" if public.get("computed_at_utc") else "") + ".")
         if s["scored_days"]:
             c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Days scored", s["scored_days"])
+            c1.metric("Windows scored", s["scored_days"])
             c2.metric("Hit rate", f"{100 * s['hit_rate']:.0f}%")
             c3.metric("Mean P&L per MWh", f"{s['mean_pnl_per_mwh']:+.2f} EUR")
             c4.metric("Model MAE vs auction", f"{s['model_mae']:.2f} EUR/MWh")
@@ -386,6 +360,22 @@ def main() -> None:
             st.dataframe(shown, hide_index=True, use_container_width=True)
         for skipped in s["skipped"]:
             st.warning(f"{skipped['delivery_date']} {skipped['product']}: {skipped['reason']}")
+
+    # 4. The model's own error against the auction result
+    st.subheader(f"Forecast error against the auction result, last 30 settled days ({feature_set}, pre-market version of each day)")
+    st.caption("The model's own error, with no other comparison: the EEX traded price in the panel above is the only benchmark of the level forecast.")
+    perf = performance_panel(db, version, feature_set)
+    if perf["scores"].empty:
+        st.info("No settled forecasts yet. The settle job runs at 14:00 London time after the auction results are out.")
+    else:
+        c1, c2 = st.columns(2)
+        c1.metric("Days settled", int(len(perf["scores"])))
+        c2.metric("Model MAE against the auction", f"{perf['mae']:.2f} EUR/MWh")
+        st.plotly_chart(performance_chart(perf["scores"], feature_set), use_container_width=True)
+        if not perf["hourly"].empty:
+            st.plotly_chart(hourly_history_chart(perf["hourly"], feature_set), use_container_width=True)
+        with st.expander("Daily scores"):
+            st.dataframe(perf["scores"][["delivery_day", "issued_at_utc", "hours", "mae", "rmse"]].round(2), hide_index=True, use_container_width=True)
 
     # 5. Calibration of the probabilistic forecasts
     st.subheader(f"Calibration of the band and the event probabilities ({feature_set}); the band and the spike are under evaluation")

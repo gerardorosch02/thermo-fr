@@ -356,8 +356,8 @@ def settle(store: Store, cache_dir=Path("data/cache"), entsoe=None, now=None, ki
             continue
         store.save_score(int(version["forecast_id"]), version["delivery_day"], version["feature_set"], version["issued_at_utc"], score, now=now)
         summary["scored"] += 1
-        log.info("scored %s %s issued %s: MAE %.2f (benchmark %.2f)", version["delivery_day"], version["feature_set"],
-                 version["issued_at_utc"], score["mae"], score["naive_mae"] or float("nan"))
+        log.info("scored %s %s issued %s: MAE %.2f against the auction result", version["delivery_day"], version["feature_set"],
+                 version["issued_at_utc"], score["mae"])
     status = "ok" if not summary["errors"] else ("partial" if summary["actual_days"] or summary["scored"] else "failed")
     store.finish_run(run_id, status, "; ".join(summary["errors"]), now=now)
     summary["status"] = status

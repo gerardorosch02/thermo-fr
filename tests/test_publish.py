@@ -43,7 +43,7 @@ def test_export_writes_the_public_files_for_the_window(tmp_path):
     forecasts = pd.read_csv(out / "forecasts.csv")
     assert set(forecasts["delivery_day"]) == set(DAYS)  # June is outside the 90-day window, extended is never exported
     assert forecasts.groupby("delivery_day")["issued_at_utc"].nunique().eq(2).all()
-    assert list(forecasts.columns) == ["delivery_day", "issued_at_utc", "kind", "train_hours", "feature_set", "model", "premarket", "timestamp_utc", "hour", "forecast", "naive_day"]
+    assert list(forecasts.columns) == ["delivery_day", "issued_at_utc", "kind", "train_hours", "feature_set", "model", "premarket", "timestamp_utc", "hour", "forecast"]
     flags = forecasts.groupby("delivery_day")["premarket"].first()
     assert flags["2026-10-07"] == 0 and flags[["2026-10-08", "2026-10-09", "2026-10-10"]].eq(1).all()  # the fixture issues the first day on the day itself
     tomorrow = pd.read_csv(out / "tomorrow.csv")
@@ -93,8 +93,15 @@ def test_import_accepts_scores_written_before_the_flag_was_renamed(tmp_path):
     out = tmp_path / "published"
     export_published(filled_store(tmp_path / "src.sqlite"), out, days=90, now=NOW, market_path=tmp_path / "no_market.csv")
     scores = out / "scores.csv"
-    scores.write_text(scores.read_text().replace("mae_below_baseline", "model_won"))
+    legacy = pd.read_csv(scores)  # a file written before 2026-10-12 carried the internal comparison columns, under their older name too
+    legacy["naive_mae"], legacy["naive_rmse"], legacy["model_won"] = 8.0, 9.0, 1
+    legacy.to_csv(scores, index=False)
     store = Store(tmp_path / "db.sqlite")
     summary = import_published(store, out)
     assert summary["scores"] > 0 and store.scores()["mae_below_baseline"].notna().all()
     store.close()
+    # and today's file, without them, imports as well
+    export_published(filled_store(tmp_path / "src2.sqlite"), out, days=90, now=NOW, market_path=tmp_path / "no_market.csv")
+    fresh = Store(tmp_path / "db2.sqlite")
+    assert import_published(fresh, out)["scores"] > 0 and fresh.scores()["mae"].notna().all()
+    fresh.close()

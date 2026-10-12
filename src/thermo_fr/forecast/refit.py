@@ -38,9 +38,9 @@ REFIT_PARAMS: dict = {"n_estimators": 300, "num_leaves": 31}
 # The frozen holdout of docs/experiments.md (2026-07-01 onward, evaluated once per accepted change, strict rows, monthly walk-forward with the
 # backtest settings). Copied here by hand so that the model metadata can carry it; the recent check below is a different, weaker thing.
 FROZEN_HOLDOUT = {
-    "honest_v2": {"window": "2026-07-01 to 2026-10-10", "strict_hours": 2448, "mae": 25.81, "naive_mae": 29.37, "crash_2026_10_01_to_10_10_mae": 36.00,
+    "honest_v2": {"window": "2026-07-01 to 2026-10-10", "strict_hours": 2448, "mae": 25.81, "crash_2026_10_01_to_10_10_mae": 36.00,
                   "source": "docs/experiments.md, holdout row of 2026-10-10", "method": "monthly walk-forward, backtest settings, not this file"},
-    "honest": {"window": "2026-07-01 to 2026-10-10", "strict_hours": 2448, "mae": 26.23, "naive_mae": 29.37, "crash_2026_10_01_to_10_10_mae": 33.76,
+    "honest": {"window": "2026-07-01 to 2026-10-10", "strict_hours": 2448, "mae": 26.23, "crash_2026_10_01_to_10_10_mae": 33.76,
                "source": "docs/experiments.md, holdout row of 2026-10-10", "method": "monthly walk-forward, backtest settings, not this file"},
 }
 
@@ -66,8 +66,6 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
         log(f"Recent check: fit on {int(train.sum()):,} hours, scoring {int(test.sum()):,} hours after {cut.date()} (these days join the final fit) ...")
         pred = fit_predict("gbm", table.X[train], table.y[train], table.X[test], params=params)
         actual = table.y[test].to_numpy()
-        naive = table.X.loc[test, "price_lag1"].to_numpy()
-        ok = ~np.isnan(naive)
         metrics = {
             "from": str((cut + pd.Timedelta(days=1)).date()),
             "to": str(last_day.date()),
@@ -78,8 +76,6 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
                     "docs/experiments.md",
             "mae": round(float(np.mean(np.abs(pred - actual))), 2),
             "rmse": round(float(np.sqrt(np.mean((pred - actual) ** 2))), 2),
-            "naive_mae": round(float(np.mean(np.abs(naive[ok] - actual[ok]))), 2),
-            "naive_rmse": round(float(np.sqrt(np.mean((naive[ok] - actual[ok]) ** 2))), 2),
         }
     log(f"Final fit on {int(known.sum()):,} hours ...")
     model = make_model("gbm", params)
