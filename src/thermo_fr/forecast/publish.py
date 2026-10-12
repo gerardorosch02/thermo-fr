@@ -111,6 +111,54 @@ def shape_status(store: Store, out_dir) -> dict:
 MARKET_FILE = "market.json"  # written only where the traded prices are (the laptop); every other publisher reads it and carries it through
 
 
+def _premarket(frame: pd.DataFrame):
+    return premarket_flag(frame["delivery_day"], frame["issued_at_utc"])
+
+LIVE_RECORD_RULE = ("Each delivery day counts once, scored on the last version issued before the market window opened (11:15 Paris on the day "
+                    "before); a day whose versions were all issued later is listed as late only and not scored. The headline is the current "
+                    "default model from its first pre-market day; the earlier days of the previous set are a separate row.")
+
+
+def _record_for(rows: pd.DataFrame, feature_set: str, days: int) -> tuple[dict, pd.DataFrame]:
+    """One row per delivery day (its last pre-market version) with the aggregates of the last `days` of them; late-only days listed."""
+    picked, late_only = [], []
+    for day, group in rows.sort_values(["delivery_day", "issued_at_utc"]).groupby("delivery_day", sort=True):
+        pre = group[group["premarket"].astype(bool)]
+        if len(pre):
+            picked.append(pre.iloc[-1])
+        else:
+            late_only.append({"delivery_day": day, "versions": int(len(group)), "first_issued_utc": str(group["issued_at_utc"].iloc[0])})
+    table = pd.DataFrame(picked).reset_index(drop=True) if picked else rows.iloc[0:0]
+    out = {"feature_set": feature_set, "days": int(len(table)), "late_only_days": late_only, "window_days": days}
+    if len(table):
+        recent = table.tail(days)
+        out.update({"first_premarket_day": str(table["delivery_day"].iloc[0]), "last_premarket_day": str(table["delivery_day"].iloc[-1]),
+                    "days_in_window": int(len(recent)), "model_mae": round(float(recent["mae"].mean()), 2),
+                    "baseline_mae": round(float(recent["naive_mae"].mean()), 2),
+                    "share_below_baseline": round(float(recent["mae_below_baseline"].fillna(0).astype(float).mean()), 3)})
+    return out, table
+
+
+def live_record(scores: pd.DataFrame, default_set: str = "honest_v2", previous_set: str = "honest", days: int = 30) -> tuple[dict, dict]:
+    """The public live record: (record, tables). record["default"] is the headline, record["previous"] the earlier set's own row or None."""
+    needed = {"delivery_day", "issued_at_utc", "feature_set", "mae", "naive_mae", "mae_below_baseline"}
+    empty = {"feature_set": default_set, "days": 0, "late_only_days": [], "window_days": days, "status": "collecting data"}
+    if scores is None or scores.empty or not needed <= set(scores.columns):
+        return {"default": empty, "previous": None, "min_days_to_show": 1, "rule": LIVE_RECORD_RULE}, {"default": pd.DataFrame(), "previous": pd.DataFrame()}
+    frame = scores.copy()
+    frame["premarket"] = _premarket(frame)
+    default, default_table = _record_for(frame[frame["feature_set"] == default_set], default_set, days)
+    default["status"] = "ok" if default["days"] >= 1 else "collecting data"
+    previous_rows = frame[frame["feature_set"] == previous_set]
+    if default.get("first_premarket_day"):
+        previous_rows = previous_rows[previous_rows["delivery_day"] < default["first_premarket_day"]]
+    previous, previous_table = (_record_for(previous_rows, previous_set, days) if len(previous_rows) else (None, pd.DataFrame()))
+    return ({"default": default, "previous": previous, "min_days_to_show": 1, "rule": LIVE_RECORD_RULE},
+            {"default": default_table, "previous": previous_table})
+
+
+
+
 def write_market_file(store: Store, out_dir, market_path=MARKET_PATH) -> dict | None:
     """Compute the market aggregates where the traded prices are and write published/market.json; None when there is no market file.
 
@@ -267,6 +315,7 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
         "forecast_versions": int(len(versions)),
         "actual_days": int(actuals["delivery_day"].nunique()) if len(actuals) else 0,
         "scored_versions": int(len(scores)),
+        "live_record": live_record(scores, PUBLIC_FEATURE_SET, FALLBACK_FEATURE_SET)[0],
         "model": {k: model_meta.get(k) for k in ("feature_set", "model_file", "fitted_at_utc", "train_from", "train_to", "train_hours",
                                                  "recent_check", "frozen_holdout", "features")} if model_meta else {},
         "fallback_model": {k: fallback_meta.get(k) for k in ("feature_set", "model_file", "fitted_at_utc", "train_from", "train_to",

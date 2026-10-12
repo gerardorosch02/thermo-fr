@@ -44,6 +44,52 @@ def headline_versions(frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(picked).reset_index(drop=True)
 
 
+def _premarket(frame: pd.DataFrame):
+    return premarket_flag(frame).to_numpy()
+
+LIVE_RECORD_RULE = ("Each delivery day counts once, scored on the last version issued before the market window opened (11:15 Paris on the day "
+                    "before); a day whose versions were all issued later is listed as late only and not scored. The headline is the current "
+                    "default model from its first pre-market day; the earlier days of the previous set are a separate row.")
+
+
+def _record_for(rows: pd.DataFrame, feature_set: str, days: int) -> tuple[dict, pd.DataFrame]:
+    """One row per delivery day (its last pre-market version) with the aggregates of the last `days` of them; late-only days listed."""
+    picked, late_only = [], []
+    for day, group in rows.sort_values(["delivery_day", "issued_at_utc"]).groupby("delivery_day", sort=True):
+        pre = group[group["premarket"].astype(bool)]
+        if len(pre):
+            picked.append(pre.iloc[-1])
+        else:
+            late_only.append({"delivery_day": day, "versions": int(len(group)), "first_issued_utc": str(group["issued_at_utc"].iloc[0])})
+    table = pd.DataFrame(picked).reset_index(drop=True) if picked else rows.iloc[0:0]
+    out = {"feature_set": feature_set, "days": int(len(table)), "late_only_days": late_only, "window_days": days}
+    if len(table):
+        recent = table.tail(days)
+        out.update({"first_premarket_day": str(table["delivery_day"].iloc[0]), "last_premarket_day": str(table["delivery_day"].iloc[-1]),
+                    "days_in_window": int(len(recent)), "model_mae": round(float(recent["mae"].mean()), 2),
+                    "baseline_mae": round(float(recent["naive_mae"].mean()), 2),
+                    "share_below_baseline": round(float(recent["mae_below_baseline"].fillna(0).astype(float).mean()), 3)})
+    return out, table
+
+
+def live_record(scores: pd.DataFrame, default_set: str = "honest_v2", previous_set: str = "honest", days: int = 30) -> tuple[dict, dict]:
+    """The public live record: (record, tables). record["default"] is the headline, record["previous"] the earlier set's own row or None."""
+    needed = {"delivery_day", "issued_at_utc", "feature_set", "mae", "naive_mae", "mae_below_baseline"}
+    empty = {"feature_set": default_set, "days": 0, "late_only_days": [], "window_days": days, "status": "collecting data"}
+    if scores is None or scores.empty or not needed <= set(scores.columns):
+        return {"default": empty, "previous": None, "min_days_to_show": 1, "rule": LIVE_RECORD_RULE}, {"default": pd.DataFrame(), "previous": pd.DataFrame()}
+    frame = scores.copy()
+    frame["premarket"] = _premarket(frame)
+    default, default_table = _record_for(frame[frame["feature_set"] == default_set], default_set, days)
+    default["status"] = "ok" if default["days"] >= 1 else "collecting data"
+    previous_rows = frame[frame["feature_set"] == previous_set]
+    if default.get("first_premarket_day"):
+        previous_rows = previous_rows[previous_rows["delivery_day"] < default["first_premarket_day"]]
+    previous, previous_table = (_record_for(previous_rows, previous_set, days) if len(previous_rows) else (None, pd.DataFrame()))
+    return ({"default": default, "previous": previous, "min_days_to_show": 1, "rule": LIVE_RECORD_RULE},
+            {"default": default_table, "previous": previous_table})
+
+
 def headline_rows(frame: pd.DataFrame) -> pd.DataFrame:
     """The rows of `frame` (forecasts or scores, with delivery_day and issued_at_utc) that belong to each day's headline version."""
     heads = headline_versions(frame)
@@ -75,10 +121,24 @@ def load_published(version: float) -> dict:
         "prob_tomorrow": read("tomorrow_probabilistic.csv"),
         "prob_backtest": json.loads((PUBLISHED / "probabilistic_backtest.json").read_text()) if (PUBLISHED / "probabilistic_backtest.json").exists() else {},
     }
-    # the dataset may carry more than one feature set (the default model's and the fallback's); the app shows the default
+    # the dataset may carry more than one feature set (the default model's and the fallback's); the app shows the default.
+    # scores_all keeps every set: the live record splits them itself (default headline, previous model row)
+    out["scores_all"] = out["scores"]
     for key in ("forecasts", "scores"):
         out[key] = default_set_rows(out[key], status)
     return out
+
+
+def paris_clock(stamp) -> str:
+    return pd.Timestamp(stamp).tz_convert(PARIS).strftime("%Y-%m-%d %H:%M")
+
+
+def late_only_text(record: dict) -> str:
+    items = record.get("late_only_days") or []
+    if not items:
+        return ""
+    return "Late only, not scored: " + "; ".join(f"{d['delivery_day']} ({d['versions']} version(s), earliest issued {paris_clock(d['first_issued_utc'])} Paris)"
+                                                   for d in items) + "."
 
 
 def default_set_rows(frame: pd.DataFrame, status: dict) -> pd.DataFrame:
@@ -326,16 +386,28 @@ def main() -> None:
                 columns={"issued_paris": "Issued (Paris)", "kind": "Run kind", "model": "Model", "daily_mean": "Daily mean forecast (EUR/MWh)"}),
                 hide_index=True, use_container_width=True)
 
-    st.subheader("Forecast error, last 30 days (pre-market version of each day)")
-    scores = daily_scores(data)
-    if scores.empty:
-        st.info("No settled days yet.")
+    default_set = status.get("feature_set", "honest_v2")
+    previous_set = status.get("fallback_model_file", "model/honest.txt").split("/")[-1].replace(".txt", "")
+    record, tables = live_record(data.get("scores_all", data["scores"]), default_set, previous_set)
+    head = record["default"]
+    st.subheader(f"Forecast error, last 30 days: default model {default_set}, pre-market version of each day")
+    st.caption(record["rule"])
+    if head["status"] != "ok":
+        st.info(f"Collecting data: no settled delivery day with a pre-market {default_set} version yet. The first scheduled pre-market run "
+                "settles the day after it is issued.")
+        if late_only_text(head):
+            st.warning(late_only_text(head))
     else:
+        scores = tables["default"].tail(30).copy()
+        scores["rolling_mae"] = scores["mae"].rolling(7, min_periods=1).mean()
+        scores["rolling_naive_mae"] = scores["naive_mae"].rolling(7, min_periods=1).mean()
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Days settled", int(len(scores)))
-        c2.metric("Model MAE", f"{scores['mae'].mean():.2f} EUR/MWh")
-        c3.metric("Baseline MAE (same hour D-1)", f"{scores['naive_mae'].mean():.2f} EUR/MWh")
-        c4.metric("Days with lower MAE than the baseline", f"{100 * scores['mae_below_baseline'].fillna(0).mean():.0f}%")
+        c1.metric("Days settled", head["days_in_window"], help=f"pre-market {default_set} days since {head['first_premarket_day']}, last 30")
+        c2.metric("Model MAE", f"{head['model_mae']:.2f} EUR/MWh")
+        c3.metric("Baseline MAE (same hour D-1)", f"{head['baseline_mae']:.2f} EUR/MWh")
+        c4.metric("Days with lower MAE than the baseline", f"{100 * head['share_below_baseline']:.0f}%")
+        if late_only_text(head):
+            st.warning(late_only_text(head))
         st.plotly_chart(performance_chart(scores), use_container_width=True)
         hist = history_chart(data)
         if hist is not None:
@@ -344,6 +416,20 @@ def main() -> None:
             st.dataframe(scores[[c for c in ("delivery_day", "issued_at_utc", "model", "hours", "mae", "rmse", "naive_mae", "naive_rmse",
                                               "mae_below_baseline") if c in scores]].round(2),
                          hide_index=True, use_container_width=True)
+    previous = record.get("previous")
+    if previous:
+        if previous["days"]:
+            st.markdown(f"**Previous model ({previous_set} set, {previous['first_premarket_day']} to {previous['last_premarket_day']}, before the "
+                        f"default model's first pre-market day)**: {previous['days']} day(s) settled with a pre-market version, model MAE "
+                        f"{previous['model_mae']:.2f} EUR/MWh, baseline MAE {previous['baseline_mae']:.2f}, lower than the baseline on "
+                        f"{100 * previous['share_below_baseline']:.0f}% of days. Its versions include models fitted live before the stored "
+                        f"model file existed (model column \"gbm\"). {late_only_text(previous)}")
+        else:
+            st.markdown(f"**Previous model ({previous_set} set)**: no day with a pre-market version. {late_only_text(previous)}")
+        with st.expander(f"Daily scores, previous model ({previous_set})"):
+            prev_table = tables["previous"]
+            st.dataframe(prev_table[[c for c in ("delivery_day", "issued_at_utc", "model", "hours", "mae", "rmse", "naive_mae", "naive_rmse",
+                                                   "mae_below_baseline") if c in prev_table]].round(2), hide_index=True, use_container_width=True)
 
     st.subheader("Versus the market")
     r = MARKET_RECORD
