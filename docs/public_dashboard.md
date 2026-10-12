@@ -31,7 +31,7 @@ The workflow is stateless: each run imports `published/` into a fresh SQLite sto
 
 ## Schedule
 
-GitHub cron is UTC. The workflow runs `morning-run` at 09:30 and 10:30 UTC on weekdays (10:30 and 11:30 London in summer, 09:30 and 10:30 in winter), `settle` at 13:15 UTC every day (14:15 London in summer, 13:15 in winter), and `refit` at 02:00 UTC on the first weekday of the month (the cron fires on the 1st to the 3rd and the job checks the weekday). GitHub may start scheduled runs several minutes late. Each step can also be started by hand from the Actions tab (Run workflow, choose the step). The very first run must be `refit`, so that `morning-run` has a model file.
+GitHub cron is UTC. The workflow runs `morning-run` at 09:30 and 10:30 UTC on weekdays (10:30 and 11:30 London in summer, 09:30 and 10:30 in winter), `settle` at 13:15 UTC every day (14:15 London in summer, 13:15 in winter), and `refit` at 02:00 UTC on the first weekday of the month (the cron fires on the 1st to the 3rd and the job checks the weekday). Since October 2026 the refit, like the pre-market run, is dispatched from the laptop (`thermo-fr dispatch --step refit`, first weekday at 07:00 London) and the cron is a backup: `thermo-fr refit-model --once-per-month` exits without committing when `published/model/*.json` already shows a refit in the current month, and the metadata records the trigger (`dispatch`, `cron` or `manual`). GitHub may start scheduled runs several minutes late. Each step can also be started by hand from the Actions tab (Run workflow, choose the step). The very first run must be `refit`, so that `morning-run` has a model file.
 
 ## One-time setup
 

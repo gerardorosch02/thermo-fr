@@ -191,16 +191,23 @@ def cmd_publish(args) -> None:
 
 def cmd_refit_model(args) -> None:
     from .forecast.jobs import setup_logging
-    from .forecast.refit import fetch_and_refit, refit_from_file
+    from .forecast.refit import fetch_and_refit, refit_from_file, refit_this_month
 
     setup_logging("refit-model", logs_dir=Path(args.logs_dir))
     sets = tuple(args.feature_sets)
+    if args.once_per_month:
+        done = refit_this_month(Path(args.out), sets)
+        if done is not None:
+            print(f"already refitted this month: {', '.join(done['feature_sets'])} fitted {done['fitted_at_utc']} ({done['trigger']} trigger); "
+                  f"nothing fetched, nothing written")
+            return
     if args.from_file:
-        metas = refit_from_file(Path(args.data), out_dir=Path(args.out), feature_sets=sets, probabilistic=not args.no_probabilistic)
+        metas = refit_from_file(Path(args.data), out_dir=Path(args.out), feature_sets=sets, probabilistic=not args.no_probabilistic,
+                                trigger=args.trigger)
     else:
         end = args.end or first_of_this_month()
         metas = fetch_and_refit(args.start, end, out_dir=Path(args.out), cache_dir=Path(args.cache_dir), csv_dir=Path(args.csv_dir),
-                                inputs_path=Path(args.data), feature_sets=sets, probabilistic=not args.no_probabilistic)
+                                inputs_path=Path(args.data), feature_sets=sets, probabilistic=not args.no_probabilistic, trigger=args.trigger)
     for feature_set, meta in metas.items():
         check = meta.get("recent_check") or {}
         print(f"{feature_set}: model fitted on {meta['train_hours']:,} hours ({meta['train_from']} to {meta['train_to']}), saved as "
@@ -619,7 +626,7 @@ def cmd_dispatch(args) -> None:
     store = Store(Path(args.db))
     try:
         result = dispatch_and_record(store, Path(args.repo), step=args.step, kind=args.kind, ref=args.ref, gh=args.gh, log=log,
-                                     wait_s=args.wait)
+                                     wait_s=args.wait, first_weekday_only=args.first_weekday_only)
     finally:
         store.close()
     print(f"{result['status']}: {result['message']}")
@@ -739,6 +746,10 @@ def main(argv=None) -> None:
     refit.add_argument("--feature-sets", nargs="+", default=["honest_v2", "honest"], choices=FEATURE_SETS,
                        help="one model file per set: the default model honest_v2 and the fallback honest (default: %(default)s)")
     refit.add_argument("--no-probabilistic", action="store_true", help="skip the quantile and event models (written for the first set)")
+    refit.add_argument("--once-per-month", action="store_true",
+                       help="exit without fetching or writing when the metadata under --out already shows a refit of every set in the "
+                            "current month (Paris calendar); the workflow uses it so the laptop dispatch and the backup cron commit one refit")
+    refit.add_argument("--trigger", default="manual", choices=("dispatch", "cron", "manual"), help="recorded in the metadata")
     refit.add_argument("--cache-dir", default="data/cache")
     refit.add_argument("--csv-dir", default="data/csv")
     refit.add_argument("--logs-dir", default="logs")
@@ -807,6 +818,9 @@ def main(argv=None) -> None:
     disp.add_argument("--gh", default="gh", help="the GitHub CLI executable")
     disp.add_argument("--wait", type=float, default=45.0, help="seconds to wait for the run to appear")
     disp.add_argument("--kind", default="manual", choices=("scheduled", "manual", "test"), help="recorded with the run in the local store")
+    disp.add_argument("--first-weekday-only", action="store_true",
+                      help="dispatch only when today (Paris) is the first weekday of the month, else record a skipped run; for the "
+                           "scheduled refit dispatch, whose task fires on the 1st to the 3rd")
     disp.set_defaults(func=cmd_dispatch)
     mpub.set_defaults(func=cmd_market_publish)
     meval = mkt_sub.add_parser("evaluate", help="score every stored market row with the forecast that was live before its window")

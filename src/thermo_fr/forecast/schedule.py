@@ -25,6 +25,12 @@ deadline, pre-market inside the window, and from 11:00 Paris a late run for
 information only, whose version the dashboards label "issued after the market
 window, not tradeable"; a later version never replaces a pre-market one, since
 the headline is the last version issued before the window (market.headline_version).
+
+The monthly refit follows the same pattern since October 2026: the laptop
+dispatches it on the first weekday of the month at 07:00 London (`thermo-fr
+dispatch --step refit --first-weekday-only`), the 02:00 UTC cron on the 1st to
+the 3rd stays as a backup, and `thermo-fr refit-model --once-per-month` makes
+whichever trigger arrives second exit without committing.
 """
 
 import argparse
@@ -53,6 +59,8 @@ def decide(now_utc: dt.datetime, event: str, schedule: str = "", dispatch_step: 
     paris = now_utc.astimezone(PARIS)
     if event == "workflow_dispatch":
         step = dispatch_step or "morning-run"
+        if step == "refit":
+            return step, "dispatched refit; once per month, a second trigger in the same month exits as already refitted"
         if step != "morning-run":
             return step, "manual dispatch"
         clock = paris.time()

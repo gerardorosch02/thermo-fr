@@ -20,6 +20,9 @@ from ..forecast.market import evaluate as evaluate_market
 from ..forecast.market import load_market
 from ..forecast.store import Store
 
+MODEL_DIR = Path("published/model")
+REFIT_RED_FROM_DAY = 5  # a month without a refit by this day of the month is shown in red
+
 INPUT_LABELS = {
     "load_fc_mw": "Load forecast (MW)",
     "wind_fc_mw": "Wind forecast (MW)",
@@ -157,7 +160,7 @@ def status_panel(path, delivery_day: str) -> dict:
     def read(store: Store):
         return {"latest": store.latest_status(delivery_day), "history": store.status_for(delivery_day),
                 "timing": store.timing_log(), "summary": store.timing_summary(), "runs": store.runs(limit=12),
-                "last_dispatch": last_publish_run(store, "dispatch")}
+                "last_dispatch": last_publish_run(store, "dispatch"), "last_refit_dispatch": last_publish_run(store, "dispatch-refit")}
 
     out = _with_store(path, read)
     latest = out["latest"]
@@ -195,6 +198,49 @@ def last_publish_run(store, command: str = "market-publish") -> dict | None:
     row = mine.iloc[0]
     return {"status": row["status"] or "running", "message": row["message"] or "", "started_at_utc": row["started_at_utc"],
             "finished_at_utc": row["finished_at_utc"], "kind": row["kind"]}
+
+
+def refit_panel(model_dir=MODEL_DIR, feature_set: str = "honest_v2", now=None, repo=None, red_from_day: int = REFIT_RED_FROM_DAY) -> dict:
+    """The last refit of the published model (date and trigger) and whether the current month has one.
+
+    With `repo` the metadata is read from origin/main, because the refit is committed by GitHub Actions and the local checkout can be
+    behind; when the fetch fails, or without `repo`, the local file is read and `source` says so. Levels: "ok" when the current month
+    (Paris calendar, the refit's own rule) has a refit, "due" when it has none before the `red_from_day`th, "overdue" (red) from that day,
+    "missing" without any metadata.
+    """
+    import json
+    import subprocess
+
+    from ..forecast.gitsync import GitSyncError, fetch_file
+    from ..forecast.refit import read_refit_metadata, refit_month
+    from ..forecast.schedule import PARIS
+
+    model_dir = Path(model_dir)
+    text, source = None, f"the local checkout ({model_dir.as_posix()}/{feature_set}.json)"
+    if repo is not None:
+        try:
+            text = fetch_file(repo, f"{model_dir.as_posix()}/{feature_set}.json")
+            source = "origin/main"
+        except (GitSyncError, OSError, subprocess.SubprocessError) as exc:
+            source = f"the local checkout, origin/main unreachable ({str(exc)[:100]})"
+    meta = json.loads(text) if text else read_refit_metadata(model_dir, feature_set)
+    moment = pd.Timestamp(now).tz_convert("UTC") if now is not None else pd.Timestamp.now(tz="UTC")
+    current = refit_month(moment)
+    out = {"source": source, "month": current, "fitted_at_utc": None, "trigger": None, "this_month": False, "red_from_day": red_from_day}
+    if not meta or not meta.get("fitted_at_utc"):
+        out.update(level="missing", message=f"No refit metadata for {feature_set} in {source}.")
+        return out
+    fitted = pd.Timestamp(meta["fitted_at_utc"])
+    trigger = meta.get("trigger") or "unknown"
+    out.update(fitted_at_utc=meta["fitted_at_utc"], trigger=trigger, this_month=refit_month(fitted) == current)
+    stamp = f"{fitted.strftime('%Y-%m-%d %H:%M')} UTC, trigger {trigger}"
+    if out["this_month"]:
+        out.update(level="ok", message=f"Last refit {stamp}: this month's refit is done.")
+    elif moment.tz_convert(PARIS).day < red_from_day:
+        out.update(level="due", message=f"No refit yet this month (due on the first weekday; red from the {red_from_day}th). Last refit {stamp}.")
+    else:
+        out.update(level="overdue", message=f"No refit this month by the {red_from_day}th. Last refit {stamp}.")
+    return out
 
 
 def market_panel(path, feature_set: str = "honest_v2", market_path=MARKET_PATH) -> dict:

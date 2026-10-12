@@ -65,6 +65,11 @@ def calibration_panel(path, version, feature_set):
     return q.calibration_panel(path, feature_set)
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def refit_panel(hour_stamp):
+    return q.refit_panel(repo=Path("."))  # fetches origin/main, where GitHub Actions commits the refit; at most once per quarter hour
+
+
 @st.cache_data(show_spinner=False)
 def shape_panel(path, version, feature_set):
     return q.shape_panel(path, feature_set)
@@ -479,6 +484,15 @@ def main() -> None:
         st.error(f"Dispatch {dispatch['started_at_utc']} ({dispatch['kind']}) failed: {dispatch['message']}")
     else:
         st.success(f"Dispatch {dispatch['started_at_utc']} ({dispatch['kind']}): {dispatch['message']}")
+    st.markdown("**Monthly refit** (dispatched from this machine on the first weekday of the month at 07:00 London, `thermo-fr dispatch "
+                "--step refit`; the GitHub cron is a backup, and the refit runs once per month whichever trigger arrives first)")
+    refit = refit_panel(pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%dT%H"))
+    {"ok": st.success, "due": st.warning, "overdue": st.error, "missing": st.error}[refit["level"]](refit["message"])
+    st.caption(f"Model metadata read from {refit['source']}.")
+    refit_dispatch = status.get("last_refit_dispatch")
+    if refit_dispatch is not None:
+        shown = {"failed": st.error, "skipped": st.caption}.get(refit_dispatch["status"], st.success)
+        shown(f"Refit dispatch {refit_dispatch['started_at_utc']} ({refit_dispatch['kind']}) {refit_dispatch['status']}: {refit_dispatch['message']}")
     st.markdown("**Market data collection** (the scheduled `thermo-fr market fetch`; raw responses and the log stay on this machine)")
     fetch_log = fetch_log_panel(q.db_version(q.FETCH_LOG_PATH))
     if fetch_log["entries"].empty:

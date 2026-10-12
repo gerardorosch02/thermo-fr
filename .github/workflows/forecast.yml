@@ -16,7 +16,12 @@ name: Day-ahead forecast
 #   settle       daily afternoon: fetches the auction results, scores the forecasts
 #   refit        first weekday of the month: fetches the full history since 2021,
 #                refits both models (honest_v2, the default, and honest, the
-#                fallback), commits only the model files and their metadata
+#                fallback), commits only the model files and their metadata.
+#                Dispatched from the laptop at 07:00 London (`thermo-fr dispatch
+#                --step refit`), the 02:00 UTC cron is a backup; `--once-per-month`
+#                makes the second trigger of a month exit as "already refitted
+#                this month" without committing, and the metadata records which
+#                trigger (dispatch or cron) produced the fit
 #
 # Two publishers. This workflow commits the public dataset under published/.
 # The laptop commits one file, published/market.json (the aggregates of the
@@ -44,7 +49,8 @@ name: Day-ahead forecast
 # version issued before the window. A version's issue time is the run's wall
 # clock, never a scheduled time. Settle runs at 13:15 UTC daily (a late settle
 # is harmless); the refit cron fires on the 1st, 2nd and 3rd at 02:00 UTC and
-# proceeds only on the first weekday of the month.
+# proceeds only on the first weekday of the month, as a backup for the laptop's
+# refit dispatch that morning.
 
 on:
   schedule:
@@ -54,7 +60,7 @@ on:
     - cron: "35 9 * * 1-5"    # backup pre-market run, winter (10:35 Paris); skipped in summer
     - cron: "30 10 * * 1-5"   # later run, information only (after the market window)
     - cron: "15 13 * * *"     # settle
-    - cron: "0 2 1-3 * *"     # refit, on the first weekday of the month only
+    - cron: "0 2 1-3 * *"     # backup refit, on the first weekday of the month only (the laptop dispatches the refit at 07:00 London)
   workflow_dispatch:
     inputs:
       step:
@@ -108,7 +114,8 @@ jobs:
             settle)
               thermo-fr settle --kind scheduled --db data/forecast.db ;;
             refit)
-              thermo-fr refit-model --start 2021-01-01 --out published/model --feature-sets honest_v2 honest ;;
+              thermo-fr refit-model --start 2021-01-01 --out published/model --feature-sets honest_v2 honest \
+                --once-per-month --trigger "${{ github.event_name == 'workflow_dispatch' && 'dispatch' || 'cron' }}" ;;
             morning-run)
               test -f published/model/honest_v2.txt || { echo "no stored model: run the refit step first"; exit 1; }
               thermo-fr morning-run --kind scheduled --db data/forecast.db --data data/forecast/inputs.csv \

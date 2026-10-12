@@ -7,6 +7,11 @@ cron ran at 17:51 and 18:04 UTC and the four weekday morning crons never ran. A 
 backup and the workflow's `schedule-step` treats a dispatched run exactly like a cron run (see forecast/schedule.py), so a dispatch that
 only starts after the window is labelled "issued after the market window, not tradeable" and never replaces a pre-market version.
 
+The monthly refit is dispatched the same way (`thermo-fr dispatch --step refit --first-weekday-only`, a scheduled task on the 1st to
+the 3rd at 07:00 London that dispatches on the first weekday of the month only), with the refit cron as a backup; the refit itself is
+idempotent (`thermo-fr refit-model --once-per-month`), so whichever trigger reaches the workflow second exits as "already refitted
+this month" without committing. Refit dispatches are recorded under the command "dispatch-refit".
+
 No secret touches the command line: gh authenticates with the login stored in its own keyring (`gh auth login` once), and the
 environment disables every prompt so a scheduled run that cannot authenticate fails with a message instead of hanging. Each dispatch
 is recorded as a run (command "dispatch") in the local store, failures included, which the local dashboard shows in red.
@@ -21,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .schedule import decide
+from .schedule import PARIS, decide, first_weekday_of_month
 from .store import Store
 
 WORKFLOW = "forecast.yml"
@@ -70,11 +75,28 @@ def dispatch_workflow(repo, step: str = "morning-run", ref: str = "main", workfl
             raise DispatchError(f"gh workflow run returned but no workflow_dispatch run of {workflow} appeared within {wait_s:.0f} s")
 
 
-def expected_label(now=None) -> str:
-    """What schedule-step will make of a morning-run dispatched now (the same rule the workflow applies)."""
-    moment = (pd.Timestamp(now).tz_convert("UTC") if now is not None else pd.Timestamp.now(tz="UTC")).to_pydatetime()
-    step, reason = decide(moment, "workflow_dispatch", "", "morning-run")
-    return f"{step}: {reason}"
+def _moment(now=None) -> pd.Timestamp:
+    return pd.Timestamp(now).tz_convert("UTC") if now is not None else pd.Timestamp.now(tz="UTC")
+
+
+def expected_label(now=None, step: str = "morning-run") -> str:
+    """What schedule-step will make of `step` dispatched now (the same rule the workflow applies)."""
+    decided, reason = decide(_moment(now).to_pydatetime(), "workflow_dispatch", "", step)
+    return f"{decided}: {reason}"
+
+
+def run_command(step: str) -> str:
+    """The command a dispatch is recorded under in the store: "dispatch" for the forecast, "dispatch-<step>" otherwise."""
+    return "dispatch" if step == "morning-run" else f"dispatch-{step}"
+
+
+def not_first_weekday(now=None) -> str | None:
+    """A reason to skip when today in Paris is not the first weekday of the month, else None."""
+    today = _moment(now).tz_convert(PARIS).date()
+    first = first_weekday_of_month(today)
+    if today == first:
+        return None
+    return f"{today} is not the first weekday of the month ({first}); the task fires on the 1st to the 3rd and dispatches once"
 
 
 RETRY_DELAY_S = 60.0  # after waking from sleep the network can take a few seconds to return
@@ -82,18 +104,26 @@ RETRY_DELAY_S = 60.0  # after waking from sleep the network can take a few secon
 
 def dispatch_and_record(store: Store, repo, step: str = "morning-run", kind: str = "manual", ref: str = "main", gh: str = "gh",
                         runner=subprocess.run, log=None, now=None, retries: int = 1, retry_delay_s: float | None = None,
-                        sleep=time.sleep, **kw) -> dict:
-    """Dispatch and record the outcome as a run in the store (ok or failed); never raises for a failed dispatch.
+                        sleep=time.sleep, first_weekday_only: bool = False, **kw) -> dict:
+    """Dispatch and record the outcome as a run in the store (ok, skipped or failed); never raises for a failed dispatch.
 
     A network or gh error is retried once after `retry_delay_s` seconds before a failure is recorded; the second scheduled dispatch
-    of the morning is the next chance after that.
+    of the morning is the next chance after that. With `first_weekday_only` nothing is sent unless today (Paris) is the first weekday
+    of the month: the refit task fires on the 1st to the 3rd and the other days are recorded as skipped.
     """
     import logging
 
     log = log or logging.getLogger("thermo_fr.dispatch")
     retry_delay_s = RETRY_DELAY_S if retry_delay_s is None else retry_delay_s
-    run_id = store.start_run("dispatch", kind, None, now=now)
-    expected = expected_label(now) if step == "morning-run" else f"{step}: manual dispatch"
+    run_id = store.start_run(run_command(step), kind, None, now=now)
+    expected = expected_label(now, step)
+    if first_weekday_only:
+        reason = not_first_weekday(now)
+        if reason is not None:
+            message = f"{step} not dispatched: {reason}"
+            log.info(message)
+            store.finish_run(run_id, "skipped", message, now=now)
+            return {"status": "skipped", "message": message, "attempts": 0}
     attempt, errors = 0, []
     while True:
         attempt += 1

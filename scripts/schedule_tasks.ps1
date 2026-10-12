@@ -22,6 +22,15 @@ machine is asleep or hibernating rather than shut down:
                           login, no secret is on the command line, and each dispatch is
                           recorded as a run in the local store (red on the dashboard when
                           it fails).
+  thermo-fr dispatch refit  the 1st, 2nd and 3rd of each month at 07:00 local time: runs
+                          `gh workflow run` for the refit step on main, on the first weekday
+                          of the month only (the other days are recorded as skipped), with the
+                          same stored login, logging and single retry as the forecast dispatch.
+                          The GitHub refit cron stays as a backup; the refit itself runs once
+                          per month (`--once-per-month` in the workflow), so a second trigger
+                          exits without committing. Task Scheduler's PowerShell cmdlets have
+                          no monthly trigger, so the task is registered with a placeholder and
+                          its trigger is replaced through the Task Scheduler COM API.
   thermo-fr settle        every day at 14:00 local time
   thermo-fr market publish  every day at 14:30 local time, after the settle: writes
                           published/market.json from the local store and the traded
@@ -81,6 +90,7 @@ $outageName = "thermo-fr outage snapshot"
 $fuelName = "thermo-fr fuel snapshot"
 $marketPublishName = "thermo-fr market publish"
 $dispatchName = "thermo-fr dispatch forecast"
+$refitDispatchName = "thermo-fr dispatch refit"
 
 function Remove-IfPresent($name) {
     $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
@@ -98,6 +108,7 @@ if ($Remove) {
     Remove-IfPresent $fuelName
     Remove-IfPresent $marketPublishName
     Remove-IfPresent $dispatchName
+    Remove-IfPresent $refitDispatchName
 }
 
 if ($Install) {
@@ -108,6 +119,7 @@ if ($Install) {
     Remove-IfPresent $fuelName
     Remove-IfPresent $marketPublishName
     Remove-IfPresent $dispatchName
+    Remove-IfPresent $refitDispatchName
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
         -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $weekdays = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
@@ -129,6 +141,25 @@ if ($Install) {
     Register-ScheduledTask -TaskName $dispatchName -Action $dispatchAction -Trigger $dispatchTriggers -Settings $settings `
         -Description "thermo-fr: trigger the GitHub Actions pre-market forecast run (gh workflow run; the GitHub crons are a backup)" | Out-Null
     Write-Host "Installed task '$dispatchName' (weekdays 09:05 and 09:30 local time, 10:05 and 10:30 Paris)"
+
+    # Monthly trigger on the 1st to the 3rd at 07:00: New-ScheduledTaskTrigger has no monthly form, so the task is registered with a
+    # placeholder daily trigger and its triggers are replaced through the Task Scheduler COM API (trigger type 4, TASK_TRIGGER_MONTHLY,
+    # days and months as bitmasks). The command itself dispatches on the first weekday of the month only.
+    $refitAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr dispatch --step refit --kind scheduled --first-weekday-only" -WorkingDirectory $repo
+    Register-ScheduledTask -TaskName $refitDispatchName -Action $refitAction -Trigger (New-ScheduledTaskTrigger -Daily -At "07:00") -Settings $settings `
+        -Description "thermo-fr: trigger the GitHub Actions monthly refit on the first weekday of the month (gh workflow run; the GitHub cron is a backup)" | Out-Null
+    $service = New-Object -ComObject Schedule.Service
+    $service.Connect()
+    $folder = $service.GetFolder("\")
+    $definition = $folder.GetTask($refitDispatchName).Definition
+    $definition.Triggers.Clear()
+    $monthly = $definition.Triggers.Create(4)
+    $monthly.DaysOfMonth = 7          # bitmask: days 1, 2 and 3
+    $monthly.MonthsOfYear = 4095      # every month
+    $monthly.StartBoundary = (Get-Date -Format "yyyy-MM-dd") + "T07:00:00"
+    $monthly.Enabled = $true
+    $folder.RegisterTaskDefinition($refitDispatchName, $definition, 4, $null, $null, 3) | Out-Null   # 4 = TASK_UPDATE, 3 = interactive token
+    Write-Host "Installed task '$refitDispatchName' (the 1st, 2nd and 3rd of each month at 07:00 local time; dispatches on the first weekday only)"
 
     $settleTrigger = New-ScheduledTaskTrigger -Daily -At "14:00"
     $settleAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr settle --kind scheduled" -WorkingDirectory $repo
@@ -176,7 +207,7 @@ if ($Install) {
 }
 
 if ($Show -or $Install) {
-    foreach ($name in @($morningName, $dispatchName, $settleName, $marketName, $outageName, $fuelName, $marketPublishName)) {
+    foreach ($name in @($morningName, $dispatchName, $refitDispatchName, $settleName, $marketName, $outageName, $fuelName, $marketPublishName)) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -eq $task) { Write-Host "Task '$name' is not installed"; continue }
         $info = Get-ScheduledTaskInfo -TaskName $name
@@ -184,7 +215,9 @@ if ($Show -or $Install) {
             $name, $task.State, $info.NextRunTime, $info.LastRunTime, $info.LastTaskResult, $task.Settings.WakeToRun, $task.Settings.StartWhenAvailable)
         foreach ($trigger in $task.Triggers) {
             $start = ([datetime]$trigger.StartBoundary).ToString("HH:mm")
-            $days = if ($trigger.DaysOfWeek) { $trigger.DaysOfWeek } else { "daily" }
+            $days = if ($trigger.DaysOfWeek) { $trigger.DaysOfWeek }
+                    elseif ($trigger.CimClass.CimClassName -eq "MSFT_TaskMonthlyTrigger") { "monthly, the 1st to the 3rd" }
+                    else { "daily" }
             Write-Host ("    trigger at {0} ({1})" -f $start, $days)
         }
     }
