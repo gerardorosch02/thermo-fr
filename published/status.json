@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-10-11T18:04:56Z",
+  "written_at_utc": "2026-10-12T10:23:42Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -9,9 +9,9 @@
   "fallback_model_file": "model/honest.txt",
   "model_note": "Every forecast version in forecasts.csv and scores.csv carries the model that produced it in the model column: gbm:<file> for a stored model, with the suffix :fallback when the default model's inputs were missing and the fallback model was used, and gbm for a model fitted live.",
   "window_days": 90,
-  "from_day": "2026-07-13",
-  "tomorrow": "2026-10-12",
-  "forecast_versions": 14,
+  "from_day": "2026-07-14",
+  "tomorrow": "2026-10-13",
+  "forecast_versions": 15,
   "actual_days": 6,
   "scored_versions": 14,
   "model": {
@@ -116,11 +116,11 @@
   },
   "last_run": {
     "run_id": 1,
-    "command": "settle",
+    "command": "morning-run",
     "kind": "scheduled",
-    "delivery_day": null,
-    "started_at_utc": "2026-10-11T18:04:47Z",
-    "finished_at_utc": "2026-10-11T18:04:55Z",
+    "delivery_day": "2026-10-13",
+    "started_at_utc": "2026-10-12T10:22:31Z",
+    "finished_at_utc": "2026-10-12T10:23:41Z",
     "status": "ok",
     "message": ""
   },
