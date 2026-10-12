@@ -26,8 +26,13 @@ class GitSyncError(RuntimeError):
 
 
 def _environment(env=None) -> dict:
-    """The inherited environment without any GIT_AUTHOR_* or GIT_COMMITTER_* variable, prompts disabled, plus `env`."""
-    base = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))}
+    """The inherited environment without any GIT_* variable, prompts disabled, plus `env`.
+
+    A git hook (the pre-commit hook that runs the tests) exports GIT_DIR, GIT_INDEX_FILE and GIT_PREFIX to its children; inherited, they
+    would point every git call here at the hook's repository and index instead of the worktree or clone given as cwd. The identity
+    variables are set explicitly per call, so dropping the inherited ones is also what keeps a personal address off the commits.
+    """
+    base = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     return {**base, **NO_PROMPT_ENV, **(env or {})}
 
 
@@ -69,6 +74,39 @@ def fetch_file(repo, path: str, remote: str = "origin", branch: str = "main", ru
             return None
         raise GitSyncError(f"git show {remote}/{branch}:{path}: {shown.stderr.strip()}")
     return shown.stdout
+
+
+WORKTREE_DIR = ".publish-worktree"  # git-ignored; a detached checkout of origin/main used only by the scheduled publish
+
+
+def publish_worktree(repo, remote: str = "origin", branch: str = "main", runner=subprocess.run, log=print) -> Path:
+    """A dedicated worktree of `remote/branch` under the repository, created on first use and reset to the fetched branch every time.
+
+    The scheduled publish commits and pushes from here, so whatever branch or uncommitted state the main working tree is in has no
+    effect and is not affected: the worktree is detached (so the main tree's checkout of `branch` is never in the way), hard-reset to
+    the remote branch and cleaned before each publish, and listed in .git/info/exclude so no checkout ever sees it as untracked.
+    """
+    repo = Path(repo)
+    wt = repo / WORKTREE_DIR
+    _git(repo, "fetch", remote, branch, runner=runner)
+    git_dir = Path(_git(repo, "rev-parse", "--git-common-dir", runner=runner).stdout.strip())
+    git_dir = git_dir if git_dir.is_absolute() else repo / git_dir
+    exclude = git_dir / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    marker = f"/{WORKTREE_DIR}/"
+    if not exclude.exists() or marker not in exclude.read_text(encoding="utf-8"):
+        with exclude.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n{marker}\n")
+    if not (wt / ".git").exists():
+        _git(repo, "worktree", "prune", check=False, runner=runner)
+        if wt.exists():
+            raise GitSyncError(f"{wt} exists but is not a git worktree; remove it and run again")
+        _git(repo, "worktree", "add", "--detach", str(wt), f"{remote}/{branch}", runner=runner)
+        log(f"created the publish worktree at {wt}")
+    _git(wt, "checkout", "-q", "--detach", f"{remote}/{branch}", runner=runner)
+    _git(wt, "reset", "-q", "--hard", f"{remote}/{branch}", runner=runner)
+    _git(wt, "clean", "-fdq", runner=runner)
+    return wt
 
 
 def commit_and_push(repo, paths, message: str, remote: str = "origin", branch: str = "main", runner=subprocess.run, log=print) -> dict:

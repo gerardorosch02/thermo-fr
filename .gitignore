@@ -6,3 +6,4 @@ __pycache__/
 /reports/
 /logs/
 /local/
+/.publish-worktree/

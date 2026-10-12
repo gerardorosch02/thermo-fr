@@ -258,23 +258,34 @@ def market_publish(store, out, market_path, repo, branch: str = "main", kind: st
     """
     import logging
 
-    from .forecast.gitsync import GitSyncError, commit_and_push, fetch_file
+    from .forecast.gitsync import GitSyncError, commit_and_push, fetch_file, publish_worktree
     from .forecast.market import sync_published_versions
     from .forecast.publish import write_market_file
 
     log = log or logging.getLogger("thermo_fr.market")
     run_id = store.start_run("market-publish", kind, None, now=now)
+    git_kw = {"runner": runner} if runner is not None else {}
     try:
         # the aggregates score the versions the public has seen: forecasts.csv as committed on the remote branch, archived locally
         out_in_repo = Path(out).resolve().relative_to(Path(repo).resolve()) if Path(out).is_absolute() else Path(out)
-        text = fetch_file(Path(repo), f"{out_in_repo.as_posix()}/forecasts.csv", branch=branch,
-                          **({"runner": runner} if runner is not None else {}))
+        text = fetch_file(Path(repo), f"{out_in_repo.as_posix()}/forecasts.csv", branch=branch, **git_kw)
         if text is None:
             log.warning("no published forecasts.csv on origin/%s; scoring the archived published versions only", branch)
         else:
             new = sync_published_versions(store, text, now=now)
             log.info("published versions archived: %d new, %d in total", new, store.published_version_count())
-        section = write_market_file(store, Path(out), Path(market_path))
+        if not push:  # inspection only: the file goes to the main tree's published folder and nothing is committed
+            section = write_market_file(store, Path(out), Path(market_path))
+            if section is None:
+                message = f"no traded prices in {market_path}: market.json not written"
+                store.finish_run(run_id, "skipped", message, now=now)
+                return {"status": "skipped", "message": message}
+            written = f"market.json: {section['scored_days']} scored day(s), computed {section.get('computed_at_utc')}"
+            store.finish_run(run_id, "ok", f"{written}; not pushed (--no-push)", now=now)
+            return {"status": "ok", "message": written, "section": section}
+        # the publish happens in a dedicated worktree of origin/main: the main working tree, whatever its branch or state, is never used
+        worktree = publish_worktree(Path(repo), branch=branch, log=log.info, **git_kw)
+        section = write_market_file(store, worktree / out_in_repo, Path(market_path))
         if section is None:
             message = f"no traded prices in {market_path}: market.json not written, nothing to push"
             log.warning(message)
@@ -282,11 +293,8 @@ def market_publish(store, out, market_path, repo, branch: str = "main", kind: st
             return {"status": "skipped", "message": message}
         written = f"market.json: {section['scored_days']} scored day(s), computed {section.get('computed_at_utc')}"
         log.info(written)
-        if not push:
-            store.finish_run(run_id, "ok", f"{written}; not pushed (--no-push)", now=now)
-            return {"status": "ok", "message": written, "section": section}
-        result = commit_and_push(Path(repo), [Path(out) / "market.json"], f"Market aggregates {pd.Timestamp.now(tz='UTC'):%Y-%m-%dT%H:%MZ}",
-                                 branch=branch, log=log.info, **({"runner": runner} if runner is not None else {}))
+        result = commit_and_push(worktree, [out_in_repo / "market.json"], f"Market aggregates {pd.Timestamp.now(tz='UTC'):%Y-%m-%dT%H:%MZ}",
+                                 branch=branch, log=log.info, **git_kw)
         if result["pushed"]:
             message = f"{written}; pushed to origin/{branch} on attempt {result['attempts']} as {result['identity']}"
         else:
@@ -696,8 +704,9 @@ def main(argv=None) -> None:
     mfetch.add_argument("--raw-dir", default="data/market/raw", help="where raw responses are kept (git-ignored)")
     mfetch.add_argument("--spacing", type=float, default=10.0, help="seconds between requests")
     mfetch.set_defaults(func=cmd_market_fetch)
-    mpub = mkt_sub.add_parser("publish", help="laptop only: write published/market.json from the local store and push that one file "
-                                              "(rebase onto the workflow's commits, never force)")
+    mpub = mkt_sub.add_parser("publish", help="laptop only: write published/market.json from the local store and push that one file from a "
+                                              "dedicated worktree of origin/main (.publish-worktree; rebase onto the workflow's commits, never force); "
+                                              "the main working tree is never used, whatever branch or state it is in")
     mpub.add_argument("--db", default="data/forecast.db")
     mpub.add_argument("--path", default="data/market/eex_fr_da.csv")
     mpub.add_argument("--out", default="published")

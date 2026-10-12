@@ -26,7 +26,10 @@ machine is asleep or hibernating rather than shut down:
   thermo-fr market publish  every day at 14:30 local time, after the settle: writes
                           published/market.json from the local store and the traded
                           prices, commits that one file and pushes it (pull with
-                          rebase first, one retry, never a force push). The workflow
+                          rebase first, one retry, never a force push). It works in a
+                          dedicated worktree of origin/main (.publish-worktree, git-ignored,
+                          created on first use), so the main working tree is never used,
+                          whatever branch or uncommitted state it is in. The workflow
                           never writes market.json, so the two publishers touch
                           different files. The commit carries the identity of the
                           repository's local git config, skips the pre-commit hook
