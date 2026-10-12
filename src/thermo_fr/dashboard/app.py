@@ -16,6 +16,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from thermo_fr.dashboard import data as q
+from thermo_fr.dashboard import probability_text as pt
 
 COLORS = {"honest_v2": "#2a78d6", "honest": "#6f5fc6", "extended": "#1baf7a", "actual": "#eb6834", "benchmark": "#52514e", "grid": "#e6e5e1"}
 BAND_RGBA = {"honest_v2": ("rgba(42,120,214,0.14)", "rgba(42,120,214,0.30)"), "honest": ("rgba(111,95,198,0.14)", "rgba(111,95,198,0.30)"),
@@ -239,11 +240,22 @@ def main() -> None:
             has_band = "band_p10" in by_hour
             st.plotly_chart(forecast_chart(by_hour, feature_set, today, has_band), use_container_width=True)
         if "p_negative" in by_hour and by_hour["p_negative"].notna().any():
+            summary = pt.negative_summary(by_hour)
+            st.markdown(f"**{summary['text']}**")
+            neg_text, spike_text = by_hour["p_negative"].map(pt.format_probability), by_hour["p_spike"].map(pt.format_probability)
             prob_fig = go.Figure()
-            prob_fig.add_trace(go.Bar(x=by_hour["hour"], y=by_hour["p_negative"], name="P(price < 0)", marker_color=COLORS[feature_set]))
-            prob_fig.add_trace(go.Bar(x=by_hour["hour"], y=by_hour["p_spike"], name="P(spike), under evaluation", marker_color=COLORS["actual"]))
-            prob_fig.update_layout(barmode="group", yaxis=dict(range=[0, 1]))
+            prob_fig.add_trace(go.Bar(x=by_hour["hour"], y=by_hour["p_negative"], name="P(price < 0)", marker_color=COLORS[feature_set],
+                                      customdata=neg_text, hovertemplate="%{x}:00 Paris, negative: %{customdata}<extra></extra>"))
+            prob_fig.add_trace(go.Bar(x=by_hour["hour"], y=by_hour["p_spike"], name="P(spike), under evaluation", marker_color=COLORS["actual"],
+                                      customdata=spike_text, hovertemplate="%{x}:00 Paris, spike: %{customdata}<extra></extra>"))
+            top = pt.probability_axis_top(max(summary["max_p"] or 0.0, float(by_hour["p_spike"].max()) if by_hour["p_spike"].notna().any() else 0.0))
+            prob_fig.update_layout(barmode="group", yaxis=dict(range=[0, top], tickformat=".0%"))
+            if pt.show_half_line(top):
+                prob_fig.add_hline(y=0.5, line=dict(color="#e6e5e1", width=1, dash="dot"))
             st.plotly_chart(base_layout(prob_fig, "Probability"), use_container_width=True)
+            with st.expander("Hourly probabilities"):
+                st.dataframe(pd.DataFrame({"hour": by_hour["hour"], "P(price < 0)": neg_text, "P(spike), under evaluation": spike_text}),
+                             hide_index=True, use_container_width=True)
             st.caption(f"Per-hour probability of a negative price (published) and of a spike above the trailing-year 95th percentile "
                        f"({by_hour['spike_threshold'].iloc[0]:.0f} EUR/MWh at this issue; under evaluation, not published: on the holdout the "
                        "trailing threshold labelled 41% of hours as spikes).")
@@ -393,6 +405,8 @@ def main() -> None:
                     st.dataframe(pd.DataFrame(live[event]["reliability"]), hide_index=True, use_container_width=True)
     else:
         st.info("No settled day with a band yet; the live calibration starts with the first.")
+    if pt.lowest_bin_sentence(cal["backtest"] or {}):
+        st.caption(pt.lowest_bin_sentence(cal["backtest"] or {}))
     for label, record in (cal["backtest"] or {}).items():
         overall = record["intervals"]["all"]
         st.markdown(f"**Backtest {label}, {record['first_day']} to {record['last_day']}**: 10-90 coverage {100 * overall['model']['coverage_10_90']:.1f}%, "
