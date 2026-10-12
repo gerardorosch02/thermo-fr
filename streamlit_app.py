@@ -93,36 +93,68 @@ def live_record(scores: pd.DataFrame, default_set: str = "honest_v2", previous_s
 
 
 # ---------------------------------------------------------------------------- display of event probabilities (the published values keep full precision)
-BELOW_1PCT = "below 1%"
 SUMMARY_THRESHOLD = 0.05  # hours above this count in the one-line summary
-VERY_UNLIKELY = "Negative prices very unlikely tomorrow (every hour below 1%)."
+FALLBACK_BIN = {"upper": 0.01, "observed": None, "mean_forecast": None, "source": None}  # without a backtest file: under 1% is "low"
 
 
-def format_probability(p) -> str:
-    """Display form of a probability: 'below 1%' under 1% (the lowest reliability bin is overconfident), one decimal under 10%, else whole."""
+def lowest_bin(backtest: dict) -> dict:
+    """The lowest bin of the negative-price reliability table, from the holdout window (else the selection window), of probabilistic_backtest.json.
+
+    Returns upper (the bin's upper edge as a probability), observed (the share of its hours that went negative), mean_forecast and source;
+    FALLBACK_BIN when the file carries no table. Nothing here is hard-coded: the label follows the table.
+    """
+    for source in ("holdout", "selection", *sorted(k for k in (backtest or {}) if k not in ("holdout", "selection"))):
+        record = (backtest or {}).get(source) or {}
+        table = (record.get("events", {}).get("negative", {}) or {}).get("reliability") or []
+        if table:
+            first = table[0]
+            upper = float(str(first["bin"]).split("-")[-1])
+            return {"upper": upper, "observed": float(first["observed_frequency"]), "mean_forecast": float(first["mean_forecast"]), "source": source}
+    return dict(FALLBACK_BIN)
+
+
+def bin_label(info: dict) -> str:
+    """'low (about 2% historically)' from the bin's observed rate, rounded to the nearest percent; 'low' when no table is available."""
+    if info is None or info.get("observed") is None:
+        return "low"
+    return f"low (about {round(100 * info['observed']):d}% historically)"
+
+
+def format_probability(p, info: dict | None = None) -> str:
+    """Display form of a probability: the bin label for hours in the lowest reliability bin, one decimal under 10%, else whole percents."""
     if p is None or pd.isna(p):
         return "n/a"
+    info = info or FALLBACK_BIN
     p = float(p)
-    if p < 0.01:
-        return BELOW_1PCT
+    if p < info["upper"]:
+        return bin_label(info)
     return f"{100 * p:.1f}%" if p < 0.10 else f"{100 * p:.0f}%"
 
 
-def negative_summary(hourly: pd.DataFrame, column: str = "p_negative") -> dict:
-    """One line about tomorrow: the highest hourly probability and its hour, and the hours above 5%; or the very-unlikely sentence."""
+def unlikely_sentence(info: dict | None) -> str:
+    info = info or FALLBACK_BIN
+    if info.get("observed") is None:
+        return f"Negative prices unlikely tomorrow (every hour below {100 * info['upper']:.0f}%)."
+    return (f"Negative prices unlikely tomorrow (every hour in the lowest band, where about {round(100 * info['observed']):d}% of hours "
+            "historically went negative).")
+
+
+def negative_summary(hourly: pd.DataFrame, info: dict | None = None, column: str = "p_negative") -> dict:
+    """One line about tomorrow: the highest hourly probability and its hour, and the hours above 5%; or the unlikely sentence."""
+    info = info or FALLBACK_BIN
     if hourly is None or hourly.empty or column not in hourly or hourly[column].isna().all():
-        return {"text": "", "max_p": None, "max_hour": None, "hours_above_5pct": 0, "all_below_1pct": False}
+        return {"text": "", "max_p": None, "max_hour": None, "hours_above_5pct": 0, "all_in_lowest_band": False}
     values = hourly[[c for c in ("hour", column) if c in hourly]].dropna(subset=[column])
     top = values.loc[values[column].idxmax()]
     max_p, max_hour = float(top[column]), int(top["hour"]) if "hour" in values else None
     above = int((values[column] > SUMMARY_THRESHOLD).sum())
-    all_below = bool((values[column] < 0.01).all())
-    if all_below:
-        text = VERY_UNLIKELY
+    all_lowest = bool((values[column] < info["upper"]).all())
+    if all_lowest:
+        text = unlikely_sentence(info)
     else:
         where = f" at {max_hour:02d}:00 Paris" if max_hour is not None else ""
-        text = f"Highest hourly probability of a negative price tomorrow: {format_probability(max_p)}{where}; {above} hour(s) above 5%."
-    return {"text": text, "max_p": max_p, "max_hour": max_hour, "hours_above_5pct": above, "all_below_1pct": all_below}
+        text = f"Highest hourly probability of a negative price tomorrow: {format_probability(max_p, info)}{where}; {above} hour(s) above 5%."
+    return {"text": text, "max_p": max_p, "max_hour": max_hour, "hours_above_5pct": above, "all_in_lowest_band": all_lowest}
 
 
 def probability_axis_top(max_p) -> float:
@@ -137,18 +169,21 @@ def show_half_line(axis_top: float) -> bool:
 
 
 def lowest_bin_sentence(backtest: dict) -> str:
-    """Why probabilities below 1% are shown as 'below 1%': the lowest reliability bin of the negative-price backtest is overconfident."""
-    parts = []
-    for label, record in (backtest or {}).items():
-        table = (record.get("events", {}).get("negative", {}) or {}).get("reliability") or []
-        if table:
-            first = table[0]
-            parts.append(f"{label}: forecast about {100 * float(first['mean_forecast']):.1f}%, observed {100 * float(first['observed_frequency']):.1f}%")
-    if not parts:
+    """Why hours in the lowest bin carry the bin's label instead of the model's figure: that bin is overconfident."""
+    info = lowest_bin(backtest)
+    if info.get("observed") is None:
         return ""
-    return ("The lowest reliability bin is overconfident: where the model gave well under 1%, negative prices still occurred about 2% of the "
-            "time (" + "; ".join(parts) + "). Probabilities below 1% are therefore shown as \"below 1%\", never as 0.0%; the published CSV keeps "
-            "the full values.")
+    others = []
+    for source in ("holdout", "selection"):
+        if source == info["source"]:
+            continue
+        other = lowest_bin({source: (backtest or {}).get(source) or {}})
+        if other.get("observed") is not None:
+            others.append(f"{source}: {100 * other['mean_forecast']:.1f}% against {100 * other['observed']:.1f}%")
+    return (f"In the lowest reliability bin (forecasts below {100 * info['upper']:.0f}%) the model is overconfident: on the {info['source']} "
+            f"window it gave {100 * info['mean_forecast']:.1f}% on average where {100 * info['observed']:.1f}% of those hours went negative"
+            + (f" ({'; '.join(others)})" if others else "") + f". Hours in that bin are therefore labelled \"{bin_label(info)}\" rather than with "
+            "the model's own figure; the published CSV keeps the full values.")
 
 
 def headline_rows(frame: pd.DataFrame) -> pd.DataFrame:
@@ -536,9 +571,10 @@ def main() -> None:
         hourly = prob.groupby("hour").agg(p_negative=("p_negative", "mean")).reset_index()
         st.markdown("**Tomorrow's per-hour probability of a negative price** (headline version), from a classifier on the same inputs as the "
                     "point forecast.")
-        summary = negative_summary(hourly)
+        bin_info = lowest_bin(data.get("prob_backtest") or {})
+        summary = negative_summary(hourly, bin_info)
         st.markdown(f"**{summary['text']}**")
-        shown = hourly["p_negative"].map(format_probability)
+        shown = hourly["p_negative"].map(lambda p: format_probability(p, bin_info))
         fig = go.Figure(go.Bar(x=hourly["hour"], y=hourly["p_negative"], name="P(price < 0)", marker_color=COLORS["forecast"],
                                customdata=shown, hovertemplate="%{x}:00 Paris: %{customdata}<extra></extra>"))
         top = probability_axis_top(summary["max_p"])
