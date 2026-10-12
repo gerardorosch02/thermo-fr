@@ -211,12 +211,19 @@ if ($Show -or $Install) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -eq $task) { Write-Host "Task '$name' is not installed"; continue }
         $info = Get-ScheduledTaskInfo -TaskName $name
+        $next = $info.NextRunTime
+        if ($null -eq $next -or $next.Year -lt 2000) {
+            # Get-ScheduledTaskInfo reports no next run for a monthly trigger registered through the COM API; schtasks computes it
+            $row = schtasks /query /tn $name /fo csv /v | ConvertFrom-Csv | Select-Object -First 1
+            $next = "$($row.'Next Run Time') (from schtasks)"
+        }
         Write-Host ("{0}: state {1}, next run {2}, last run {3} (result {4}), wake to run {5}, start when available {6}" -f `
-            $name, $task.State, $info.NextRunTime, $info.LastRunTime, $info.LastTaskResult, $task.Settings.WakeToRun, $task.Settings.StartWhenAvailable)
+            $name, $task.State, $next, $info.LastRunTime, $info.LastTaskResult, $task.Settings.WakeToRun, $task.Settings.StartWhenAvailable)
+        $xml = [string](Export-ScheduledTask -TaskName $name)
         foreach ($trigger in $task.Triggers) {
             $start = ([datetime]$trigger.StartBoundary).ToString("HH:mm")
             $days = if ($trigger.DaysOfWeek) { $trigger.DaysOfWeek }
-                    elseif ($trigger.CimClass.CimClassName -eq "MSFT_TaskMonthlyTrigger") { "monthly, the 1st to the 3rd" }
+                    elseif ($xml -match "<ScheduleByMonth>") { "monthly, the 1st to the 3rd" }
                     else { "daily" }
             Write-Host ("    trigger at {0} ({1})" -f $start, $days)
         }
