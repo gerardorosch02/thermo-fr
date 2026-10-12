@@ -301,6 +301,69 @@ def reliability_table(y: np.ndarray, p: np.ndarray, bins: int = 10) -> pd.DataFr
     return pd.DataFrame(rows)
 
 
+LOW_END_EDGES = (0.0, 0.01, 0.05, 0.10)  # the finer bins of the lowest reliability decile: below 1%, 1 to 5%, 5 to 10%
+LOW_END_MIN_EVENTS = 10  # a bin with fewer negative hours than this on the selection window is merged with its neighbour
+
+
+def _pct(edge: float) -> str:
+    return f"{100 * edge:g}%"
+
+
+def low_end_bins(y, p, edges=LOW_END_EDGES) -> list[dict]:
+    """Reliability of the forecasts below the top edge, one row per bin [lower, upper): hours, negative hours, mean forecast, observed rate."""
+    y, p = np.asarray(y, dtype=float), np.asarray(p, dtype=float)
+    rows = []
+    for lower, upper in zip(edges[:-1], edges[1:]):
+        mask = (p >= lower) & (p < upper)
+        rows.append({"bin": f"{_pct(lower)} to {_pct(upper)}" if lower > 0 else f"below {_pct(upper)}", "lower": float(lower), "upper": float(upper),
+                     "hours": int(mask.sum()), "negative_hours": int(y[mask].sum()) if mask.any() else 0,
+                     "mean_forecast": round(float(p[mask].mean()), 5) if mask.any() else None,
+                     "observed_rate": round(float(y[mask].mean()), 5) if mask.any() else None, "merged_from": []})
+    return rows
+
+
+def merge_sparse_bins(rows: list[dict], min_events: int = LOW_END_MIN_EVENTS) -> list[dict]:
+    """Merge every bin with fewer than `min_events` negative hours into its upper neighbour (the top bin into the one below), repeatedly."""
+    rows = [dict(r, merged_from=list(r.get("merged_from") or [])) for r in rows]
+    while len(rows) > 1 and any(r["negative_hours"] < min_events for r in rows):
+        i = next(i for i, r in enumerate(rows) if r["negative_hours"] < min_events)
+        j = i + 1 if i + 1 < len(rows) else i - 1
+        a, b = (rows[i], rows[j]) if i < j else (rows[j], rows[i])
+        hours = a["hours"] + b["hours"]
+        weighted = lambda key: (round((a[key] * a["hours"] + b[key] * b["hours"]) / hours, 5) if hours and a[key] is not None and b[key] is not None  # noqa: E731
+                                else (a[key] if b[key] is None else b[key]))
+        merged = {"bin": f"{_pct(a['lower'])} to {_pct(b['upper'])}" if a["lower"] > 0 else f"below {_pct(b['upper'])}", "lower": a["lower"], "upper": b["upper"],
+                  "hours": hours, "negative_hours": a["negative_hours"] + b["negative_hours"], "mean_forecast": weighted("mean_forecast"),
+                  "observed_rate": weighted("observed_rate"),
+                  "merged_from": (a["merged_from"] or [a["bin"]]) + (b["merged_from"] or [b["bin"]])}
+        rows[min(i, j):max(i, j) + 1] = [merged]
+    return rows
+
+
+def low_end_table(selection: pd.DataFrame, holdout: pd.DataFrame | None, event: str = "negative", edges=LOW_END_EDGES,
+                  min_events: int = LOW_END_MIN_EVENTS, strict_only: bool = True) -> dict:
+    """The low-end reliability table for the public file: bins fixed on the selection window (merged where sparse), the holdout on the same bins."""
+    def arrays(frame):
+        f = frame[frame["strict"]] if strict_only and "strict" in frame else frame
+        f = f.dropna(subset=[f"is_{event}", f"p_{event}"])
+        return f[f"is_{event}"].to_numpy(dtype=float), f[f"p_{event}"].to_numpy(dtype=float)
+
+    y, p = arrays(selection)
+    fine = low_end_bins(y, p, edges)
+    merged = merge_sparse_bins(fine, min_events)
+    final_edges = [merged[0]["lower"]] + [r["upper"] for r in merged]
+    note = "; ".join(f"{' and '.join(r['merged_from'])} merged into {r['bin']}: fewer than {min_events} negative hours on the selection window"
+                     for r in merged if r["merged_from"])
+    out = {"edges": final_edges, "min_events": min_events, "merge_note": note or "no bin merged",
+           "selection": [{k: v for k, v in r.items()} for r in low_end_bins(y, p, final_edges)]}
+    for r, m in zip(out["selection"], merged):
+        r["merged_from"] = m["merged_from"]
+    if holdout is not None and len(holdout):
+        hy, hp = arrays(holdout)
+        out["holdout"] = low_end_bins(hy, hp, final_edges)
+    return out
+
+
 def evaluate_events(pred: pd.DataFrame, strict_only: bool = True) -> dict:
     frame = pred[pred["strict"]] if strict_only and "strict" in pred else pred
     out = {}

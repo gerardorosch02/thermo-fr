@@ -240,11 +240,11 @@ def main() -> None:
             has_band = "band_p10" in by_hour
             st.plotly_chart(forecast_chart(by_hour, feature_set, today, has_band), use_container_width=True)
         if "p_negative" in by_hour and by_hour["p_negative"].notna().any():
-            bin_info = pt.lowest_bin(calibration_panel(db, version, feature_set)["backtest"] or {})
-            summary = pt.negative_summary(by_hour, bin_info)
+            bins = pt.low_end_bins(calibration_panel(db, version, feature_set)["backtest"] or {})
+            summary = pt.negative_summary(by_hour, bins)
             st.markdown(f"**{summary['text']}**")
-            neg_text = by_hour["p_negative"].map(lambda p: pt.format_probability(p, bin_info))
-            spike_text = by_hour["p_spike"].map(lambda p: pt.format_probability(p, bin_info))
+            neg_text = by_hour["p_negative"].map(lambda p: pt.format_probability(p, bins))
+            spike_text = by_hour["p_spike"].map(lambda p: pt.rate_text(float(p)) if pd.notna(p) else "n/a")  # the spike has no low-end table
             prob_fig = go.Figure()
             prob_fig.add_trace(go.Bar(x=by_hour["hour"], y=by_hour["p_negative"], name="P(price < 0)", marker_color=COLORS[feature_set],
                                       customdata=neg_text, hovertemplate="%{x}:00 Paris, negative: %{customdata}<extra></extra>"))
@@ -407,8 +407,8 @@ def main() -> None:
                     st.dataframe(pd.DataFrame(live[event]["reliability"]), hide_index=True, use_container_width=True)
     else:
         st.info("No settled day with a band yet; the live calibration starts with the first.")
-    if pt.lowest_bin_sentence(cal["backtest"] or {}):
-        st.caption(pt.lowest_bin_sentence(cal["backtest"] or {}))
+    if pt.low_end_sentence(cal["backtest"] or {}):
+        st.caption(pt.low_end_sentence(cal["backtest"] or {}))
     for label, record in (cal["backtest"] or {}).items():
         overall = record["intervals"]["all"]
         st.markdown(f"**Backtest {label}, {record['first_day']} to {record['last_day']}**: 10-90 coverage {100 * overall['model']['coverage_10_90']:.1f}%, "

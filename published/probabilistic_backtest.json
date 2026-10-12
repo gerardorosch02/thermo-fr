@@ -82,7 +82,46 @@
             "observed_frequency": 0.872
           }
         ],
-        "accepted": true
+        "accepted": true,
+        "low_end_bins": [
+          {
+            "bin": "below 1%",
+            "lower": 0.0,
+            "upper": 0.01,
+            "hours": 18312,
+            "negative_hours": 203,
+            "mean_forecast": 0.0005,
+            "observed_rate": 0.01109,
+            "merged_from": []
+          },
+          {
+            "bin": "1% to 5%",
+            "lower": 0.01,
+            "upper": 0.05,
+            "hours": 811,
+            "negative_hours": 127,
+            "mean_forecast": 0.02314,
+            "observed_rate": 0.1566,
+            "merged_from": []
+          },
+          {
+            "bin": "5% to 10%",
+            "lower": 0.05,
+            "upper": 0.1,
+            "hours": 231,
+            "negative_hours": 64,
+            "mean_forecast": 0.07162,
+            "observed_rate": 0.27706,
+            "merged_from": []
+          }
+        ],
+        "low_end_edges": [
+          0.0,
+          0.01,
+          0.05,
+          0.1
+        ],
+        "low_end_merge_note": "no bin merged"
       }
     },
     "written_at_utc": "2026-10-10T11:55:47Z"
@@ -170,7 +209,46 @@
             "observed_frequency": 1.0
           }
         ],
-        "accepted": true
+        "accepted": true,
+        "low_end_bins": [
+          {
+            "bin": "below 1%",
+            "lower": 0.0,
+            "upper": 0.01,
+            "hours": 2132,
+            "negative_hours": 25,
+            "mean_forecast": 0.00049,
+            "observed_rate": 0.01173,
+            "merged_from": []
+          },
+          {
+            "bin": "1% to 5%",
+            "lower": 0.01,
+            "upper": 0.05,
+            "hours": 129,
+            "negative_hours": 18,
+            "mean_forecast": 0.02442,
+            "observed_rate": 0.13953,
+            "merged_from": []
+          },
+          {
+            "bin": "5% to 10%",
+            "lower": 0.05,
+            "upper": 0.1,
+            "hours": 44,
+            "negative_hours": 12,
+            "mean_forecast": 0.0705,
+            "observed_rate": 0.27273,
+            "merged_from": []
+          }
+        ],
+        "low_end_edges": [
+          0.0,
+          0.01,
+          0.05,
+          0.1
+        ],
+        "low_end_merge_note": "no bin merged"
       }
     },
     "written_at_utc": "2026-10-10T11:55:48Z"

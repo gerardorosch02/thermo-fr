@@ -4,67 +4,53 @@ import pandas as pd
 
 # ---------------------------------------------------------------------------- display of event probabilities (the published values keep full precision)
 SUMMARY_THRESHOLD = 0.05  # hours above this count in the one-line summary
-FALLBACK_BIN = {"upper": 0.01, "observed": None, "mean_forecast": None, "source": None}  # without a backtest file: under 1% is "low"
+OWN_FIGURE_FROM = 0.10  # from here the model's own figure is shown; below, the bin's historical rate
 
 
-def lowest_bin(backtest: dict) -> dict:
-    """The lowest bin of the negative-price reliability table, from the holdout window (else the selection window), of probabilistic_backtest.json.
-
-    Returns upper (the bin's upper edge as a probability), observed (the share of its hours that went negative), mean_forecast and source;
-    FALLBACK_BIN when the file carries no table. Nothing here is hard-coded: the label follows the table.
-    """
-    for source in ("holdout", "selection", *sorted(k for k in (backtest or {}) if k not in ("holdout", "selection"))):
-        record = (backtest or {}).get(source) or {}
-        table = (record.get("events", {}).get("negative", {}) or {}).get("reliability") or []
-        if table:
-            first = table[0]
-            upper = float(str(first["bin"]).split("-")[-1])
-            return {"upper": upper, "observed": float(first["observed_frequency"]), "mean_forecast": float(first["mean_forecast"]), "source": source}
-    return dict(FALLBACK_BIN)
+def low_end_bins(backtest: dict, window: str = "selection") -> list[dict]:
+    """The low-end reliability bins written by `thermo-fr prob-low-end` (selection window by default), or [] when the file has none."""
+    record = (backtest or {}).get(window) or {}
+    rows = (record.get("events", {}).get("negative", {}) or {}).get("low_end_bins") or []
+    return [dict(r) for r in rows if r.get("observed_rate") is not None]
 
 
-def bin_label(info: dict) -> str:
-    """'low (about 2% historically)' from the bin's observed rate, rounded to the nearest percent; 'low' when no table is available."""
-    if info is None or info.get("observed") is None:
-        return "low"
-    return f"low (about {round(100 * info['observed']):d}% historically)"
+def rate_text(rate: float) -> str:
+    """One decimal below 10%, whole percents from there."""
+    return f"{100 * rate:.1f}%" if rate < 0.10 else f"{100 * rate:.0f}%"
 
 
-def format_probability(p, info: dict | None = None) -> str:
-    """Display form of a probability: the bin label for hours in the lowest reliability bin, one decimal under 10%, else whole percents."""
+def bin_for(p: float, bins: list[dict]) -> dict | None:
+    for row in bins:
+        if row["lower"] <= p < row["upper"]:
+            return row
+    return None
+
+
+def format_probability(p, bins: list[dict] | None = None) -> str:
+    """An hour below 10% shows its bin's observed rate on the selection window ('about 2.0% historically'); from 10% the model's own figure."""
     if p is None or pd.isna(p):
         return "n/a"
-    info = info or FALLBACK_BIN
     p = float(p)
-    if p < info["upper"]:
-        return bin_label(info)
-    return f"{100 * p:.1f}%" if p < 0.10 else f"{100 * p:.0f}%"
+    if p >= OWN_FIGURE_FROM:
+        return rate_text(p)
+    row = bin_for(p, bins or [])
+    if row is None:
+        return "low" if p < 0.01 else rate_text(p)  # no table published: nothing to map to
+    return f"about {rate_text(row['observed_rate'])} historically"
 
 
-def unlikely_sentence(info: dict | None) -> str:
-    info = info or FALLBACK_BIN
-    if info.get("observed") is None:
-        return f"Negative prices unlikely tomorrow (every hour below {100 * info['upper']:.0f}%)."
-    return (f"Negative prices unlikely tomorrow (every hour in the lowest band, where about {round(100 * info['observed']):d}% of hours "
-            "historically went negative).")
-
-
-def negative_summary(hourly: pd.DataFrame, info: dict | None = None, column: str = "p_negative") -> dict:
-    """One line about tomorrow: the highest hourly probability and its hour, and the hours above 5%; or the unlikely sentence."""
-    info = info or FALLBACK_BIN
+def negative_summary(hourly: pd.DataFrame, bins: list[dict] | None = None, column: str = "p_negative") -> dict:
+    """One line about tomorrow: the highest hour with its label, and the hours above 5% when there are any."""
     if hourly is None or hourly.empty or column not in hourly or hourly[column].isna().all():
-        return {"text": "", "max_p": None, "max_hour": None, "hours_above_5pct": 0, "all_in_lowest_band": False}
+        return {"text": "", "max_p": None, "max_hour": None, "hours_above_5pct": 0, "label": ""}
     values = hourly[[c for c in ("hour", column) if c in hourly]].dropna(subset=[column])
     top = values.loc[values[column].idxmax()]
     max_p, max_hour = float(top[column]), int(top["hour"]) if "hour" in values else None
     above = int((values[column] > SUMMARY_THRESHOLD).sum())
-    all_lowest = bool((values[column] < info["upper"]).all())
-    if all_lowest:
-        text = unlikely_sentence(info)
-    else:
-        where = f" at {max_hour:02d}:00 Paris" if max_hour is not None else ""
-        text = f"Highest hourly probability of a negative price tomorrow: {format_probability(max_p, info)}{where}; {above} hour(s) above 5%."
-    return {"text": text, "max_p": max_p, "max_hour": max_hour, "hours_above_5pct": above, "all_in_lowest_band": all_lowest}
+    label = format_probability(max_p, bins)
+    where = f"Highest hour {max_hour:02d}:00 Paris" if max_hour is not None else "Highest hour"
+    text = f"{where}, {label}" + (f"; {above} hour(s) above 5%" if above else "") + "."
+    return {"text": text, "max_p": max_p, "max_hour": max_hour, "hours_above_5pct": above, "label": label}
 
 
 def probability_axis_top(max_p) -> float:
@@ -78,19 +64,20 @@ def show_half_line(axis_top: float) -> bool:
     return axis_top >= 0.5
 
 
-def lowest_bin_sentence(backtest: dict) -> str:
-    """Why hours in the lowest bin carry the bin's label instead of the model's figure: that bin is overconfident."""
-    info = lowest_bin(backtest)
-    if info.get("observed") is None:
+def low_end_sentence(backtest: dict) -> str:
+    """The low-end bins with the selection and holdout rates side by side, so a reader can see whether the mapping held up."""
+    selection = low_end_bins(backtest, "selection")
+    if not selection:
         return ""
-    others = []
-    for source in ("holdout", "selection"):
-        if source == info["source"]:
-            continue
-        other = lowest_bin({source: (backtest or {}).get(source) or {}})
-        if other.get("observed") is not None:
-            others.append(f"{source}: {100 * other['mean_forecast']:.1f}% against {100 * other['observed']:.1f}%")
-    return (f"In the lowest reliability bin (forecasts below {100 * info['upper']:.0f}%) the model is overconfident: on the {info['source']} "
-            f"window it gave {100 * info['mean_forecast']:.1f}% on average where {100 * info['observed']:.1f}% of those hours went negative"
-            + (f" ({'; '.join(others)})" if others else "") + f". Hours in that bin are therefore labelled \"{bin_label(info)}\" rather than with "
-            "the model's own figure; the published CSV keeps the full values.")
+    holdout = {r["bin"]: r for r in low_end_bins(backtest, "holdout")}
+    parts = []
+    for r in selection:
+        h = holdout.get(r["bin"])
+        held = (f"holdout {rate_text(h['observed_rate'])} of {h['hours']:,} hours" if h else "holdout: no hours")
+        parts.append(f"{r['bin']}: the model gave {rate_text(r['mean_forecast'])} on average, {rate_text(r['observed_rate'])} of {r['hours']:,} hours "
+                     f"went negative ({held})")
+    note = ((backtest or {}).get("selection") or {}).get("events", {}).get("negative", {}).get("low_end_merge_note")
+    merge = f" {note[0].upper() + note[1:]}." if note and note != "no bin merged" else ""
+    return ("Low-end reliability of the forecasts below 10%, selection window with the holdout alongside: " + "; ".join(parts) + "." + merge
+            + " Hours below 10% are therefore labelled with their bin's selection-window rate (\"about X% historically\") rather than the model's "
+            "own figure; the published CSV keeps the full values.")

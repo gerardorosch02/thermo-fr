@@ -410,6 +410,31 @@ def cmd_nuclear_availability(args) -> None:
     print(f"Daily mean unavailable {frame['unavailable_mw'].mean():.0f} MW, available {frame['available_mw'].mean():.0f} MW of {args.installed_mw:,} MW.")
 
 
+def cmd_prob_low_end(args) -> None:
+    """Finer low-end reliability bins of the negative-price backtest, from the saved predictions, into the published aggregates file."""
+    from .forecast import probabilistic as pb
+
+    selection = pd.read_parquet(args.selection)
+    holdout = pd.read_parquet(args.holdout) if args.holdout and Path(args.holdout).exists() else None
+    table = pb.low_end_table(selection, holdout, min_events=args.min_events)
+    path = Path(args.publish)
+    existing = json.loads(path.read_text()) if path.exists() else {}
+    for label in ("selection", "holdout"):
+        if label in existing and label in table:
+            existing[label].setdefault("events", {}).setdefault("negative", {})["low_end_bins"] = table[label]
+            existing[label]["events"]["negative"]["low_end_edges"] = table["edges"]
+            existing[label]["events"]["negative"]["low_end_merge_note"] = table["merge_note"]
+    path.write_text(json.dumps(existing, indent=2, default=str))
+    print(f"Low-end reliability of P(price < 0), bins fixed on the selection window ({table['merge_note']}):")
+    print(f"{'bin':>14s} {'window':>10s} {'hours':>7s} {'negative':>9s} {'mean forecast':>14s} {'observed':>9s}")
+    for label in ("selection", "holdout"):
+        for r in table.get(label, []):
+            mf = "n/a" if r["mean_forecast"] is None else f"{100 * r['mean_forecast']:.2f}%"
+            ob = "n/a" if r["observed_rate"] is None else f"{100 * r['observed_rate']:.2f}%"
+            print(f"{r['bin']:>14s} {label:>10s} {r['hours']:>7d} {r['negative_hours']:>9d} {mf:>14s} {ob:>9s}")
+    print(f"written to {path}")
+
+
 def cmd_prob_backtest(args) -> None:
     """Walk-forward of the quantile and event models; writes reports/prob and the aggregates file the public app reads."""
     from .forecast import probabilistic as pb
@@ -726,6 +751,14 @@ def main(argv=None) -> None:
     prb.add_argument("--publish", default="published/probabilistic_backtest.json", help="aggregates only; '' to skip")
     prb.add_argument("--label", default="selection")
     prb.set_defaults(func=cmd_prob_backtest)
+
+    ple = sub.add_parser("prob-low-end", help="finer low-end reliability bins (below 1%, 1 to 5%, 5 to 10%) of the negative-price backtest, from the "
+                                              "saved predictions, into published/probabilistic_backtest.json; the apps read them for their labels")
+    ple.add_argument("--selection", default="reports/prob/prob_ready_selection.parquet")
+    ple.add_argument("--holdout", default="reports/prob/prob_ready_holdout.parquet")
+    ple.add_argument("--min-events", type=int, default=10, help="a selection bin with fewer negative hours is merged with its neighbour")
+    ple.add_argument("--publish", default="published/probabilistic_backtest.json")
+    ple.set_defaults(func=cmd_prob_low_end)
 
     shp = sub.add_parser("shape-backtest", help="Walk-forward of the shape model (price minus the day's base) with the battery backtest")
     shp.add_argument("--data", default="data/forecast/inputs.csv")
