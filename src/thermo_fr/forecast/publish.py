@@ -48,7 +48,7 @@ from .market import MIN_PUBLIC_DAYS
 from .probabilistic import live_calibration
 from .shape import live_shape_record
 from .market import evaluate as evaluate_market
-from .market import headline_version, load_market, premarket_flag, public_summary
+from .market import PublishedVersions, headline_version, load_market, premarket_flag, public_summary
 from .store import Store, iso, utc_now
 
 PUBLIC_FEATURE_SET = "honest_v2"  # the default model's set (published/model/honest_v2.txt); honest.txt is the fallback
@@ -112,7 +112,11 @@ MARKET_FILE = "market.json"  # written only where the traded prices are (the lap
 
 
 def write_market_file(store: Store, out_dir, market_path=MARKET_PATH) -> dict | None:
-    """Compute the market aggregates where the traded prices are and write published/market.json; None when there is no market file."""
+    """Compute the market aggregates where the traded prices are and write published/market.json; None when there is no market file.
+
+    The aggregates score the published pre-market versions archived in the store (see market.PublishedVersions); `thermo-fr market
+    publish` refreshes that archive from forecasts.csv on origin/main before calling this.
+    """
     rows = load_market(market_path)
     if rows.empty:
         return None
@@ -146,7 +150,8 @@ def market_status(store: Store, market_path=MARKET_PATH, previous: dict | None =
                     "carried_note": "this machine holds no traded prices; the aggregates are the last ones computed on the laptop"}
         return {"scored_days": 0, "min_days_to_show": MIN_PUBLIC_DAYS, "note": "No traded prices recorded yet.",
                 "counts": "settled delivery days whose published-set forecast was issued before the market window, scored against the auction"}
-    return {**public_summary(evaluate_market(store, rows, feature_set=PUBLIC_FEATURE_SET)), "computed_on": "laptop", "carried_through": False}
+    result = evaluate_market(PublishedVersions(store), rows, feature_set=PUBLIC_FEATURE_SET)
+    return {**public_summary(result), "computed_on": "laptop", "carried_through": False}
 
 
 def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None, last_run: dict | None = None,

@@ -56,6 +56,21 @@ def identity_env(name: str, email: str) -> dict:
     return {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email, "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email}
 
 
+def fetch_file(repo, path: str, remote: str = "origin", branch: str = "main", runner=subprocess.run) -> str | None:
+    """Fetch the remote branch and return the committed text of `path` on it (None when the branch has no such file).
+
+    Reads the commit, not the working tree, so a locally regenerated copy of a public file can never pass as the published one.
+    """
+    repo = Path(repo)
+    _git(repo, "fetch", remote, branch, runner=runner)
+    shown = _git(repo, "show", f"{remote}/{branch}:{path}", check=False, runner=runner)
+    if shown.returncode != 0:
+        if "does not exist" in shown.stderr or "exists on disk, but not in" in shown.stderr or "invalid object name" in shown.stderr.lower():
+            return None
+        raise GitSyncError(f"git show {remote}/{branch}:{path}: {shown.stderr.strip()}")
+    return shown.stdout
+
+
 def commit_and_push(repo, paths, message: str, remote: str = "origin", branch: str = "main", runner=subprocess.run, log=print) -> dict:
     """Stage `paths`, commit them if they changed, rebase onto the remote branch, push; retry the rebase and push once.
 

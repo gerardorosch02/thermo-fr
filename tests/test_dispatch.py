@@ -75,6 +75,34 @@ def test_dispatch_records_ok_and_failed_runs_in_the_store(tmp_path, monkeypatch)
     store.close()
 
 
+def test_a_network_error_is_retried_once_after_sixty_seconds(tmp_path, monkeypatch):
+    monkeypatch.setattr(d, "find_gh", lambda gh="gh": "gh")
+    store = Store(tmp_path / "db.sqlite")
+    created, state, slept = [], {"calls": 0}, []
+
+    def flaky(cmd, **kw):
+        if cmd[1:3] == ["workflow", "run"]:
+            state["calls"] += 1
+            if state["calls"] == 1:
+                return subprocess.CompletedProcess(cmd, 1, "", "error connecting to api.github.com: dial tcp: lookup api.github.com: no such host")
+            created.append({"databaseId": 5, "number": 8, "status": "queued", "conclusion": None,
+                            "createdAt": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ"), "url": "https://github.com/example/8"})
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return subprocess.CompletedProcess(cmd, 0, json.dumps(created), "")
+
+    ok = d.dispatch_and_record(store, tmp_path, kind="scheduled", runner=flaky, sleep=slept.append, wait_s=1, poll_s=0, log=_Quiet())
+    assert ok["status"] == "ok" and ok["attempts"] == 2 and "no such host" in ok["message"] and "run #8" in ok["message"]
+    assert slept[0] == d.RETRY_DELAY_S == 60.0 and state["calls"] == 2
+    assert last_publish_run(store, "dispatch")["status"] == "ok"
+    # two failures in a row: one retry only, then the failure is recorded
+    always = lambda cmd, **kw: subprocess.CompletedProcess(cmd, 1, "", "network is unreachable")  # noqa: E731
+    slept.clear()
+    failed = d.dispatch_and_record(store, tmp_path, kind="scheduled", runner=always, sleep=slept.append, wait_s=1, poll_s=0, log=_Quiet())
+    assert failed["status"] == "failed" and failed["attempts"] == 2 and slept == [60.0] and "after 2 attempt(s)" in failed["message"]
+    assert last_publish_run(store, "dispatch")["status"] == "failed"
+    store.close()
+
+
 def test_cli_dispatch_exits_nonzero_on_failure(tmp_path, monkeypatch, capsys):
     from thermo_fr import cli
 
@@ -82,6 +110,7 @@ def test_cli_dispatch_exits_nonzero_on_failure(tmp_path, monkeypatch, capsys):
         raise d.DispatchError("HTTP 401: Bad credentials")
 
     monkeypatch.setattr(d, "dispatch_workflow", refuse)
+    monkeypatch.setattr(d, "RETRY_DELAY_S", 0.0)  # the one retry, without the real minute
     monkeypatch.chdir(tmp_path)
     root = logging.getLogger("thermo_fr")
     handlers_before = list(root.handlers)
@@ -93,7 +122,7 @@ def test_cli_dispatch_exits_nonzero_on_failure(tmp_path, monkeypatch, capsys):
             if handler not in handlers_before:
                 root.removeHandler(handler)
                 handler.close()
-    assert exc.value.code == 1 and "failed: dispatch of morning-run failed: HTTP 401" in capsys.readouterr().out
+    assert exc.value.code == 1 and "failed: dispatch of morning-run failed after 2 attempt(s): HTTP 401" in capsys.readouterr().out
     s = Store(tmp_path / "db.sqlite")
     assert s.runs().iloc[0]["status"] == "failed"
     s.close()

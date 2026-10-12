@@ -54,6 +54,11 @@ CREATE TABLE IF NOT EXISTS forecast_values (
 CREATE TABLE IF NOT EXISTS forecast_prob (
     forecast_id INTEGER NOT NULL, timestamp_utc TEXT NOT NULL, q10 REAL, q50 REAL, q90 REAL, lo REAL, hi REAL, p_negative REAL, p_spike REAL,
     spike_threshold REAL, conformal_margin REAL, PRIMARY KEY (forecast_id, timestamp_utc));
+CREATE TABLE IF NOT EXISTS published_forecasts (
+    version_id INTEGER PRIMARY KEY AUTOINCREMENT, delivery_day TEXT NOT NULL, feature_set TEXT NOT NULL, issued_at_utc TEXT NOT NULL,
+    model TEXT, kind TEXT, imported_at_utc TEXT NOT NULL, UNIQUE (delivery_day, feature_set, issued_at_utc));
+CREATE TABLE IF NOT EXISTS published_values (
+    version_id INTEGER NOT NULL, timestamp_utc TEXT NOT NULL, hour INTEGER NOT NULL, forecast REAL, PRIMARY KEY (version_id, timestamp_utc));
 CREATE TABLE IF NOT EXISTS actuals (
     timestamp_utc TEXT PRIMARY KEY, delivery_day TEXT NOT NULL, hour INTEGER NOT NULL, price REAL NOT NULL, fetched_at_utc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scores (
@@ -361,6 +366,52 @@ class Store:
         )
         self.conn.commit()
         return len(rows)
+
+    # The versions the public has seen: published/forecasts.csv keeps 90 days, this archive keeps every version it ever carried
+
+    def save_published_versions(self, frame: pd.DataFrame, now=None) -> int:
+        """Archive the versions of a published forecasts.csv (one row per hour); returns how many versions were new."""
+        if frame.empty:
+            return 0
+        imported = iso(utc_now(now))
+        new = 0
+        keys = ["delivery_day", "feature_set", "issued_at_utc"]
+        for (day, feature_set, issued), rows in frame.groupby(keys, sort=True):
+            issued = iso(pd.Timestamp(issued))
+            exists = self.conn.execute("SELECT version_id FROM published_forecasts WHERE delivery_day = ? AND feature_set = ? AND issued_at_utc = ?",
+                                       (day, feature_set, issued)).fetchone()
+            if exists:
+                continue
+            first = rows.iloc[0]
+            cur = self.conn.execute(
+                "INSERT INTO published_forecasts (delivery_day, feature_set, issued_at_utc, model, kind, imported_at_utc) VALUES (?, ?, ?, ?, ?, ?)",
+                (day, feature_set, issued, str(first.get("model", "")), str(first.get("kind", "")), imported))
+            version_id = int(cur.lastrowid)
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO published_values (version_id, timestamp_utc, hour, forecast) VALUES (?, ?, ?, ?)",
+                [(version_id, iso(pd.Timestamp(ts)), int(h), float(f)) for ts, h, f in zip(rows["timestamp_utc"], rows["hour"], rows["forecast"])
+                 if not pd.isna(f)])
+            new += 1
+        self.conn.commit()
+        return new
+
+    def published_versions(self, delivery_day: str, feature_set: str | None = None) -> pd.DataFrame:
+        """Store.forecast_versions for the archive: forecast_id is the archive's version_id."""
+        query = "SELECT version_id AS forecast_id, delivery_day, feature_set, issued_at_utc, model, kind FROM published_forecasts WHERE delivery_day = ?"
+        params: tuple = (delivery_day,)
+        if feature_set:
+            query += " AND feature_set = ?"
+            params += (feature_set,)
+        return pd.read_sql_query(query + " ORDER BY issued_at_utc", self.conn, params=params)
+
+    def published_curve(self, version_id: int) -> pd.DataFrame:
+        frame = pd.read_sql_query("SELECT timestamp_utc, hour, forecast FROM published_values WHERE version_id = ? ORDER BY timestamp_utc",
+                                  self.conn, params=(int(version_id),))
+        frame["timestamp_utc"] = pd.to_datetime(frame["timestamp_utc"], utc=True)
+        return frame.set_index("timestamp_utc")
+
+    def published_version_count(self) -> int:
+        return int(self.conn.execute("SELECT COUNT(*) FROM published_forecasts").fetchone()[0])
 
     def actuals_for(self, delivery_day: str) -> pd.Series:
         frame = pd.read_sql_query(

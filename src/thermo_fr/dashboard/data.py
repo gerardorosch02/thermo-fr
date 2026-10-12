@@ -13,6 +13,7 @@ from ..config import LOCAL_TZ
 from ..forecast.jobs import next_delivery_day
 from ..forecast.market import DEFAULT_PATH as MARKET_PATH
 from ..forecast.market import FETCH_LOG_PATH, read_fetch_log
+from ..forecast.publish import read_market_file
 from ..forecast.probabilistic import live_calibration
 from ..forecast.shape import live_shape_record
 from ..forecast.market import evaluate as evaluate_market
@@ -204,6 +205,8 @@ def market_panel(path, feature_set: str = "honest_v2", market_path=MARKET_PATH) 
         return {"rows": 0, "path": str(market_path), "last_publish": last_publish}
     out = _with_store(path, lambda store: evaluate_market(store, rows, feature_set=feature_set))
     out["last_publish"] = last_publish
+    out["versions_label"] = out["summary"]["versions"]
+    out["published_record"] = read_market_file(Path("published"))
     out["rows"] = int(len(rows))
     out["path"] = str(market_path)
     out["sources"] = rows["source"].value_counts().to_dict()

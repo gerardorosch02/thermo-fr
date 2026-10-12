@@ -77,22 +77,40 @@ def expected_label(now=None) -> str:
     return f"{step}: {reason}"
 
 
+RETRY_DELAY_S = 60.0  # after waking from sleep the network can take a few seconds to return
+
+
 def dispatch_and_record(store: Store, repo, step: str = "morning-run", kind: str = "manual", ref: str = "main", gh: str = "gh",
-                        runner=subprocess.run, log=None, now=None, **kw) -> dict:
-    """Dispatch and record the outcome as a run in the store (ok or failed); never raises for a failed dispatch."""
+                        runner=subprocess.run, log=None, now=None, retries: int = 1, retry_delay_s: float | None = None,
+                        sleep=time.sleep, **kw) -> dict:
+    """Dispatch and record the outcome as a run in the store (ok or failed); never raises for a failed dispatch.
+
+    A network or gh error is retried once after `retry_delay_s` seconds before a failure is recorded; the second scheduled dispatch
+    of the morning is the next chance after that.
+    """
     import logging
 
     log = log or logging.getLogger("thermo_fr.dispatch")
+    retry_delay_s = RETRY_DELAY_S if retry_delay_s is None else retry_delay_s
     run_id = store.start_run("dispatch", kind, None, now=now)
     expected = expected_label(now) if step == "morning-run" else f"{step}: manual dispatch"
-    try:
-        run = dispatch_workflow(repo, step=step, ref=ref, gh=gh, runner=runner, now=now, **kw)
-        message = f"dispatched {step} on {ref}: run #{run['number']} {run['status']} ({run['url']}); expected {expected}"
-        log.info(message)
-        store.finish_run(run_id, "ok", message, now=now)
-        return {"status": "ok", "message": message, "run": run}
-    except (DispatchError, OSError, ValueError) as exc:
-        message = f"dispatch of {step} failed: {exc}; expected {expected}"
-        log.error(message)
-        store.finish_run(run_id, "failed", message, now=now)
-        return {"status": "failed", "message": message}
+    attempt, errors = 0, []
+    while True:
+        attempt += 1
+        try:
+            run = dispatch_workflow(repo, step=step, ref=ref, gh=gh, runner=runner, now=now, sleep=sleep, **kw)
+            retried = f" (succeeded on attempt {attempt} after: {'; '.join(errors)})" if errors else ""
+            message = f"dispatched {step} on {ref}: run #{run['number']} {run['status']} ({run['url']}); expected {expected}{retried}"
+            log.info(message)
+            store.finish_run(run_id, "ok", message, now=now)
+            return {"status": "ok", "message": message, "run": run, "attempts": attempt}
+        except (DispatchError, OSError, ValueError) as exc:
+            errors.append(str(exc))
+            if attempt <= retries:
+                log.warning("dispatch attempt %d failed (%s); retrying in %.0f s", attempt, exc, retry_delay_s)
+                sleep(retry_delay_s)
+                continue
+            message = f"dispatch of {step} failed after {attempt} attempt(s): {' | '.join(errors)}; expected {expected}"
+            log.error(message)
+            store.finish_run(run_id, "failed", message, now=now)
+            return {"status": "failed", "message": message, "attempts": attempt}

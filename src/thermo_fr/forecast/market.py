@@ -298,6 +298,44 @@ def product_average(series: pd.Series, product: str) -> float:
     return float(values.mean()) if len(values) else float("nan")
 
 
+class PublishedVersions:
+    """The versions the public has seen, with this machine's auction results: what the public market record is scored against.
+
+    Store-like for forecast_before and evaluate_day. The versions come from published/forecasts.csv on origin/main, archived in the
+    store by sync_published_versions so that days older than the 90 the file keeps stay scorable. A delivery day whose published
+    versions were all issued after the window is not counted, even when this machine holds an earlier local version.
+    """
+
+    LABEL = "published pre-market versions (the public site's)"
+
+    def __init__(self, store: Store):
+        self.store = store
+
+    def forecast_versions(self, delivery_day: str, feature_set: str | None = None) -> pd.DataFrame:
+        return self.store.published_versions(delivery_day, feature_set)
+
+    def forecast_curve(self, forecast_id: int) -> pd.DataFrame:
+        return self.store.published_curve(forecast_id)
+
+    def actuals_for(self, delivery_day: str) -> pd.Series:
+        return self.store.actuals_for(delivery_day)
+
+
+LOCAL_LABEL = "local versions (this machine's morning runs)"
+
+
+def sync_published_versions(store: Store, forecasts_csv, now=None) -> int:
+    """Archive the versions of a published forecasts.csv (a path or its text); returns how many were new."""
+    import io
+
+    source = io.StringIO(forecasts_csv) if isinstance(forecasts_csv, str) and "\n" in forecasts_csv else forecasts_csv
+    frame = pd.read_csv(source)
+    needed = {"delivery_day", "issued_at_utc", "feature_set", "timestamp_utc", "hour", "forecast"}
+    if not needed <= set(frame.columns):
+        raise MarketDataError(f"published forecasts file lacks {sorted(needed - set(frame.columns))}")
+    return store.save_published_versions(frame, now=now)
+
+
 def forecast_before(store: Store, delivery_date: str, before: pd.Timestamp, feature_set: str = "honest") -> tuple[dict, pd.DataFrame]:
     """The latest forecast version of the day issued strictly before `before` (UTC)."""
     versions = store.forecast_versions(delivery_date, feature_set)
@@ -366,7 +404,8 @@ def evaluate(store: Store, market: pd.DataFrame, feature_set: str = "honest", ba
         except NoForecastBeforeWindowError as exc:
             skipped.append({"delivery_date": r["delivery_date"], "product": r["product"], "reason": str(exc)})
     table = pd.DataFrame(rows)
-    summary = {"feature_set": feature_set, "days": int(len(table)), "scored_days": 0, "skipped": skipped}
+    summary = {"feature_set": feature_set, "versions": getattr(store, "LABEL", LOCAL_LABEL), "days": int(len(table)), "scored_days": 0,
+               "skipped": skipped}
     band_table = pd.DataFrame(columns=["band_eur_mwh", "trades", "hit_rate", "total_pnl_per_mwh", "mean_pnl_per_mwh"])
     if not table.empty:
         table["cumulative_pnl_per_mwh"] = table["pnl_per_mwh"].fillna(0).cumsum().round(2)
@@ -401,10 +440,12 @@ def public_summary(result: dict, min_days: int = MIN_PUBLIC_DAYS) -> dict:
     s = result["summary"]
     out = {"source": "EEX French Day-Ahead Base and Peak futures traded before the auction, collected locally; "
                      "traded prices are not republished.", "scored_days": s["scored_days"], "min_days_to_show": min_days,
-           "counts": "settled delivery days whose published-set forecast was issued before the market window (11:15 Paris on the trade "
-                     "date), scored against the auction result; versions issued later and days without a traded price are not counted, "
-                     "and the backfilled walk-forward record in the README (42 windows) is a separate, out-of-sample reissue, not part "
-                     "of this count",
+           "counts": "settled delivery days whose published pre-market version of the default set (the version shown on the public site, "
+                     "read from published/forecasts.csv on main) was issued before the market window (11:15 Paris on the trade date), scored "
+                     "against the auction result; days whose published versions were all issued later, days with only a local version on "
+                     "the collecting machine, and days without a traded price are not counted; the backfilled walk-forward record in the "
+                     "README (42 windows) is a separate, out-of-sample reissue, not part of this count",
+           "versions": s.get("versions", LOCAL_LABEL),
            "computed_at_utc": pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%dT%H:%M:%SZ")}
     if s["scored_days"] >= min_days:
         out.update({k: s[k] for k in ("hit_rate", "mean_pnl_per_mwh", "model_mae", "market_mae", "share_model_beats_market")})

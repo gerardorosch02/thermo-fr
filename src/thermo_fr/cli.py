@@ -258,12 +258,22 @@ def market_publish(store, out, market_path, repo, branch: str = "main", kind: st
     """
     import logging
 
-    from .forecast.gitsync import GitSyncError, commit_and_push
+    from .forecast.gitsync import GitSyncError, commit_and_push, fetch_file
+    from .forecast.market import sync_published_versions
     from .forecast.publish import write_market_file
 
     log = log or logging.getLogger("thermo_fr.market")
     run_id = store.start_run("market-publish", kind, None, now=now)
     try:
+        # the aggregates score the versions the public has seen: forecasts.csv as committed on the remote branch, archived locally
+        out_in_repo = Path(out).resolve().relative_to(Path(repo).resolve()) if Path(out).is_absolute() else Path(out)
+        text = fetch_file(Path(repo), f"{out_in_repo.as_posix()}/forecasts.csv", branch=branch,
+                          **({"runner": runner} if runner is not None else {}))
+        if text is None:
+            log.warning("no published forecasts.csv on origin/%s; scoring the archived published versions only", branch)
+        else:
+            new = sync_published_versions(store, text, now=now)
+            log.info("published versions archived: %d new, %d in total", new, store.published_version_count())
         section = write_market_file(store, Path(out), Path(market_path))
         if section is None:
             message = f"no traded prices in {market_path}: market.json not written, nothing to push"

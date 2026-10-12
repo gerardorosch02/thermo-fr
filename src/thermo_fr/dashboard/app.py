@@ -360,6 +360,10 @@ def main() -> None:
                 f"or `thermo-fr market add`; rows are kept in {mkt['path']}, which is git-ignored and never published.")
     else:
         s = mkt["summary"]
+        public = mkt.get("published_record") or {}
+        st.caption(f"These rows score the {mkt.get('versions_label', 'local versions')}. The public record (published/market.json) scores the "
+                   f"published pre-market version instead: {public.get('scored_days', 'no file yet')} day(s) scored"
+                   + (f", computed {public['computed_at_utc']}" if public.get("computed_at_utc") else "") + ".")
         if s["scored_days"]:
             c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("Days scored", s["scored_days"])
