@@ -13,7 +13,7 @@ from thermo_fr import cli
 from thermo_fr.forecast.gitsync import _git
 from thermo_fr.forecast.jobs import settle
 from thermo_fr.forecast.probabilistic import live_calibration
-from thermo_fr.forecast.publish import export_published, staged_changes_are_stamps_only, status_equivalent
+from thermo_fr.forecast.publish import export_published, import_published, staged_changes_are_stamps_only, status_equivalent
 from thermo_fr.forecast.shape import battery_backtest, live_frame, live_shape_record, previous_day_actual
 from thermo_fr.forecast.store import Store, score_curve
 
@@ -168,3 +168,24 @@ def test_staged_changes_are_stamps_only_and_the_cli_exit_code(tmp_path, monkeypa
     (repo / "published" / "status.json").write_text(json.dumps({**moved, "live_record": {"days": 2}}))
     _git(repo, "add", "published")
     assert staged_changes_are_stamps_only(repo) == (False, "published/status.json changed beyond its stamps")
+
+
+def test_import_then_export_leaves_the_published_files_byte_for_byte(tmp_path):
+    """Run #12 of 2026-10-13 re-committed scores.csv with an rmse one unit in the last place off: the default CSV float parser is inexact."""
+    store = Store(tmp_path / "db.sqlite")
+    curve = imported_version(store)
+    actual = pd.Series([90.0 + h * 1.5 + (0.1 if h % 7 == 0 else 0.0) for h in curve["hour"]], index=curve.index)  # non-terminating errors
+    store.save_actuals(actual, pd.Series([DAY] * len(curve)))
+    store.save_score(1, DAY, "honest_v2", "2026-10-12T08:30:00Z", {"hours": 24, "mae": 16.345312500000002, "rmse": 22.771532775549314,
+                                                                      "naive_mae": None, "naive_rmse": None, "mae_below_baseline": None})
+    out = tmp_path / "published"
+    export_published(store, out, days=90, now=pd.Timestamp("2026-10-13T06:18Z"), market_path=tmp_path / "no_market.csv")
+    store.close()
+    fresh = Store(tmp_path / "fresh.sqlite")
+    import_published(fresh, out)
+    again = tmp_path / "again"
+    export_published(fresh, again, days=90, now=pd.Timestamp("2026-10-13T06:19Z"), market_path=tmp_path / "no_market.csv")
+    fresh.close()
+    for name in ("forecasts.csv", "actuals.csv", "scores.csv", "probabilistic.csv", "tomorrow.csv", "error_band.csv"):
+        assert (out / name).read_bytes() == (again / name).read_bytes(), name
+    assert "22.771532775549314" in (again / "scores.csv").read_text()

@@ -403,12 +403,17 @@ def staged_changes_are_stamps_only(repo, out="published") -> tuple[bool, str]:
 
 
 def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
-    """Load the published files into a (usually empty) store."""
+    """Load the published files into a (usually empty) store.
+
+    Numbers are parsed exactly (float_precision="round_trip"): pandas' default parser can land one unit in the last place off, which
+    made an import followed by an export rewrite scores.csv with a different last digit (run #12 of 2026-10-13 committed exactly that),
+    and a publish that changed nothing must leave the files byte for byte as they were.
+    """
     src = Path(in_dir)
     summary = {"forecast_versions": 0, "actual_rows": 0, "scores": 0, "error_band_rows": 0, "probabilistic_versions": 0}
     forecasts_path = src / "forecasts.csv"
     if forecasts_path.exists() and forecasts_path.stat().st_size > 0:
-        forecasts = pd.read_csv(forecasts_path)
+        forecasts = pd.read_csv(forecasts_path, float_precision="round_trip")
         if not forecasts.empty:
             forecasts["timestamp_utc"] = pd.to_datetime(forecasts["timestamp_utc"], utc=True)
             if "feature_set" not in forecasts:  # files written when only one set was published
@@ -425,14 +430,14 @@ def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
                 summary["forecast_versions"] += 1
     actuals_path = src / "actuals.csv"
     if actuals_path.exists() and actuals_path.stat().st_size > 0:
-        actuals = pd.read_csv(actuals_path)
+        actuals = pd.read_csv(actuals_path, float_precision="round_trip")
         if not actuals.empty:
             index = pd.to_datetime(actuals["timestamp_utc"], utc=True)
             prices = pd.Series(actuals["price"].to_numpy(), index=index)
             summary["actual_rows"] = store.save_actuals(prices, actuals["delivery_day"].reset_index(drop=True))
     scores_path = src / "scores.csv"
     if scores_path.exists() and scores_path.stat().st_size > 0:
-        scores = pd.read_csv(scores_path).rename(columns={"model_won": "mae_below_baseline"})  # files written before the rename
+        scores = pd.read_csv(scores_path, float_precision="round_trip").rename(columns={"model_won": "mae_below_baseline"})  # files written before the rename
         if "feature_set" not in scores:
             scores["feature_set"] = FALLBACK_FEATURE_SET
         versions = pd.read_sql_query("SELECT forecast_id, delivery_day, issued_at_utc, feature_set FROM forecasts", store.conn)
@@ -446,7 +451,7 @@ def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
             summary["scores"] += 1
     prob_path = src / "probabilistic.csv"
     if prob_path.exists() and prob_path.stat().st_size > 0:
-        prob = pd.read_csv(prob_path)
+        prob = pd.read_csv(prob_path, float_precision="round_trip")
         if not prob.empty:
             versions = pd.read_sql_query("SELECT forecast_id, delivery_day, issued_at_utc, feature_set FROM forecasts", store.conn)
             merged = prob.merge(versions, on=["delivery_day", "issued_at_utc", "feature_set"], how="inner")
@@ -464,7 +469,7 @@ def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
                 summary["probabilistic_versions"] += 1
     band_path = src / "error_band.csv"
     if band_path.exists() and band_path.stat().st_size > 0:
-        band = pd.read_csv(band_path)
+        band = pd.read_csv(band_path, float_precision="round_trip")
         if not band.empty:
             store.save_error_band(band, source=str(band_path))
             summary["error_band_rows"] = int(len(band))
