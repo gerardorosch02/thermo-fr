@@ -202,7 +202,7 @@ def battery_backtest(frame: pd.DataFrame, methods=("model", "d1", "same_type"), 
         perfect = battery_day(actual, actual, efficiency)
         row["value_perfect"] = perfect["value_eur"]
         for method in methods:
-            forecast = (part[f"base_{method}"] + part[f"shape_{method}"]).to_numpy()
+            forecast = (pd.to_numeric(part[f"base_{method}"], errors="coerce") + pd.to_numeric(part[f"shape_{method}"], errors="coerce")).to_numpy(dtype=float)
             if np.isnan(forecast).any():
                 row[f"value_{method}"], row[f"traded_{method}"] = np.nan, False
                 continue
@@ -293,19 +293,39 @@ def paired_report(battery_daily: pd.DataFrame, shape_daily: pd.DataFrame, benchm
     return out
 
 
-def live_frame(curve: pd.DataFrame, actual: pd.Series, delivery_day: str) -> pd.DataFrame:
-    """A stored forecast version (columns forecast, naive_day) and the day's actual prices as one scoring frame (model and D-1 only)."""
+def previous_day_actual(store, delivery_day: str) -> pd.Series | None:
+    """The previous day's auction prices moved forward by 24 hours: the same-hour-previous-day reference for a version that carries none.
+
+    Versions imported from the public dataset carry no naive_day (the figure stopped being published on 2026-10-12), which left the
+    column None in the GitHub Actions store and crashed the publish step of run #10 that evening. None when the previous day is not settled.
+    """
+    previous = store.actuals_for((pd.Timestamp(delivery_day) - pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
+    if previous.empty:
+        return None
+    return pd.Series(pd.to_numeric(previous, errors="coerce").to_numpy(dtype=float), index=previous.index + pd.Timedelta(hours=24))
+
+
+def live_frame(curve: pd.DataFrame, actual: pd.Series, delivery_day: str, d1: pd.Series | None = None) -> pd.DataFrame:
+    """A stored forecast version (columns forecast, naive_day) and the day's actual prices as one scoring frame (model and D-1 only).
+
+    The D-1 reference is the version's naive_day column; when that is empty (a version imported from the public dataset) it is `d1`,
+    the previous day's prices from `previous_day_actual`, and without either the D-1 columns are NaN and the day gets no D-1 value.
+    """
     frame = pd.DataFrame(index=curve.index)
     frame["delivery_day"] = pd.Timestamp(delivery_day)
     frame["hour"] = curve["hour"].astype(int).to_numpy()
-    frame["actual"] = actual.reindex(curve.index).to_numpy()
+    frame["actual"] = pd.to_numeric(actual.reindex(curve.index), errors="coerce").to_numpy(dtype=float)
     days = frame["delivery_day"]
+    forecast = pd.to_numeric(curve["forecast"], errors="coerce").astype(float)
+    reference = pd.to_numeric(curve["naive_day"], errors="coerce").astype(float) if "naive_day" in curve else pd.Series(np.nan, index=curve.index)
+    if reference.isna().all() and d1 is not None:
+        reference = pd.to_numeric(d1.reindex(curve.index), errors="coerce").astype(float)
     frame["actual_base"] = daily_mean(frame["actual"], days)
     frame["actual_shape"] = frame["actual"] - frame["actual_base"]
-    frame["base_model"] = daily_mean(curve["forecast"], days)
-    frame["shape_model"] = curve["forecast"] - frame["base_model"]
-    frame["base_d1"] = daily_mean(curve["naive_day"], days)
-    frame["shape_d1"] = curve["naive_day"] - frame["base_d1"]
+    frame["base_model"] = daily_mean(forecast, days)
+    frame["shape_model"] = forecast - frame["base_model"]
+    frame["base_d1"] = daily_mean(reference, days)
+    frame["shape_d1"] = reference - frame["base_d1"]
     return frame
 
 
@@ -318,7 +338,7 @@ def live_shape_record(store, feature_set: str, days: int = 90) -> dict:
         if actual.empty:
             continue
         curve = store.forecast_curve(int(row["forecast_id"]))
-        frames.append(live_frame(curve, actual, row["delivery_day"]))
+        frames.append(live_frame(curve, actual, row["delivery_day"], d1=previous_day_actual(store, row["delivery_day"])))
     if not frames:
         return {"days": 0}
     frame = pd.concat(frames)

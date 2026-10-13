@@ -160,7 +160,8 @@ def status_panel(path, delivery_day: str) -> dict:
     def read(store: Store):
         return {"latest": store.latest_status(delivery_day), "history": store.status_for(delivery_day),
                 "timing": store.timing_log(), "summary": store.timing_summary(), "runs": store.runs(limit=12),
-                "last_dispatch": last_publish_run(store, "dispatch"), "last_refit_dispatch": last_publish_run(store, "dispatch-refit")}
+                "last_dispatch": last_publish_run(store, "dispatch"), "last_settle_dispatch": last_publish_run(store, "dispatch-settle"),
+                "last_refit_dispatch": last_publish_run(store, "dispatch-refit")}
 
     out = _with_store(path, read)
     latest = out["latest"]

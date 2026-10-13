@@ -17,11 +17,17 @@ machine is asleep or hibernating rather than shut down:
   thermo-fr dispatch forecast  weekdays at 09:05 and 09:30 local time (10:05 and 10:30 Paris,
                           all year, since London and Paris change clocks together): runs
                           `gh workflow run` so the GitHub Actions pre-market forecast starts
-                          on time; GitHub's own crons were delivered hours late or dropped
-                          and stay in the workflow only as a backup. gh uses its stored
-                          login, no secret is on the command line, and each dispatch is
-                          recorded as a run in the local store (red on the dashboard when
-                          it fails).
+                          on time; GitHub's own morning crons were delivered hours late or
+                          dropped and were removed from the workflow on 2026-10-13. gh uses
+                          its stored login, no secret is on the command line, and each
+                          dispatch is recorded as a run in the local store (red on the
+                          dashboard when it fails).
+  thermo-fr dispatch settle  every day at 14:20 local time: runs `gh workflow run` for the
+                          settle step on main (same login, logging and single retry), so the
+                          public record is scored the same afternoon; the 13:15 UTC settle
+                          cron stays as a backup, and a second settle of the same day changes
+                          nothing. It runs between the laptop's own 14:00 settle and the 14:30
+                          market publish, which fetches main before scoring.
   thermo-fr dispatch refit  the 1st, 2nd and 3rd of each month at 07:00 local time: runs
                           `gh workflow run` for the refit step on main, on the first weekday
                           of the month only (the other days are recorded as skipped), with the
@@ -91,6 +97,7 @@ $fuelName = "thermo-fr fuel snapshot"
 $marketPublishName = "thermo-fr market publish"
 $dispatchName = "thermo-fr dispatch forecast"
 $refitDispatchName = "thermo-fr dispatch refit"
+$settleDispatchName = "thermo-fr dispatch settle"
 
 function Remove-IfPresent($name) {
     $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
@@ -109,6 +116,7 @@ if ($Remove) {
     Remove-IfPresent $marketPublishName
     Remove-IfPresent $dispatchName
     Remove-IfPresent $refitDispatchName
+    Remove-IfPresent $settleDispatchName
 }
 
 if ($Install) {
@@ -120,6 +128,7 @@ if ($Install) {
     Remove-IfPresent $marketPublishName
     Remove-IfPresent $dispatchName
     Remove-IfPresent $refitDispatchName
+    Remove-IfPresent $settleDispatchName
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
         -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $weekdays = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
@@ -139,8 +148,14 @@ if ($Install) {
     }
     $dispatchAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr dispatch --step morning-run --kind scheduled" -WorkingDirectory $repo
     Register-ScheduledTask -TaskName $dispatchName -Action $dispatchAction -Trigger $dispatchTriggers -Settings $settings `
-        -Description "thermo-fr: trigger the GitHub Actions pre-market forecast run (gh workflow run; the GitHub crons are a backup)" | Out-Null
+        -Description "thermo-fr: trigger the GitHub Actions pre-market forecast run (gh workflow run; no cron backs it up since 2026-10-13)" | Out-Null
     Write-Host "Installed task '$dispatchName' (weekdays 09:05 and 09:30 local time, 10:05 and 10:30 Paris)"
+
+    $settleDispatchTrigger = New-ScheduledTaskTrigger -Daily -At "14:20"
+    $settleDispatchAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr dispatch --step settle --kind scheduled" -WorkingDirectory $repo
+    Register-ScheduledTask -TaskName $settleDispatchName -Action $settleDispatchAction -Trigger $settleDispatchTrigger -Settings $settings `
+        -Description "thermo-fr: trigger the GitHub Actions settle (gh workflow run; the 13:15 UTC cron is a backup, a second settle changes nothing)" | Out-Null
+    Write-Host "Installed task '$settleDispatchName' (daily 14:20 local time, between the local settle and the market publish)"
 
     # Monthly trigger on the 1st to the 3rd at 07:00: New-ScheduledTaskTrigger has no monthly form, so the task is registered with a
     # placeholder daily trigger and its triggers are replaced through the Task Scheduler COM API (trigger type 4, TASK_TRIGGER_MONTHLY,
@@ -207,7 +222,7 @@ if ($Install) {
 }
 
 if ($Show -or $Install) {
-    foreach ($name in @($morningName, $dispatchName, $refitDispatchName, $settleName, $marketName, $outageName, $fuelName, $marketPublishName)) {
+    foreach ($name in @($morningName, $dispatchName, $settleDispatchName, $refitDispatchName, $settleName, $marketName, $outageName, $fuelName, $marketPublishName)) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -eq $task) { Write-Host "Task '$name' is not installed"; continue }
         $info = Get-ScheduledTaskInfo -TaskName $name

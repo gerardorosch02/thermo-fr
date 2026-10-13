@@ -3,9 +3,13 @@
 GitHub's schedule trigger is delivered late by hours, or not at all, at busy times: on 10 and 11 October 2026 the 13:15 UTC settle
 cron ran at 17:51 and 18:04 UTC and the four weekday morning crons never ran. A forecast that has to be issued between 10:05 and
 11:00 Paris cannot ride on it. The laptop therefore dispatches the pre-market run itself, through `gh workflow run`, at 09:05 and
-09:30 London (10:05 and 10:30 Paris all year, since London and Paris change clocks together); the crons stay in the workflow as a
-backup and the workflow's `schedule-step` treats a dispatched run exactly like a cron run (see forecast/schedule.py), so a dispatch that
-only starts after the window is labelled "issued after the market window, not tradeable" and never replaces a pre-market version.
+09:30 London (10:05 and 10:30 Paris all year, since London and Paris change clocks together), and the workflow's `schedule-step` decides
+a dispatched run by the Paris clock (see forecast/schedule.py), so a dispatch that only starts after the window is labelled "issued
+after the market window, not tradeable" and never replaces a pre-market version. The weekday morning crons were removed from the
+workflow on 2026-10-13: on 12 October GitHub delivered them 9 to 12 hours late, which cannot back up a pre-market forecast and only
+adds after-window versions. The settle is dispatched the same way at 14:20 London (`--step settle`), so the public record updates the
+same afternoon; its 13:15 UTC cron stays as a backup, and a second settle of the same day changes nothing (the same prices are stored
+again, nothing new is scored, and the workflow commits nothing when only the stamps in status.json changed).
 
 The monthly refit is dispatched the same way (`thermo-fr dispatch --step refit --first-weekday-only`, a scheduled task on the 1st to
 the 3rd at 07:00 London that dispatches on the first weekday of the month only), with the refit cron as a backup; the refit itself is

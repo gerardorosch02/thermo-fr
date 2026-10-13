@@ -1,65 +1,21 @@
-"""The workflow's step decision from the Paris clock: pre-market window all year, late run for information, refit day."""
+"""The workflow's step decision: a dispatched morning-run follows the Paris clock rule all year; only the settle and refit crons remain."""
 
 import datetime as dt
 
-from thermo_fr.forecast.schedule import LATE_CRON, PREMARKET_CRONS, REFIT_CRON, SETTLE_CRON, decide, first_weekday_of_month
+from thermo_fr.forecast.schedule import REFIT_CRON, SETTLE_CRON, decide, first_weekday_of_month
 
 
 def utc(text: str) -> dt.datetime:
     return dt.datetime.fromisoformat(text).replace(tzinfo=dt.timezone.utc)
 
 
-def test_summer_keeps_the_08_utc_runs_and_skips_the_09_utc_ones():
-    # Paris is UTC+2: 08:10 UTC is 10:10 Paris, 09:10 UTC is 11:10 Paris
-    assert decide(utc("2026-07-15T08:12:00"), "schedule", PREMARKET_CRONS[0])[0] == "morning-run"
-    assert decide(utc("2026-07-15T08:40:00"), "schedule", PREMARKET_CRONS[1])[0] == "morning-run"
-    step, reason = decide(utc("2026-07-15T09:12:00"), "schedule", PREMARKET_CRONS[2])
-    assert step == "skip" and "market window" in reason
-    assert decide(utc("2026-07-15T09:38:00"), "schedule", PREMARKET_CRONS[3])[0] == "skip"
-
-
-def test_winter_keeps_the_09_utc_runs_and_skips_the_08_utc_ones():
-    # Paris is UTC+1: 08:10 UTC is 09:10 Paris (before the load forecast deadline), 09:10 UTC is 10:10 Paris
-    step, reason = decide(utc("2026-01-15T08:12:00"), "schedule", PREMARKET_CRONS[0])
-    assert step == "skip" and "load forecast deadline" in reason
-    assert decide(utc("2026-01-15T08:40:00"), "schedule", PREMARKET_CRONS[1])[0] == "skip"
-    assert decide(utc("2026-01-15T09:12:00"), "schedule", PREMARKET_CRONS[2])[0] == "morning-run"
-    assert decide(utc("2026-01-15T09:38:00"), "schedule", PREMARKET_CRONS[3])[0] == "morning-run"
-
-
-def test_every_day_of_the_year_has_a_pre_market_run_even_with_a_late_start():
-    for day in (dt.date(2026, 1, 15), dt.date(2026, 3, 30), dt.date(2026, 7, 15), dt.date(2026, 10, 26), dt.date(2026, 12, 15)):
-        for delay in (0, 5, 15):  # minutes GitHub may start a scheduled workflow late
-            kept = [cron for cron in PREMARKET_CRONS
-                    if decide(dt.datetime.combine(day, dt.time(int(cron.split()[1]), int(cron.split()[0]) + delay), dt.timezone.utc),
-                              "schedule", cron)[0] == "morning-run"]
-            assert kept, (day, delay)
-    # a run that only starts at 11:00 Paris or later is never kept
-    assert decide(utc("2026-07-15T09:00:00"), "schedule", PREMARKET_CRONS[2])[0] == "skip"  # 11:00 Paris exactly
-    assert decide(utc("2026-01-15T09:59:00"), "schedule", PREMARKET_CRONS[3])[0] == "morning-run"  # 10:59 Paris
-    assert decide(utc("2026-01-15T10:00:00"), "schedule", PREMARKET_CRONS[3])[0] == "skip"  # 11:00 Paris
-
-
-def test_late_run_settle_refit_and_dispatch():
-    step, reason = decide(utc("2026-07-15T10:32:00"), "schedule", LATE_CRON)
-    assert step == "morning-run" and "information" in reason and "12:32 Paris" in reason
-    assert decide(utc("2026-07-15T13:16:00"), "schedule", SETTLE_CRON)[0] == "settle"
-    assert decide(utc("2026-06-01T02:01:00"), "schedule", REFIT_CRON)[0] == "refit"  # Monday 1 June 2026
-    assert decide(utc("2026-08-01T02:01:00"), "schedule", REFIT_CRON)[0] == "skip"  # Saturday; the refit waits for Monday 3 August
-    assert decide(utc("2026-08-03T02:01:00"), "schedule", REFIT_CRON)[0] == "refit"
-    assert first_weekday_of_month(dt.date(2026, 8, 20)) == dt.date(2026, 8, 3)
-    assert decide(utc("2026-07-15T15:00:00"), "workflow_dispatch", "", "settle") == ("settle", "manual dispatch")
-    step, reason = decide(utc("2026-07-15T15:00:00"), "workflow_dispatch", "")
-    assert step == "morning-run" and "after the market window" in reason
-    assert decide(utc("2026-07-15T15:00:00"), "schedule", "0 0 * * *")[0] == "skip"
-
-
-def test_a_dispatched_morning_run_follows_the_same_clock_rule_as_a_cron_all_year():
+def test_a_dispatched_morning_run_follows_the_clock_rule_all_year():
     # summer: 10:05 Paris is 08:05 UTC; winter: 09:05 UTC. The laptop dispatches at 09:05 and 09:30 London, 10:05 and 10:30 Paris
     for day, offset in (("2026-07-15", 2), ("2026-01-15", 1), ("2026-10-26", 1), ("2026-03-30", 2)):
         def at(hh, mm):
             return utc(f"{day}T{hh - offset:02d}:{mm:02d}:00")
-        assert decide(at(10, 0), "workflow_dispatch", "", "morning-run")[0] == "skip"  # before the load forecast deadline
+        step, reason = decide(at(10, 0), "workflow_dispatch", "", "morning-run")
+        assert step == "skip" and "load forecast deadline" in reason
         step, reason = decide(at(10, 6), "workflow_dispatch", "", "morning-run")
         assert step == "morning-run" and reason == "dispatched pre-market run at 10:06 Paris"
         assert decide(at(10, 31), "workflow_dispatch", "", "morning-run")[0] == "morning-run"
@@ -68,15 +24,35 @@ def test_a_dispatched_morning_run_follows_the_same_clock_rule_as_a_cron_all_year
         assert step == "morning-run" and "after the market window" in reason  # information only, labelled by the dashboards
         step, reason = decide(at(12, 10), "workflow_dispatch", "", "morning-run")
         assert step == "morning-run" and "12:10 Paris, after the market window" in reason
-        # the same moments decided for a cron give the same step, except that a cron at or after 11:00 is skipped (the late cron covers it)
-        for hh, mm in ((10, 6), (10, 31), (10, 59)):
-            assert decide(at(hh, mm), "schedule", PREMARKET_CRONS[0])[0] == decide(at(hh, mm), "workflow_dispatch", "", "morning-run")[0]
-        assert decide(at(10, 0), "schedule", PREMARKET_CRONS[0])[0] == "skip"
+    step, reason = decide(utc("2026-07-15T15:00:00"), "workflow_dispatch", "")
+    assert step == "morning-run" and "after the market window" in reason  # the default input is the morning-run
+
+
+def test_settle_and_refit_crons_remain_as_backups_and_every_other_schedule_is_skipped():
+    assert decide(utc("2026-07-15T13:16:00"), "schedule", SETTLE_CRON) == ("settle", "daily settlement (backup cron)")
+    assert decide(utc("2026-10-12T21:43:59"), "schedule", SETTLE_CRON)[0] == "settle"  # delivered eight hours late: harmless
+    assert decide(utc("2026-06-01T02:01:00"), "schedule", REFIT_CRON)[0] == "refit"  # Monday 1 June 2026
+    assert decide(utc("2026-08-01T02:01:00"), "schedule", REFIT_CRON)[0] == "skip"  # Saturday; the refit waits for Monday 3 August
+    assert decide(utc("2026-08-03T02:01:00"), "schedule", REFIT_CRON)[0] == "refit"
+    assert first_weekday_of_month(dt.date(2026, 8, 20)) == dt.date(2026, 8, 3)
+    # the removed morning crons: a workflow file that still carried one would be skipped, not run late
+    for old in ("10 8 * * 1-5", "35 8 * * 1-5", "10 9 * * 1-5", "35 9 * * 1-5", "30 10 * * 1-5", "0 0 * * *"):
+        step, reason = decide(utc("2026-07-15T08:12:00"), "schedule", old)
+        assert step == "skip" and "unknown schedule" in reason
+
+
+def test_dispatched_settle_and_refit_say_why_a_second_trigger_is_harmless():
+    step, reason = decide(utc("2026-07-15T13:20:00"), "workflow_dispatch", "", "settle")
+    assert step == "settle" and "second settle" in reason
+    step, reason = decide(utc("2026-11-02T07:00:00"), "workflow_dispatch", "", "refit")
+    assert step == "refit" and "once per month" in reason
 
 
 def test_cli_prints_github_output_lines(capsys):
     from thermo_fr import cli
 
-    cli.main(["schedule-step", "--event", "schedule", "--schedule", PREMARKET_CRONS[0], "--now", "2026-07-15T08:12:00+00:00"])
+    cli.main(["schedule-step", "--event", "workflow_dispatch", "--input", "morning-run", "--now", "2026-07-15T08:12:00+00:00"])
     out = capsys.readouterr().out
-    assert "step=morning-run" in out and "reason=pre-market run at 10:12 Paris" in out
+    assert "step=morning-run" in out and "reason=dispatched pre-market run at 10:12 Paris" in out
+    cli.main(["schedule-step", "--event", "schedule", "--schedule", SETTLE_CRON, "--now", "2026-07-15T13:16:00+00:00"])
+    assert "step=settle" in capsys.readouterr().out

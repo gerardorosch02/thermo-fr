@@ -35,31 +35,33 @@ name: Day-ahead forecast
 # ENTSO-E load forecast is due at 10:00 Paris on the day before delivery and
 # the EEX day-ahead future trades from about 11:15 Paris, so a forecast that can
 # be scored against the market must be issued between 10:05 and 11:00 Paris.
-# The pre-market run is triggered by the laptop: `thermo-fr dispatch` sends a
-# workflow_dispatch (step=morning-run) at 10:05 and 10:30 Paris on weekdays,
-# because GitHub's schedule trigger is not reliable enough for a deadline (on
-# 10 and 11 October 2026 the settle cron ran four to five hours late and the
-# morning crons never ran). The four pre-market crons (08:10, 08:35, 09:10,
-# 09:35 UTC) stay as a backup. `thermo-fr schedule-step` applies one clock rule
-# to cron and dispatch alike: a morning-run that starts before 10:05 Paris is
-# skipped, one inside 10:05 to 11:00 is the pre-market run, and a dispatch from
-# 11:00 (or the 10:30 UTC cron) runs for information only; the dashboards label
-# that version "issued after the market window, not tradeable" and it never
-# replaces a pre-market version, because the headline of a day is the last
-# version issued before the window. A version's issue time is the run's wall
-# clock, never a scheduled time. Settle runs at 13:15 UTC daily (a late settle
-# is harmless); the refit cron fires on the 1st, 2nd and 3rd at 02:00 UTC and
-# proceeds only on the first weekday of the month, as a backup for the laptop's
-# refit dispatch that morning.
+# Every step is triggered by the laptop with `thermo-fr dispatch` (a
+# workflow_dispatch through the GitHub CLI): the pre-market morning-run at
+# 10:05 and 10:30 Paris on weekdays, the settle at 14:20 London, the refit at
+# 07:00 London on the first weekday of the month. GitHub's schedule trigger is
+# not reliable enough for a deadline: on 10 and 11 October 2026 the settle cron
+# ran four to five hours late and the morning crons never ran, and on 12
+# October six scheduled runs arrived 9 to 12 hours late. The weekday morning
+# crons were removed on 2026-10-13 for that reason: arriving hours late they
+# could not back up a pre-market forecast and only added after-window versions
+# and failure risk. Two crons remain as backups, for steps where a late run is
+# harmless: the settle at 13:15 UTC and the refit at 02:00 UTC on the 1st, 2nd
+# and 3rd (the job proceeds on the first weekday only). `thermo-fr
+# schedule-step` decides a dispatched morning-run by the Paris clock: before
+# 10:05 it is skipped, inside 10:05 to 11:00 it is the pre-market run, from
+# 11:00 it runs for information only; the dashboards label that version
+# "issued after the market window, not tradeable" and it never replaces a
+# pre-market version, because the headline of a day is the last version issued
+# before the window. A version's issue time is the run's wall clock, never a
+# scheduled time. A backup that arrives after the dispatched run changes
+# nothing: the settle stores the same prices again and scores nothing new, the
+# refit exits as already refitted this month, and the commit step below
+# commits nothing when only the stamps in status.json changed. The concurrency
+# group serialises runs, so two of them never publish at once.
 
 on:
   schedule:
-    - cron: "10 8 * * 1-5"    # backup pre-market run, summer (10:10 Paris); skipped in winter
-    - cron: "35 8 * * 1-5"    # backup pre-market run, summer (10:35 Paris); skipped in winter
-    - cron: "10 9 * * 1-5"    # backup pre-market run, winter (10:10 Paris); skipped in summer
-    - cron: "35 9 * * 1-5"    # backup pre-market run, winter (10:35 Paris); skipped in summer
-    - cron: "30 10 * * 1-5"   # later run, information only (after the market window)
-    - cron: "15 13 * * *"     # settle
+    - cron: "15 13 * * *"     # backup settle (the laptop dispatches the settle at 14:20 London)
     - cron: "0 2 1-3 * *"     # backup refit, on the first weekday of the month only (the laptop dispatches the refit at 07:00 London)
   workflow_dispatch:
     inputs:
@@ -73,7 +75,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: forecast-publish
+  group: forecast-publish    # one run at a time: a second trigger of any step waits for the first to finish, so two runs never publish at once
   cancel-in-progress: false
 
 jobs:
@@ -136,6 +138,9 @@ jobs:
           else
             git add published
             git reset -q -- published/market.json  # the laptop's file: never committed from here
+            if thermo-fr publish-unchanged --out published; then
+              git reset -q  # only the stamps in status.json moved (a backup settle after the dispatched one): nothing to publish
+            fi
           fi
           if git diff --cached --quiet; then
             echo "nothing to commit"

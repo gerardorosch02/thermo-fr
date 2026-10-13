@@ -544,6 +544,9 @@ def live_margin(settled: pd.DataFrame, min_days: int = 20, alpha: float = ALPHA)
 def live_calibration(settled: pd.DataFrame) -> dict:
     """Aggregates only: coverage and width of the stored 10-90 band, Brier scores and reliability of the event probabilities on settled days."""
     frame = settled.dropna(subset=["actual"]).copy()
+    for column in STORED_PROB_COLUMNS + ["actual"]:
+        if column in frame:  # rows imported from the public dataset carry None in every column it does not publish (quantiles, spike)
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
     out = {"days": int(frame["delivery_day"].nunique()) if len(frame) else 0, "hours": int(len(frame))}
     if frame.empty:
         return out

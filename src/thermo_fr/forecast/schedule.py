@@ -1,36 +1,31 @@
-"""Which step a scheduled GitHub Actions run should perform, from the clock in Paris.
+"""Which step a GitHub Actions run should perform, from the clock in Paris.
 
 GitHub cron is UTC and Paris moves between UTC+1 and UTC+2, while the two
 deadlines that matter are Paris times: the ENTSO-E load forecast is due at
 10:00 on the day before delivery, and the EEX day-ahead future is traded from
 about 11:15, so a forecast that is to be scored against the market must be
-issued before then. The workflow therefore fires several pre-market crons
-(08:10, 08:35, 09:10 and 09:35 UTC on weekdays) and this module keeps only
-those that start inside the pre-market window, 10:05 to 11:00 Paris: in
-summer the 08:10 and 08:35 UTC runs (10:10 and 10:35 Paris), in winter the
-09:10 and 09:35 UTC runs. A run that starts before 10:05 Paris would be ahead
-of the load forecast deadline; one that starts at or after 11:00 could finish
-after the window opened. Both are skipped. One later cron (10:30 UTC, 12:30
-Paris in summer and 11:30 in winter) always runs, for information only: its
-version is issued after the market window and the dashboards label it so.
+issued before then. The pre-market window is therefore 10:05 to 11:00 Paris:
+a run that starts before 10:05 would be ahead of the load forecast deadline,
+one that starts at or after 11:00 could finish after the window opened.
 
-GitHub starts scheduled workflows late at busy times, often by five to fifteen
-minutes, which is why two pre-market crons sit about 25 minutes apart in each
-season instead of one. In October 2026 the delay reached four to five hours and
-the morning crons were dropped altogether, so the pre-market run is now
-triggered by the laptop (`thermo-fr dispatch`, a workflow_dispatch at 10:05 and
-10:30 Paris) with the crons kept as a backup. A dispatched morning-run is
-decided by the same clock rule as a cron: skipped before the load forecast
-deadline, pre-market inside the window, and from 11:00 Paris a late run for
-information only, whose version the dashboards label "issued after the market
-window, not tradeable"; a later version never replaces a pre-market one, since
-the headline is the last version issued before the window (market.headline_version).
-
-The monthly refit follows the same pattern since October 2026: the laptop
-dispatches it on the first weekday of the month at 07:00 London (`thermo-fr
-dispatch --step refit --first-weekday-only`), the 02:00 UTC cron on the 1st to
-the 3rd stays as a backup, and `thermo-fr refit-model --once-per-month` makes
-whichever trigger arrives second exit without committing.
+The pre-market run is triggered by the laptop (`thermo-fr dispatch`, a
+workflow_dispatch at 10:05 and 10:30 Paris) and decided here by that clock
+rule: skipped before the load forecast deadline, pre-market inside the window,
+and from 11:00 Paris a late run for information only, whose version the
+dashboards label "issued after the market window, not tradeable"; a later
+version never replaces a pre-market one, since the headline is the last version
+issued before the window (market.headline_version). The workflow had weekday
+morning crons as a backup until 2026-10-13; they were removed because GitHub
+delivered them hours late (on 12 October 2026 between 9 and 12 hours late), so
+they could not back up a pre-market forecast and only added after-window
+versions and failure risk. Two crons remain, both backups for a laptop
+dispatch: the settle at 13:15 UTC (the laptop dispatches it at 14:20 London)
+and the refit at 02:00 UTC on the 1st to the 3rd, which proceeds on the first
+weekday of the month only (the laptop dispatches it at 07:00 London that day).
+The settle is idempotent (a second settle stores the same prices again and
+scores nothing new) and the refit runs once per month
+(`thermo-fr refit-model --once-per-month`), so a backup that arrives after the
+dispatch changes nothing. Any other schedule string is skipped.
 """
 
 import argparse
@@ -38,8 +33,6 @@ import datetime as dt
 from zoneinfo import ZoneInfo
 
 PARIS = ZoneInfo("Europe/Paris")
-PREMARKET_CRONS = ("10 8 * * 1-5", "35 8 * * 1-5", "10 9 * * 1-5", "35 9 * * 1-5")
-LATE_CRON = "30 10 * * 1-5"
 SETTLE_CRON = "15 13 * * *"
 REFIT_CRON = "0 2 1-3 * *"
 PREMARKET_WINDOW = (dt.time(10, 5), dt.time(11, 0))  # Paris, start inclusive, end exclusive
@@ -61,6 +54,8 @@ def decide(now_utc: dt.datetime, event: str, schedule: str = "", dispatch_step: 
         step = dispatch_step or "morning-run"
         if step == "refit":
             return step, "dispatched refit; once per month, a second trigger in the same month exits as already refitted"
+        if step == "settle":
+            return step, "dispatched settle; a second settle of the same day stores the same prices again and scores nothing new"
         if step != "morning-run":
             return step, "manual dispatch"
         clock = paris.time()
@@ -70,21 +65,12 @@ def decide(now_utc: dt.datetime, event: str, schedule: str = "", dispatch_step: 
             return "morning-run", f"dispatched late run for information at {paris:%H:%M} Paris, after the market window"
         return "morning-run", f"dispatched pre-market run at {paris:%H:%M} Paris"
     if schedule == SETTLE_CRON:
-        return "settle", "daily settlement"
+        return "settle", "daily settlement (backup cron)"
     if schedule == REFIT_CRON:
         if paris.date() == first_weekday_of_month(paris.date()):
-            return "refit", "first weekday of the month"
+            return "refit", "first weekday of the month (backup cron)"
         return "skip", "refit runs on the first weekday of the month only"
-    if schedule == LATE_CRON:
-        return "morning-run", f"late run for information at {paris:%H:%M} Paris, after the market window"
-    if schedule in PREMARKET_CRONS:
-        clock = paris.time()
-        if clock < PREMARKET_WINDOW[0]:
-            return "skip", f"{paris:%H:%M} Paris is before the 10:00 load forecast deadline"
-        if clock >= PREMARKET_WINDOW[1]:
-            return "skip", f"{paris:%H:%M} Paris could finish after the market window opens at 11:15"
-        return "morning-run", f"pre-market run at {paris:%H:%M} Paris"
-    return "skip", f"unknown schedule {schedule!r}"
+    return "skip", f"unknown schedule {schedule!r}; the morning crons were removed on 2026-10-13 (the laptop dispatches the pre-market run)"
 
 
 def main(argv=None) -> None:

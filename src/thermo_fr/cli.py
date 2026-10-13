@@ -189,6 +189,16 @@ def cmd_publish(args) -> None:
           f"{status['scored_versions']} scores to {args.out}")
 
 
+def cmd_publish_unchanged(args) -> None:
+    """Exit 0 when the staged publish changed nothing but the stamps in status.json (the workflow then commits nothing), else 1."""
+    from .forecast.publish import staged_changes_are_stamps_only
+
+    unchanged, why = staged_changes_are_stamps_only(Path(args.repo), args.out)
+    print(why)
+    if not unchanged:
+        raise SystemExit(1)
+
+
 def cmd_refit_model(args) -> None:
     from .forecast.jobs import setup_logging
     from .forecast.refit import fetch_and_refit, refit_from_file, refit_this_month
@@ -736,6 +746,12 @@ def main(argv=None) -> None:
     stl.add_argument("--cache-dir", default="data/cache")
     stl.add_argument("--logs-dir", default="logs")
     stl.set_defaults(func=cmd_settle)
+
+    unchanged = sub.add_parser("publish-unchanged", help="exit 0 when the staged changes are status.json alone, differing from HEAD only in "
+                                                        "its stamps (written_at_utc, last_run); the workflow then commits nothing")
+    unchanged.add_argument("--out", default="published")
+    unchanged.add_argument("--repo", default=".")
+    unchanged.set_defaults(func=cmd_publish_unchanged)
 
     refit = sub.add_parser("refit-model", help="Fetch the full history, fit the honest model, save model file and metadata")
     refit.add_argument("--start", default="2021-01-01")

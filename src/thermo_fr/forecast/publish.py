@@ -363,6 +363,45 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
     return status
 
 
+STATUS_VOLATILE_KEYS = ("written_at_utc", "last_run")  # change on every export even when the dataset did not
+
+
+def status_equivalent(old: dict, new: dict, ignore=STATUS_VOLATILE_KEYS) -> bool:
+    """True when two status.json contents differ at most in the stamps (written_at_utc, last_run)."""
+    def text(status: dict) -> str:  # serialised, so that NaN compares equal to NaN and nested order does not matter
+        return json.dumps({k: v for k, v in status.items() if k not in ignore}, sort_keys=True, default=str)
+
+    return text(old) == text(new)
+
+
+def staged_changes_are_stamps_only(repo, out="published") -> tuple[bool, str]:
+    """(True, why) when the staged changes in `repo` are status.json alone and it differs from HEAD only in its stamps.
+
+    The workflow runs this after `git add published` so that a backup settle that arrives after the dispatched one, or any export
+    that found nothing new, commits nothing: the data files are byte-identical in that case and only the stamps moved. Any git
+    problem counts as a real change, so a publish is never dropped by mistake.
+    """
+    from .gitsync import _git
+
+    status_path = f"{Path(out).as_posix()}/status.json"
+    staged = _git(repo, "diff", "--cached", "--name-only", check=False)
+    if staged.returncode != 0:
+        return False, f"git diff failed: {staged.stderr.strip()}"
+    names = staged.stdout.split()
+    if names != [status_path]:
+        return False, f"staged: {', '.join(names) if names else 'nothing'}"
+    head = _git(repo, "show", f"HEAD:{status_path}", check=False)
+    if head.returncode != 0:
+        return False, f"no committed {status_path} to compare with"
+    try:
+        same = status_equivalent(json.loads(head.stdout), json.loads((Path(repo) / status_path).read_text(encoding="utf-8")))
+    except (ValueError, OSError) as exc:
+        return False, f"could not compare {status_path}: {exc}"
+    if same:
+        return True, f"only the stamps in {status_path} changed ({', '.join(STATUS_VOLATILE_KEYS)}); nothing new to publish"
+    return False, f"{status_path} changed beyond its stamps"
+
+
 def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
     """Load the published files into a (usually empty) store."""
     src = Path(in_dir)
