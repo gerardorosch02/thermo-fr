@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-10-12T19:56:17Z",
+  "written_at_utc": "2026-10-13T06:18:18Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -9,16 +9,22 @@
   "fallback_model_file": "model/honest.txt",
   "model_note": "Every forecast version in forecasts.csv and scores.csv carries the model that produced it in the model column: gbm:<file> for a stored model, with the suffix :fallback when the default model's inputs were missing and the fallback model was used, and gbm for a model fitted live.",
   "window_days": 90,
-  "from_day": "2026-07-14",
-  "tomorrow": "2026-10-13",
+  "from_day": "2026-07-15",
+  "tomorrow": "2026-10-14",
   "forecast_versions": 16,
-  "actual_days": 6,
-  "scored_versions": 14,
+  "actual_days": 7,
+  "scored_versions": 16,
   "live_record": {
     "default": {
       "feature_set": "honest_v2",
       "days": 0,
-      "late_only_days": [],
+      "late_only_days": [
+        {
+          "delivery_day": "2026-10-13",
+          "versions": 2,
+          "first_issued_utc": "2026-10-12T10:23:39Z"
+        }
+      ],
       "window_days": 30,
       "status": "collecting data"
     },
@@ -139,11 +145,11 @@
   },
   "last_run": {
     "run_id": 1,
-    "command": "morning-run",
+    "command": "settle",
     "kind": "scheduled",
-    "delivery_day": "2026-10-13",
-    "started_at_utc": "2026-10-12T19:54:27Z",
-    "finished_at_utc": "2026-10-12T19:56:15Z",
+    "delivery_day": null,
+    "started_at_utc": "2026-10-13T06:18:03Z",
+    "finished_at_utc": "2026-10-13T06:18:16Z",
     "status": "ok",
     "message": ""
   },
@@ -162,12 +168,116 @@
     "carried_note": "this machine holds no traded prices; the aggregates are the last ones computed on the laptop"
   },
   "shape_battery": {
-    "days": 0
+    "days": 1,
+    "shape": {
+      "hours": 24,
+      "days": 1,
+      "model": {
+        "shape_mae": 14.18,
+        "spread_error": 11.0,
+        "cheapest2_hit_rate": 0.5,
+        "dearest2_hit_rate": 0.5
+      },
+      "d1": {
+        "shape_mae": 17.22,
+        "spread_error": 28.68,
+        "cheapest2_hit_rate": 0.5,
+        "dearest2_hit_rate": 0.5
+      }
+    },
+    "battery": {
+      "days": 1,
+      "perfect_eur_per_day": 221.63,
+      "model": {
+        "eur_per_day": 188.24,
+        "share_of_perfect": 0.849,
+        "days_traded": 1,
+        "days_skipped": 0,
+        "losing_days": 0
+      },
+      "d1": {
+        "eur_per_day": 188.24,
+        "share_of_perfect": 0.849,
+        "days_traded": 1,
+        "days_skipped": 0,
+        "losing_days": 0
+      }
+    }
   },
   "probabilistic": {
     "live": {
-      "days": 0,
-      "hours": 0
+      "days": 1,
+      "hours": 24,
+      "negative": {
+        "events": 0,
+        "hours": 24,
+        "brier": 1e-05,
+        "brier_base_rate": 0.0,
+        "log_loss": 0.0032,
+        "reliability": [
+          {
+            "bin": "0.0-0.1",
+            "n": 24,
+            "mean_forecast": 0.0032,
+            "observed_frequency": 0.0
+          },
+          {
+            "bin": "0.1-0.2",
+            "n": 0,
+            "mean_forecast": NaN,
+            "observed_frequency": NaN
+          },
+          {
+            "bin": "0.2-0.3",
+            "n": 0,
+            "mean_forecast": NaN,
+            "observed_frequency": NaN
+          },
+          {
+            "bin": "0.3-0.4",
+            "n": 0,
+            "mean_forecast": NaN,
+            "observed_frequency": NaN
+          },
+          {
+            "bin": "0.4-0.5",
+            "n": 0,
+            "mean_forecast": NaN,
+            "observed_frequency": NaN
+          },
+          {
+            "bin": "0.5-0.6",
+            "n": 0,
+            "mean_forecast": NaN,
+            "observed_frequency": NaN
+          },
+          {
+            "bin": "0.6-0.7",
+            "n": 0,
+            "mean_forecast": NaN,
+            "observed_frequency": NaN
+          },
+          {
+            "bin": "0.7-0.8",
+            "n": 0,
+            "mean_forecast": NaN,
+            "observed_frequency": NaN
+          },
+          {
+            "bin": "0.8-0.9",
+            "n": 0,
+            "mean_forecast": NaN,
+            "observed_frequency": NaN
+          },
+          {
+            "bin": "0.9-1.0",
+            "n": 0,
+            "mean_forecast": NaN,
+            "observed_frequency": NaN
+          }
+        ]
+      },
+      "negative_calibrated_hours": 24
     },
     "backtest_file": "probabilistic_backtest.json",
     "calibration": {

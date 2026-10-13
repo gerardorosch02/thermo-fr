@@ -235,8 +235,58 @@
     }
   },
   "live": {
-    "days": 0,
-    "daily": []
+    "days": 1,
+    "shape": {
+      "hours": 24,
+      "days": 1,
+      "model": {
+        "shape_mae": 14.18,
+        "spread_error": 11.0,
+        "cheapest2_hit_rate": 0.5,
+        "dearest2_hit_rate": 0.5
+      },
+      "d1": {
+        "shape_mae": 17.22,
+        "spread_error": 28.68,
+        "cheapest2_hit_rate": 0.5,
+        "dearest2_hit_rate": 0.5
+      }
+    },
+    "battery": {
+      "days": 1,
+      "perfect_eur_per_day": 221.63,
+      "model": {
+        "eur_per_day": 188.24,
+        "share_of_perfect": 0.849,
+        "days_traded": 1,
+        "days_skipped": 0,
+        "losing_days": 0
+      },
+      "d1": {
+        "eur_per_day": 188.24,
+        "share_of_perfect": 0.849,
+        "days_traded": 1,
+        "days_skipped": 0,
+        "losing_days": 0
+      }
+    },
+    "daily": [
+      {
+        "delivery_day": "2026-10-13",
+        "hours": 24,
+        "value_perfect": 221.63490000000002,
+        "value_model": 188.23790000000002,
+        "traded_model": true,
+        "charge_model": 13,
+        "discharge_model": 18,
+        "value_d1": 188.23790000000002,
+        "traded_d1": true,
+        "charge_d1": 13,
+        "discharge_d1": 18,
+        "shape_mae_model": 14.175564236111109,
+        "shape_mae_d1": 17.221666666666668
+      }
+    ]
   },
   "definitions": {
     "shape": "each hour's price minus the day's mean (base)",
