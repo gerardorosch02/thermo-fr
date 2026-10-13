@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-10-13T06:18:18Z",
+  "written_at_utc": "2026-10-13T06:19:53Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -148,8 +148,8 @@
     "command": "settle",
     "kind": "scheduled",
     "delivery_day": null,
-    "started_at_utc": "2026-10-13T06:18:03Z",
-    "finished_at_utc": "2026-10-13T06:18:16Z",
+    "started_at_utc": "2026-10-13T06:19:50Z",
+    "finished_at_utc": "2026-10-13T06:19:52Z",
     "status": "ok",
     "message": ""
   },
