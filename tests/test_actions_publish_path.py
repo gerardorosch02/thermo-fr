@@ -121,7 +121,7 @@ def test_a_second_settle_of_the_same_day_changes_nothing_but_the_stamps(tmp_path
     second = settle(store, entsoe=source, now=pd.Timestamp("2026-10-13T14:21Z"), kind="test")  # the backup cron, an hour later
     assert second["status"] == "ok" and second["scored"] == 0 and second["actual_days"] == first["actual_days"]
     status2 = export_published(store, out2, days=90, now=pd.Timestamp("2026-10-13T14:22Z"), market_path=tmp_path / "no_market.csv")
-    for name in ("forecasts.csv", "actuals.csv", "scores.csv", "tomorrow.csv", "probabilistic.csv", "shape_battery.json"):
+    for name in ("forecasts.csv", "actuals.csv", "scores.csv", "tomorrow.csv", "probabilistic.csv", "drivers.csv", "shape_battery.json"):
         assert (out1 / name).read_bytes() == (out2 / name).read_bytes(), name
     assert len(store.scores()) == 1 and store.actuals_for(DAY).shape == (24,)
     assert status1 != status2 and status_equivalent(status1, status2)
@@ -186,6 +186,6 @@ def test_import_then_export_leaves_the_published_files_byte_for_byte(tmp_path):
     again = tmp_path / "again"
     export_published(fresh, again, days=90, now=pd.Timestamp("2026-10-13T06:19Z"), market_path=tmp_path / "no_market.csv")
     fresh.close()
-    for name in ("forecasts.csv", "actuals.csv", "scores.csv", "probabilistic.csv", "tomorrow.csv", "error_band.csv"):
+    for name in ("forecasts.csv", "actuals.csv", "scores.csv", "probabilistic.csv", "drivers.csv", "tomorrow.csv", "error_band.csv"):
         assert (out / name).read_bytes() == (again / name).read_bytes(), name
     assert "22.771532775549314" in (again / "scores.csv").read_text()

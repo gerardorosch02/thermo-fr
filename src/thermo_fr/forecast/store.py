@@ -12,6 +12,8 @@ One file, data/forecast.db, with these tables:
 - forecasts      one row per issued forecast version (delivery day, feature
                  set, issue time); a version is never updated or replaced
 - forecast_values  the hourly curve of a version, with the same-hour-D-1 benchmark
+- forecast_drivers per version and model feature, the daily mean of the feature and of its LightGBM
+                 contribution (plus the expected value row), what the morning brief explains a move with
 - actuals        day-ahead prices fetched by settle
 - scores         each version scored against the actuals and the benchmark
 - error_band     per feature set and delivery hour, percentiles of the backtest
@@ -51,6 +53,8 @@ CREATE TABLE IF NOT EXISTS forecasts (
 CREATE TABLE IF NOT EXISTS forecast_values (
     forecast_id INTEGER NOT NULL, timestamp_utc TEXT NOT NULL, hour INTEGER NOT NULL, forecast REAL NOT NULL, naive_day REAL,
     PRIMARY KEY (forecast_id, timestamp_utc));
+CREATE TABLE IF NOT EXISTS forecast_drivers (
+    forecast_id INTEGER NOT NULL, feature TEXT NOT NULL, value REAL, contribution REAL NOT NULL, PRIMARY KEY (forecast_id, feature));
 CREATE TABLE IF NOT EXISTS forecast_prob (
     forecast_id INTEGER NOT NULL, timestamp_utc TEXT NOT NULL, q10 REAL, q50 REAL, q90 REAL, lo REAL, hi REAL, p_negative REAL, p_spike REAL,
     spike_threshold REAL, conformal_margin REAL, PRIMARY KEY (forecast_id, timestamp_utc));
@@ -311,6 +315,25 @@ class Store:
             frames.append(curve)
         return pd.concat(frames) if frames else pd.DataFrame(columns=["q10", "q50", "q90", "lo", "hi", "p_negative", "p_spike", "spike_threshold",
                                                                           "conformal_margin", "p_negative_cal", "actual", "delivery_day"])
+
+    def save_drivers(self, forecast_id: int, drivers: pd.DataFrame) -> int:
+        """The per-feature daily means of the feature and of its contribution for a version (brief.driver_table)."""
+        rows = [(int(forecast_id), str(r["feature"]), None if pd.isna(r["value"]) else float(r["value"]), float(r["contribution"]))
+                for _, r in drivers.iterrows() if not pd.isna(r["contribution"])]
+        self.conn.executemany("INSERT OR REPLACE INTO forecast_drivers (forecast_id, feature, value, contribution) VALUES (?, ?, ?, ?)", rows)
+        self.conn.commit()
+        return len(rows)
+
+    def drivers(self, forecast_id: int) -> pd.DataFrame:
+        return pd.read_sql_query("SELECT feature, value, contribution FROM forecast_drivers WHERE forecast_id = ? ORDER BY rowid",
+                                 self.conn, params=(int(forecast_id),))
+
+    def versions_with_drivers(self, delivery_day: str, feature_set: str) -> pd.DataFrame:
+        """The versions of a day that carry drivers, oldest first."""
+        return pd.read_sql_query(
+            "SELECT f.* FROM forecasts f WHERE f.delivery_day = ? AND f.feature_set = ?"
+            " AND EXISTS (SELECT 1 FROM forecast_drivers d WHERE d.forecast_id = f.forecast_id) ORDER BY f.issued_at_utc",
+            self.conn, params=(delivery_day, feature_set))
 
     def forecast_versions(self, delivery_day: str, feature_set: str | None = None) -> pd.DataFrame:
         query = "SELECT * FROM forecasts WHERE delivery_day = ?"

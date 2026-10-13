@@ -111,11 +111,27 @@ def load_model(path):
     return Booster(model_str=text)
 
 
-def predict_with(path, X: pd.DataFrame) -> np.ndarray:
-    """Predict with a stored model, aligning the feature columns to the model's own order."""
+def _aligned(path, X: pd.DataFrame):
     booster = load_model(path)
     columns = booster.feature_name()
     missing = [c for c in columns if c not in X.columns]
     if missing:
         raise ValueError(f"Stored model needs features that are not in the table: {missing}")
-    return np.asarray(booster.predict(X[columns]), dtype=float)
+    return booster, X[columns]
+
+
+def predict_with(path, X: pd.DataFrame) -> np.ndarray:
+    """Predict with a stored model, aligning the feature columns to the model's own order."""
+    booster, aligned = _aligned(path, X)
+    return np.asarray(booster.predict(aligned), dtype=float)
+
+
+def contributions_with(path, X: pd.DataFrame) -> pd.DataFrame:
+    """LightGBM's per-feature contributions (pred_contrib=True) for each row of X, plus the model's expected value.
+
+    One column per model feature and a last column `expected_value`; each row sums to the prediction of that
+    row, which is what lets the morning brief split a change in fair value between feature groups (brief.py).
+    """
+    booster, aligned = _aligned(path, X)
+    raw = np.asarray(booster.predict(aligned, pred_contrib=True), dtype=float)
+    return pd.DataFrame(raw, index=X.index, columns=list(aligned.columns) + ["expected_value"])

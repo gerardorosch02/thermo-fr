@@ -22,7 +22,7 @@ from ..data.wind_points import WindPointsSource
 from .features import GATED_SETS, build_features, feature_timings
 from .gen_proxy import apply_weights, load_weights
 from .inputs import INPUT_COLUMNS
-from .models import fit_predict, predict_with
+from .models import contributions_with, fit_predict, predict_with
 from .solar_proxy import SOLAR
 from .timing import check_point_in_time
 from .wind_proxy import WIND
@@ -77,7 +77,9 @@ def forecast_day(date: str, inputs: pd.DataFrame, fresh: pd.DataFrame | None = N
 
     With `model_file` the stored LightGBM model is used instead of refitting, so
     only the days around `date` are needed in `inputs` (the lags reach back a
-    week). The returned frame carries `train_hours` and `passes_gate` in attrs.
+    week). The returned frame carries `train_hours` and `passes_gate` in attrs
+    and, with a stored model, `features` (the day's feature rows) and
+    `contributions` (LightGBM's per-feature contributions, brief.py).
     """
     day = pd.Timestamp(date).normalize()
     merged = merge_inputs(inputs, fresh)
@@ -96,9 +98,11 @@ def forecast_day(date: str, inputs: pd.DataFrame, fresh: pd.DataFrame | None = N
         raise ValueError(f"ENTSO-E wind and solar forecasts for {date} are not available yet.")
     train = table.info["delivery_day"] < day
     train_hours = int(table.y[train].notna().sum())
+    contributions = None
     if model_file is not None:
         log(f"Predicting {feature_set} with the stored model {model_file} ...")
         prediction = predict_with(model_file, table.X[rows])
+        contributions = contributions_with(model_file, table.X[rows])
         train_hours = 0
     else:
         log(f"Fitting {model} ({feature_set}) on {train_hours:,} hours before {date} ...")
@@ -117,4 +121,7 @@ def forecast_day(date: str, inputs: pd.DataFrame, fresh: pd.DataFrame | None = N
     curve.index.name = "timestamp_utc"
     curve.attrs["train_hours"] = train_hours
     curve.attrs["passes_gate"] = passes_gate
+    if contributions is not None:
+        curve.attrs["features"] = table.X[rows]
+        curve.attrs["contributions"] = contributions
     return curve
