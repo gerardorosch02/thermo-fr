@@ -16,7 +16,9 @@ morning-run, several times during the morning of D-1:
    workflow give the same curve for the same inputs) or fitted live when no
    stored model is given, and, when the wind and solar forecasts exist, the
    extended set, which has no stored model and is always fitted live; every
-   forecast is a new version stamped with its issue time;
+   forecast is a new version stamped with its issue time; a version predicted
+   with a stored model also stores its drivers (per feature, the daily mean of
+   the feature and of LightGBM's contribution) for the morning brief;
 4. refreshes the error band from the backtest predictions when they exist.
 
 A source that is down is recorded as an error in data_status and the run
@@ -43,6 +45,7 @@ from ..data.entsoe_client import EntsoeSource
 from ..data.solar_points import SolarPointsSource
 from ..data.weather_forecast import OpenMeteoForecastSource
 from ..data.wind_points import WindPointsSource
+from .brief import driver_table
 from .day import HISTORY_DAYS, forecast_day, merge_inputs
 from .features import FEATURES, build_features
 from .calibration import apply_calibration, load_calibration
@@ -291,6 +294,8 @@ def morning_run(store: Store, delivery_day: str | None = None, kind: str = "sche
                 forecast_id = store.save_forecast(
                     run_id, day, feature_set, issued_at, model_name, kind, curve.attrs["train_hours"], curve.attrs["passes_gate"], curve
                 )
+                if "contributions" in curve.attrs:  # a stored model: what the brief explains the fair value with
+                    store.save_drivers(forecast_id, driver_table(curve.attrs["features"], curve.attrs["contributions"]))
                 if stored is not None and suffix == "":
                     probabilistic_curve(store, run_id, day, forecast_id, predict_set, Path(stored).parent, merged, now=now)
                 summary["forecasts"][feature_set] = forecast_id

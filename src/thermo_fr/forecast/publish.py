@@ -19,6 +19,9 @@ Files written by `export_published`:
     error_band.csv     backtest error percentiles by hour (the dashboard's shaded band until the quantile band is made the default)
     market.json        the market aggregates, written only on the laptop (where the traded prices are) by `thermo-fr market publish`, which
                        commits and pushes that one file; the workflow never writes it and copies it into status.json unchanged
+    drivers.csv        per version of the published sets and model feature: the feature's group (brief.py), the daily mean of the
+                       feature and of its LightGBM contribution, plus the expected value row; the morning brief's "what changed"
+                       and "why fair value moved" come from it. Public inputs only, nothing from EEX
     probabilistic.csv  per version and hour of the published sets: the probability of a negative price, calibrated (p_negative) with the
                        raw classifier output alongside (p_negative_raw) and a flag (calibrated); the quantile band and the spike probability
                        are computed and stored locally every day but not published, under evaluation);
@@ -48,6 +51,7 @@ import pandas as pd
 
 from .market import DEFAULT_PATH as MARKET_PATH
 from .market import MIN_PUBLIC_DAYS
+from .brief import group_of
 from .calibration import load_calibration, public_calibration
 from .probabilistic import live_calibration
 from .shape import live_shape_record
@@ -303,6 +307,15 @@ def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None
     else:
         pd.DataFrame(columns=prob.columns).to_csv(out / "tomorrow_probabilistic.csv", index=False)
 
+    drivers = pd.read_sql_query(
+        "SELECT f.delivery_day, f.issued_at_utc, f.feature_set, d.feature, d.value, d.contribution"
+        " FROM forecast_drivers d JOIN forecasts f ON f.forecast_id = d.forecast_id"
+        f" WHERE f.feature_set IN ({sets_sql}) AND f.delivery_day >= ? ORDER BY f.delivery_day, f.issued_at_utc, d.rowid",
+        store.conn, params=(*PUBLIC_FEATURE_SETS, cutoff),
+    )
+    drivers.insert(4, "group", drivers["feature"].map(group_of) if len(drivers) else pd.Series(dtype=str))
+    drivers.to_csv(out / "drivers.csv", index=False)
+
     band = pd.DataFrame()
     for band_set in (PUBLIC_FEATURE_SET, FALLBACK_FEATURE_SET):  # the default model's band, else the fallback model's
         band = pd.read_sql_query(
@@ -410,7 +423,7 @@ def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
     and a publish that changed nothing must leave the files byte for byte as they were.
     """
     src = Path(in_dir)
-    summary = {"forecast_versions": 0, "actual_rows": 0, "scores": 0, "error_band_rows": 0, "probabilistic_versions": 0}
+    summary = {"forecast_versions": 0, "actual_rows": 0, "scores": 0, "error_band_rows": 0, "probabilistic_versions": 0, "driver_versions": 0}
     forecasts_path = src / "forecasts.csv"
     if forecasts_path.exists() and forecasts_path.stat().st_size > 0:
         forecasts = pd.read_csv(forecasts_path, float_precision="round_trip")
@@ -467,6 +480,17 @@ def import_published(store: Store, in_dir=DEFAULT_DIR) -> dict:
                 frame["conformal_margin"] = (frame["q10"] - frame["lo"]).round(4)
                 store.save_probabilistic(int(fid), frame)
                 summary["probabilistic_versions"] += 1
+    drivers_path = src / "drivers.csv"
+    if drivers_path.exists() and drivers_path.stat().st_size > 0:
+        drivers = pd.read_csv(drivers_path, float_precision="round_trip")
+        if not drivers.empty:
+            versions = pd.read_sql_query("SELECT forecast_id, delivery_day, issued_at_utc, feature_set FROM forecasts", store.conn)
+            merged = drivers.merge(versions, on=["delivery_day", "issued_at_utc", "feature_set"], how="inner")
+            for fid, group in merged.groupby("forecast_id", sort=False):
+                if not store.drivers(int(fid)).empty:
+                    continue
+                store.save_drivers(int(fid), group[["feature", "value", "contribution"]])
+                summary["driver_versions"] += 1
     band_path = src / "error_band.csv"
     if band_path.exists() and band_path.stat().st_size > 0:
         band = pd.read_csv(band_path, float_precision="round_trip")

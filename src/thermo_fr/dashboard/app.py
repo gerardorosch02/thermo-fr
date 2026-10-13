@@ -4,6 +4,11 @@ Run with `thermo-fr dashboard` (which calls `streamlit run` on this file). It
 reads only the SQLite database written by the scheduled jobs; the only way it
 touches the network is the "Refresh now" button, which runs morning-run once
 in a subprocess.
+
+Two pages: the morning brief (first, one screen for a trader: fair value, what
+changed, why it moved, the live record, the early EEX trade gap) and the full
+set of panels (forecast, inputs, versus the market, errors, calibration, shape,
+data status).
 """
 
 import argparse
@@ -15,8 +20,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from thermo_fr.dashboard import brief as bq
 from thermo_fr.dashboard import data as q
 from thermo_fr.dashboard import probability_text as pt
+from thermo_fr.forecast import brief as fb
 
 COLORS = {"honest_v2": "#2a78d6", "honest": "#6f5fc6", "extended": "#1baf7a", "actual": "#eb6834", "benchmark": "#52514e", "grid": "#e6e5e1"}
 BAND_RGBA = {"honest_v2": ("rgba(42,120,214,0.14)", "rgba(42,120,214,0.30)"), "honest": ("rgba(111,95,198,0.14)", "rgba(111,95,198,0.30)"),
@@ -169,41 +176,92 @@ def run_morning(db: str) -> str:
     return (result.stdout + result.stderr).strip()[-2000:]
 
 
-def main() -> None:
-    args = parse_args()
-    db = args.db
-    st.set_page_config(page_title="thermo-fr day-ahead forecast", layout="wide")
+@st.cache_data(ttl=60, show_spinner=False)
+def brief_panel(path, version, market_version, day, previous, feature_set):
+    return bq.brief_panel(path, day, previous, feature_set)
+
+
+def waterfall_chart(result: dict) -> go.Figure:
+    frame = bq.waterfall_frame(result)
+    fig = go.Figure(go.Waterfall(x=[str(label).replace(" (", "<br>(") for label in frame["label"]], y=frame["value"], measure=frame["measure"], text=[f"{v:+.0f}" if m == "relative" else f"{v:.0f}"
+                                 for v, m in zip(frame["value"], frame["measure"])], textposition="outside", connector=dict(line=dict(color="#e6e5e1")),
+                                 increasing=dict(marker=dict(color="#1baf7a")), decreasing=dict(marker=dict(color="#eb6834")),
+                                 totals=dict(marker=dict(color="#2a78d6"))))
+    fig.update_layout(template="plotly_white", height=300, margin=dict(l=30, r=10, t=10, b=60), showlegend=False,
+                      yaxis=dict(title="EUR/MWh, base", gridcolor=COLORS["grid"]), xaxis=dict(tickangle=-30))
+    return fig
+
+
+def morning_brief() -> None:
+    """Page 1: one screen for the next delivery day, written for a trader."""
+    ctx = st.session_state["ctx"]
+    db, feature_set, today, tomorrow = ctx["db"], ctx["feature_set"], ctx["today"], ctx["tomorrow"]
+    st.markdown("<style>.block-container{padding-top:1.6rem;padding-bottom:1rem}</style>", unsafe_allow_html=True)  # one laptop screen
+    panel = brief_panel(db, ctx["version"], q.db_version(q.MARKET_PATH) + q.db_version(bq.EARLY_PATH), tomorrow, today, feature_set)
+    st.header(f"Morning brief: delivery day {tomorrow} ({pd.Timestamp(tomorrow):%A})")
+    meta = panel["meta"]
+    if meta is None:
+        st.info(f"No {feature_set} forecast stored for {tomorrow} yet. The pre-market runs start at 09:45 Paris; use Refresh now to run one.")
+        return
+    issued = panel["issued_paris"]
+    if meta.get("premarket"):
+        st.caption(f"Pre-market forecast, issued {issued:%H:%M} Paris on {issued:%Y-%m-%d}, before the EEX window opened at 11:15. "
+                   f"Model {str(meta['model']).split(':', 1)[-1]}.")
+    else:
+        st.warning(f"No version was issued before the 11:15 Paris market window; this one was issued {issued:%H:%M} and is not tradeable.")
+    fair, negative = panel["fair"], panel["negative_hours"]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Fair value, base", f"{fair['base']:.1f}", help="daily mean of the hourly forecast, EUR/MWh")
+    c2.metric("Peak (08-20)", f"{fair['peak']:.1f}")
+    c3.metric("Off-peak", f"{fair['offpeak']:.1f}")
+    c4.metric("Negative-price hours", str(len(negative)), help="hours whose calibrated probability of a negative price is 5% or more")
+    if negative:
+        st.markdown("**Negative-price risk:** " + ", ".join(f"{h['hour']:02d}:00 ({100 * h['p']:.0f}%)" for h in negative) + " Paris.")
+    else:
+        st.caption("No hour at or above a 5% calibrated probability of a negative price.")
+    record = panel["record"]
+    if record["show"]:
+        st.markdown(f"**Track record.** {record['text']} Scored on the {record['versions']}; the full table is on the Forecast and record page.")
+    else:
+        st.markdown(f"**Track record.** {record['text']} Scored on the {record['versions']}.")
+    early = panel["early_trade"]
+    if early is not None:
+        st.markdown(f"**{early['label']}, local only.** {early['text']}")
+    left, right = st.columns([5, 6])
+    with left:
+        st.markdown(f"**What changed** (tomorrow against {panel['previous_day']})")
+        st.dataframe(bq.format_fundamentals(panel["fundamentals"]), hide_index=True, use_container_width=True, height=283,
+                     column_config={"Quantity": st.column_config.TextColumn(width="medium"), "Tomorrow": st.column_config.TextColumn(width="small"),
+                                    "Previous day": st.column_config.TextColumn(width="small"), "Change": st.column_config.TextColumn(width="small")})
+        st.dataframe(fb.neighbour_block(panel["fundamentals"]), use_container_width=True, height=108)  # neighbours: D-1 base (change), FR spread
+        notes = []
+        if panel["current_note"] not in ("headline", "no version"):
+            notes.append(f"tomorrow's values {panel['current_note']}")
+        if panel["previous_drivers"] is None:
+            notes.append("no stored values for the previous day")
+        elif panel["previous_source"] != "the previous day's pre-market version":
+            notes.append(f"previous day from {panel['previous_source']}")
+        st.caption("The model's inputs at issue time, EUR/MWh for prices; neighbours: D-1 base with the change in brackets, and the French minus "
+                   "neighbour spread." + (" " + "; ".join(notes).capitalize() + "." if notes else ""))
+    with right:
+        st.markdown("**Why fair value moved** (yesterday's pre-market forecast to today's, base, EUR/MWh)")
+        result = panel["waterfall"]
+        if result["complete"]:
+            st.plotly_chart(waterfall_chart(result), use_container_width=True)
+            st.markdown(f"**{panel['summary']}**")
+            st.caption("LightGBM's own contributions per feature, daily means, grouped; the steps sum to the change in the base forecast. "
+                       "\"Model refit\" appears only when the model changed between the two versions.")
+        else:
+            st.info("The waterfall needs the drivers of two consecutive pre-market versions. They are stored with every version since "
+                    "2026-10-13, so the first complete waterfall appears with the next pre-market run after two days have them.")
+
+
+def forecast_and_record() -> None:
+    """Page 2: the full panels."""
+    ctx = st.session_state["ctx"]
+    db, version, feature_set, band_source = ctx["db"], ctx["version"], ctx["feature_set"], ctx["band_source"]
+    today, tomorrow = ctx["today"], ctx["tomorrow"]
     st.title("French day-ahead price forecast")
-    today, tomorrow = q.today_and_tomorrow()
-    version = q.db_version(db)
-
-    with st.sidebar:
-        st.header("Settings")
-        feature_set = st.radio("Feature set", ("honest_v2", "honest", "extended"), index=0,
-                               help="honest_v2 is the default model (published/model/honest_v2.txt); honest is the fallback model's set; "
-                                    "both use only inputs published before 12:00 Paris on the day before delivery.")
-        st.caption("honest_v2: the honest set (calendar, load forecast, weather issued two days ahead, wind and solar proxies, price lags) "
-                   "plus lagged nuclear generation, the neighbours' D-1 prices and a residual load. Each version names the model that "
-                   "produced it; ':fallback' means the default model's inputs were missing and honest.txt was used.")
-        if feature_set == "extended":
-            st.warning(EXTENDED_NOTE)
-        band_source = st.radio("Shaded band", ("backtest error", "quantile 10-90 (under evaluation)"), index=0,
-                               help="backtest error: the historical error percentiles of the point model; quantile 10-90: the quantile models' "
-                                    "band with the conformal margin, when the version carries one. Under evaluation: accepted on the selection "
-                                    "window, under-covered on the holdout (73.8%); not published.")
-        st.divider()
-        if st.button("Refresh now (runs morning-run once)"):
-            with st.spinner("Running morning-run (fetching inputs, fitting the models) ..."):
-                output = run_morning(db)
-            st.code(output or "no output", language="text")
-            st.cache_data.clear()
-            st.rerun()
-        st.caption(f"Database: {db}")
-        st.caption("Data is read from the database only; the scheduled jobs call the APIs.")
-        if not Path(db).exists():
-            st.error("No database yet. Run `thermo-fr morning-run` once.")
-            st.stop()
-
     # 1. Tomorrow's forecast
     st.subheader(f"Tomorrow's forecast: delivery day {tomorrow}")
     panel = forecast_panel(db, version, tomorrow, feature_set, today)
@@ -515,6 +573,45 @@ def main() -> None:
             st.dataframe(status["timing"], hide_index=True, use_container_width=True)
     with st.expander("Recent job runs"):
         st.dataframe(status["runs"], hide_index=True, use_container_width=True)
+
+
+def main() -> None:
+    args = parse_args()
+    db = args.db
+    st.set_page_config(page_title="thermo-fr day-ahead forecast", layout="wide")
+    today, tomorrow = q.today_and_tomorrow()
+    version = q.db_version(db)
+
+    with st.sidebar:
+        st.header("Settings")
+        feature_set = st.radio("Feature set", ("honest_v2", "honest", "extended"), index=0,
+                               help="honest_v2 is the default model (published/model/honest_v2.txt); honest is the fallback model's set; "
+                                    "both use only inputs published before 12:00 Paris on the day before delivery.")
+        st.caption("honest_v2: the honest set (calendar, load forecast, weather issued two days ahead, wind and solar proxies, price lags) "
+                   "plus lagged nuclear generation, the neighbours' D-1 prices and a residual load. Each version names the model that "
+                   "produced it; ':fallback' means the default model's inputs were missing and honest.txt was used.")
+        if feature_set == "extended":
+            st.warning(EXTENDED_NOTE)
+        band_source = st.radio("Shaded band", ("backtest error", "quantile 10-90 (under evaluation)"), index=0,
+                               help="backtest error: the historical error percentiles of the point model; quantile 10-90: the quantile models' "
+                                    "band with the conformal margin, when the version carries one. Under evaluation: accepted on the selection "
+                                    "window, under-covered on the holdout (73.8%); not published.")
+        st.divider()
+        if st.button("Refresh now (runs morning-run once)"):
+            with st.spinner("Running morning-run (fetching inputs, fitting the models) ..."):
+                output = run_morning(db)
+            st.code(output or "no output", language="text")
+            st.cache_data.clear()
+            st.rerun()
+        st.caption(f"Database: {db}")
+        st.caption("Data is read from the database only; the scheduled jobs call the APIs.")
+        if not Path(db).exists():
+            st.error("No database yet. Run `thermo-fr morning-run` once.")
+            st.stop()
+    st.session_state["ctx"] = {"db": db, "version": version, "feature_set": feature_set, "band_source": band_source, "today": today,
+                               "tomorrow": tomorrow}
+    pages = [st.Page(morning_brief, title="Morning brief", default=True), st.Page(forecast_and_record, title="Forecast and record")]
+    st.navigation(pages).run()
 
 
 if __name__ == "__main__":

@@ -21,8 +21,10 @@ from thermo_fr.forecast.market import (
     delivery_days_to_collect,
     load_market,
     parse_paste,
+    load_early,
     read_fetch_log,
     run_fetcher,
+    run_snapshot,
     trade_date_for,
     window_bounds,
 )
@@ -114,6 +116,59 @@ def test_run_fetcher_stores_logs_and_skips_what_exists(tmp_path):
     again = run_fetcher(["2026-10-10"], plugin=plugin, market_path=csv_path, log_path=log_path, raw_dir=tmp_path / "raw", log=lambda *a: None)
     assert [(o.product, o.status) for o in again] == [("base", "exists"), ("peak", "skipped")]
     assert len(load_market(csv_path)) == 2 and len(read_fetch_log(log_path)) == 6
+
+
+def test_run_snapshot_stores_the_latest_trade_before_the_window_once_and_logs(tmp_path):
+    """Made-up trades on the 2026-10-13 tape (CEST, UTC+2): 09:30, 11:04 and 11:20 Paris; only the 11:04 one may be stored."""
+    plugin = fake_plugin(tmp_path, '''
+        import pandas as pd
+        from thermo_fr.forecast.market import TapeOutcome
+        def snapshot(delivery_dates, products, raw_dir, spacing_s, log):
+            out = []
+            for day in delivery_dates:
+                for product in products:
+                    if day == "2026-10-15":
+                        out.append(TapeOutcome(day, product, "skipped", "no trades yet"))
+                        continue
+                    tape = pd.DataFrame({"time_utc": pd.to_datetime(["2026-10-13T07:30:00Z", "2026-10-13T09:04:00Z", "2026-10-13T09:20:00Z"], utc=True),
+                                         "price": [100.0, 102.0, 104.0], "volume_mwh": [24.0, 48.0, 24.0]})
+                    out.append(TapeOutcome(day, product, "tape", "tape read at 11:20 Paris, 3 trades so far", tape, "fake site"))
+            return out
+    ''')
+    early, log_path = tmp_path / "early.csv", tmp_path / "log.csv"
+    outcomes = run_snapshot(["2026-10-14", "2026-10-15"], plugin=plugin, early_path=early, log_path=log_path, raw_dir=tmp_path / "raw",
+                            log=lambda *a: None, now=pd.Timestamp("2026-10-13T09:20Z"))
+    assert [(o.delivery_date, o.product, o.status) for o in outcomes] == [("2026-10-14", "base", "stored"), ("2026-10-15", "base", "skipped")]
+    assert "11:04 Paris, 2 trades before the window" in outcomes[0].message and outcomes[1].message == "snapshot: no trades yet"
+    stored = load_early(early)
+    assert len(stored) == 1 and stored["price"].iloc[0] == 102.0 and stored["trade_time_paris"].iloc[0] == "11:04"
+    assert stored["trade_date"].iloc[0] == "2026-10-13" and stored["trades_before_window"].iloc[0] == 2 and stored["volume_before_window_mwh"].iloc[0] == 72.0
+    assert stored["snapshot_at_utc"].iloc[0] == "2026-10-13T09:20:00Z" and stored["source"].iloc[0] == "fake site"
+    log = read_fetch_log(log_path)
+    assert len(log) == 2 and log["message"].str.startswith("snapshot:").all() and set(log["status"]) == {"stored", "skipped"}
+    # the same tape again: the trade is already stored, nothing is written twice
+    again = run_snapshot(["2026-10-14"], plugin=plugin, early_path=early, log_path=log_path, raw_dir=tmp_path / "raw", log=lambda *a: None)
+    assert [o.status for o in again] == ["exists"] and len(load_early(early)) == 1
+    # a tape with trades only inside the window stores nothing, and a module without snapshot() is an error, both logged
+    (tmp_path / "b").mkdir()
+    inside_only = fake_plugin(tmp_path / "b", '''
+        import pandas as pd
+        from thermo_fr.forecast.market import TapeOutcome
+        def snapshot(delivery_dates, products, raw_dir, spacing_s, log):
+            tape = pd.DataFrame({"time_utc": pd.to_datetime(["2026-10-13T09:15:00Z"], utc=True), "price": [104.0], "volume_mwh": [24.0]})
+            return [TapeOutcome(d, "base", "tape", "", tape, "fake site") for d in delivery_dates]
+    ''')
+    skipped = run_snapshot(["2026-10-14"], plugin=inside_only, early_path=early, log_path=log_path, raw_dir=tmp_path / "raw", log=lambda *a: None)
+    assert skipped[0].status == "skipped" and "none before 11:15 Paris" in skipped[0].message
+    (tmp_path / "c").mkdir()
+    fetch_only = fake_plugin(tmp_path / "c", "def fetch(*a): return []")
+    errors = run_snapshot(["2026-10-14"], plugin=fetch_only, early_path=early, log_path=log_path, raw_dir=tmp_path / "raw", log=lambda *a: None)
+    assert errors[0].status == "error" and "snapshot()" in errors[0].message
+    assert len(load_early(early)) == 1
+    # the command line
+    cli.main(["market", "snapshot", "--date", "2026-10-14", "--plugin", str(plugin), "--path", str(early), "--log", str(log_path),
+              "--raw-dir", str(tmp_path / "raw")])
+    assert len(load_early(early)) == 1
 
 
 def test_run_fetcher_refuses_rows_for_the_wrong_day_and_logs_errors(tmp_path):

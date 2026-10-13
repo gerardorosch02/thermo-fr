@@ -4,6 +4,14 @@ It reads only the files under published/, which a GitHub Actions workflow
 rewrites after every forecast and settlement run. No API is called here and no
 key is needed. It depends on streamlit, pandas and plotly only (requirements.txt),
 not on the thermo_fr package.
+
+Two pages. The morning brief comes first: one screen for the next delivery day
+with the fair value (base, peak, off-peak) of the pre-market forecast, the
+negative-price hours, what changed in the fundamentals against the previous
+delivery day, why the fair value moved (LightGBM's own contributions, grouped,
+as a waterfall from yesterday's pre-market forecast to today's) and the live
+record against EEX. The brief's arithmetic mirrors thermo_fr/forecast/brief.py
+and a test keeps the two equal. The second page holds the panels.
 """
 
 import json
@@ -179,6 +187,7 @@ def load_published(version: float) -> dict:
         "band": read("error_band.csv"),
         "shape": json.loads((PUBLISHED / "shape_battery.json").read_text()) if (PUBLISHED / "shape_battery.json").exists() else {},
         "prob_tomorrow": read("tomorrow_probabilistic.csv"),
+        "drivers": read("drivers.csv"),
         "prob_backtest": json.loads((PUBLISHED / "probabilistic_backtest.json").read_text()) if (PUBLISHED / "probabilistic_backtest.json").exists() else {},
     }
     # the dataset may carry more than one feature set (the default model's and the fallback's); the app shows the default.
@@ -388,8 +397,280 @@ very low prices are still forecast too high more often than not.
 """
 
 
-def main() -> None:
-    st.set_page_config(page_title="French day-ahead price forecast", layout="wide")
+# ---------------------------------------------------------------------------- the morning brief (mirrors thermo_fr/forecast/brief.py)
+PEAK_HOURS = range(8, 20)  # 08:00 to 20:00 Paris
+NEGATIVE_THRESHOLD = 0.05
+MIN_STEP = 0.5
+AVERAGE_GROUP, REFIT_STEP = "model average", "model refit"
+FRENCH_GROUP = "recent French prices (model following the market)"
+LEGACY_GROUPS = {"recent French prices": FRENCH_GROUP}  # the group's name in drivers.csv files exported before 2026-10-14
+GROUP_ORDER = [FRENCH_GROUP, "neighbour prices", "wind", "solar", "load and temperature", "nuclear", "calendar", AVERAGE_GROUP]
+FUNDAMENTALS = [("French D-1 base", "EUR/MWh", "price_lag1_mean", 1.0),
+                ("Load forecast", "GW", "load_fc_mw", 1000.0), ("Temperature", "C", "temp_c", 1.0), ("Wind proxy", "GW", "wind_proxy_mw", 1000.0),
+                ("Solar proxy", "GW", "solar_proxy_mw", 1000.0), ("Latest nuclear output", "GW", "nuclear_d1_early_mw", 1000.0),
+                ("Residual load", "GW", "residual_v2_mw", 1000.0)]
+NEIGHBOUR_ROWS = [("DE", "de_lu"), ("BE", "be"), ("ES", "es"), ("IT-North", "it_north"), ("CH", "ch")]
+
+
+def _nan(value) -> bool:
+    return value is None or (isinstance(value, float) and value != value)
+
+
+def base_of(drivers) -> float:
+    if drivers is None or drivers.empty:
+        return float("nan")
+    return float(pd.to_numeric(drivers["contribution"], errors="coerce").sum())
+
+
+def grouped(drivers) -> pd.Series:
+    """Contribution per group from the published `group` column; every group of GROUP_ORDER present."""
+    out = pd.Series(0.0, index=GROUP_ORDER, dtype=float)
+    if drivers is None or drivers.empty:
+        return out
+    sums = pd.to_numeric(drivers["contribution"], errors="coerce").groupby(drivers["group"].replace(LEGACY_GROUPS)).sum()
+    for group, total in sums.items():
+        out[group] = float(total)
+    return out
+
+
+def fair_value(curve) -> dict:
+    if curve is None or curve.empty:
+        return {"base": float("nan"), "peak": float("nan"), "offpeak": float("nan"), "hours": 0}
+    forecast = pd.to_numeric(curve["forecast"], errors="coerce")
+    peak = curve["hour"].astype(int).isin(list(PEAK_HOURS)).to_numpy()
+    return {"base": float(forecast.mean()), "peak": float(forecast[peak].mean()) if peak.any() else float("nan"),
+            "offpeak": float(forecast[~peak].mean()) if (~peak).any() else float("nan"), "hours": int(len(curve))}
+
+
+def negative_hours(by_hour, threshold: float = NEGATIVE_THRESHOLD) -> list:
+    """Hours at or above the threshold, from `p_negative` (the published, calibrated value)."""
+    if by_hour is None or by_hour.empty or "p_negative" not in by_hour:
+        return []
+    values = pd.to_numeric(by_hour["p_negative"], errors="coerce")
+    picked = by_hour.loc[values >= threshold, ["hour"]].assign(p=values[values >= threshold].to_numpy())
+    return [{"hour": int(r["hour"]), "p": float(r["p"])} for _, r in picked.sort_values("hour").iterrows()]
+
+
+def waterfall(previous, current) -> dict:
+    if previous is None or previous.empty or current is None or current.empty:
+        return {"start": base_of(previous), "end": base_of(current), "change": float("nan"), "steps": [], "complete": False}
+    before, after = grouped(previous), grouped(current)
+    groups = [g for g in GROUP_ORDER if g != AVERAGE_GROUP] + [g for g in after.index.union(before.index) if g not in GROUP_ORDER]
+    steps = [{"group": g, "change": float(after.get(g, 0.0) - before.get(g, 0.0))} for g in groups]
+    refit = float(after.get(AVERAGE_GROUP, 0.0) - before.get(AVERAGE_GROUP, 0.0))
+    if abs(refit) > 1e-9:
+        steps.append({"group": REFIT_STEP, "change": refit})
+    start, end = base_of(previous), base_of(current)
+    return {"start": start, "end": end, "change": end - start, "steps": steps, "complete": True}
+
+
+def feature_value(drivers, feature: str) -> float:
+    if drivers is None or drivers.empty:
+        return float("nan")
+    rows = drivers.loc[drivers["feature"] == feature, "value"]
+    return float(pd.to_numeric(rows, errors="coerce").iloc[0]) if len(rows) else float("nan")
+
+
+def fundamentals_table(current, previous) -> pd.DataFrame:
+    rows = []
+    for label, unit, feature, divisor in FUNDAMENTALS:
+        now, then = feature_value(current, feature) / divisor, feature_value(previous, feature) / divisor
+        rows.append({"quantity": label, "unit": unit, "tomorrow": now, "previous": then, "change": now - then, "fr_spread": float("nan")})
+    for label, zone in NEIGHBOUR_ROWS:
+        now, then = feature_value(current, f"price_{zone}_lag1"), feature_value(previous, f"price_{zone}_lag1")
+        rows.append({"quantity": f"{label} D-1 base", "unit": "EUR/MWh", "tomorrow": now, "previous": then, "change": now - then,
+                     "fr_spread": feature_value(current, f"spread_{zone}_lag1")})
+    return pd.DataFrame(rows, columns=["quantity", "unit", "tomorrow", "previous", "change", "fr_spread"])
+
+
+def neighbour_block(table: pd.DataFrame) -> pd.DataFrame:
+    rows = table.set_index("quantity")
+    prices, spreads = {}, {}
+    for label, _ in NEIGHBOUR_ROWS:
+        row = rows.loc[f"{label} D-1 base"]
+        value = "n/a" if _nan(row["tomorrow"]) else f"{row['tomorrow']:.0f}"
+        prices[label] = value + ("" if _nan(row["change"]) else f" ({row['change']:+.0f})")
+        spreads[label] = "n/a" if _nan(row["fr_spread"]) else f"{row['fr_spread']:+.0f}"
+    return pd.DataFrame([prices, spreads], index=["D-1 base", "FR spread"], columns=[label for label, _ in NEIGHBOUR_ROWS])
+
+
+def _delta(current, previous, feature, divisor=1.0) -> float:
+    return (feature_value(current, feature) - feature_value(previous, feature)) / divisor
+
+
+def step_phrase(group, current, previous, day_names=None) -> str:
+    def with_change(prefix, feature, unit, divisor=1.0, digits=1):
+        change = _delta(current, previous, feature, divisor)
+        return prefix if _nan(change) else f"{prefix} {change:+.{digits}f} {unit}".rstrip()
+
+    if group == "wind":
+        return with_change("wind", "wind_proxy_mw", "GW", 1000.0)
+    if group == "solar":
+        return with_change("solar", "solar_proxy_mw", "GW", 1000.0)
+    if group == "nuclear":
+        return with_change("nuclear", "nuclear_d1_early_mw", "GW", 1000.0)
+    if group == "load and temperature":
+        load, temp = _delta(current, previous, "load_fc_mw", 1000.0), _delta(current, previous, "temp_c")
+        if not _nan(load) and (_nan(temp) or abs(load) >= 0.3):
+            return f"load {load:+.1f} GW"
+        if not _nan(temp):
+            return f"temperature {temp:+.1f} C"
+        return "load and temperature"
+    if group == FRENCH_GROUP:
+        return with_change("French D-1 base", "price_lag1_mean", "", 1.0, 0)
+    if group == "neighbour prices":
+        return with_change("neighbour D-1 prices, DE", "price_de_lu_lag1", "", 1.0, 0)
+    if group == "calendar":
+        return f"calendar ({day_names[0]} to {day_names[1]})" if day_names else "calendar"
+    return group
+
+
+def summary_line(result, current, previous, day_names=None, min_step=MIN_STEP) -> str:
+    if not result.get("complete"):
+        return ""
+    change = result["change"]
+    head = "Fair value unchanged" if abs(change) < min_step else f"Fair value {'up' if change > 0 else 'down'} {abs(change):.0f}"
+    top = sorted((s for s in result["steps"] if abs(s["change"]) >= min_step), key=lambda s: -abs(s["change"]))[:2]
+    if not top:
+        return head + "."
+    if top[0]["group"] == FRENCH_GROUP:
+        head += ", mostly the model following the market"
+    return f"{head}: " + ", ".join(f"{step_phrase(s['group'], current, previous, day_names)} ({s['change']:+.0f})" for s in top) + "."
+
+
+def record_strip(summary, min_windows: int = 20) -> dict:
+    summary = summary or {}
+    windows = int(summary.get("scored_windows", summary.get("scored_days", 0)) or 0)
+    out = {"windows": windows, "min_windows": min_windows, "show": windows >= min_windows and summary.get("hit_rate") is not None}
+    if out["show"]:
+        out.update(hit_rate=float(summary["hit_rate"]), mean_pnl_per_mwh=float(summary["mean_pnl_per_mwh"]), model_mae=float(summary["model_mae"]),
+                   market_mae=float(summary["market_mae"]))
+        out["text"] = (f"Live record against EEX, {windows} windows: hit rate {100 * out['hit_rate']:.0f}%, mean P&L {out['mean_pnl_per_mwh']:+.2f} EUR/MWh "
+                       f"per window, model error {out['model_mae']:.1f} against the market's {out['market_mae']:.1f} EUR/MWh.")
+    else:
+        out["text"] = f"Live record against EEX: {windows} of {min_windows} windows scored; the hit rate, P&L and errors appear at {min_windows}."
+    return out
+
+
+def drivers_of(drivers: pd.DataFrame, day: str, issued: str, feature_set: str) -> pd.DataFrame:
+    if drivers is None or drivers.empty:
+        return pd.DataFrame(columns=["feature", "group", "value", "contribution"])
+    rows = drivers[(drivers["delivery_day"] == day) & (drivers["issued_at_utc"] == issued) & (drivers["feature_set"] == feature_set)]
+    return rows.reset_index(drop=True)
+
+
+def brief_from_published(data: dict, min_windows: int | None = None) -> dict:
+    """The brief's numbers from the published files: headline version of the next delivery day and of the day before."""
+    status = data.get("status") or {}
+    feature_set = status.get("feature_set", "honest_v2")
+    versions = tomorrow_versions(data)
+    out = {"feature_set": feature_set, "versions": versions}
+    if not versions:
+        return out
+    day, headline = versions["day"], versions["headline"]
+    previous_day = (pd.Timestamp(day) - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    issued = str(headline["issued_at_utc"].iloc[0])
+    out.update(day=day, previous_day=previous_day, issued=issued, premarket=versions["premarket"], model=versions.get("model", "gbm"),
+               fair=fair_value(headline.groupby("hour").agg(forecast=("forecast", "mean")).reset_index()))
+    prob = data.get("prob_tomorrow", pd.DataFrame())
+    hourly = prob.groupby("hour").agg(p_negative=("p_negative", "mean")).reset_index() if not prob.empty and "p_negative" in prob else pd.DataFrame()
+    out["negative_hours"] = negative_hours(hourly)
+    heads = headline_versions(data["forecasts"]) if not data["forecasts"].empty else pd.DataFrame(columns=["delivery_day", "issued_at_utc"])
+    previous_issued = heads.loc[heads["delivery_day"] == previous_day, "issued_at_utc"]
+    current = drivers_of(data.get("drivers"), day, issued, feature_set)
+    previous = drivers_of(data.get("drivers"), previous_day, str(previous_issued.iloc[0]), feature_set) if len(previous_issued) else pd.DataFrame()
+    out.update(current_drivers=current, previous_drivers=previous, fundamentals=fundamentals_table(current, previous), waterfall=waterfall(previous, current))
+    out["summary"] = summary_line(out["waterfall"], current, previous, (pd.Timestamp(previous_day).strftime("%a"), pd.Timestamp(day).strftime("%a")))
+    market = status.get("market") or {}
+    out["record"] = record_strip(market, int(min_windows if min_windows is not None else market.get("min_days_to_show", 20)))
+    return out
+
+
+def format_fundamentals(table: pd.DataFrame) -> pd.DataFrame:
+    def fmt(value, unit, signed=False):
+        if _nan(value):
+            return "n/a"
+        digits = 1 if unit in ("GW", "C") else 0
+        return f"{value:+.{digits}f}" if signed else f"{value:.{digits}f}"
+
+    kept = table[table["quantity"].isin([label for label, *_ in FUNDAMENTALS])].reset_index(drop=True)
+    return pd.DataFrame({"Quantity": kept["quantity"] + " (" + kept["unit"] + ")",
+                         "Tomorrow": [fmt(v, u) for v, u in zip(kept["tomorrow"], kept["unit"])],
+                         "Previous day": [fmt(v, u) for v, u in zip(kept["previous"], kept["unit"])],
+                         "Change": [fmt(v, u, signed=True) for v, u in zip(kept["change"], kept["unit"])]})
+
+
+def waterfall_chart(result: dict) -> go.Figure:
+    labels = ["yesterday"] + [s["group"] for s in result["steps"]] + ["today"]
+    values = [result["start"]] + [s["change"] for s in result["steps"]] + [result["end"]]
+    measures = ["absolute"] + ["relative"] * len(result["steps"]) + ["total"]
+    fig = go.Figure(go.Waterfall(x=[label.replace(" (", "<br>(") for label in labels], y=values, measure=measures, textposition="outside",
+                                 text=[f"{v:+.0f}" if m == "relative" else f"{v:.0f}" for v, m in zip(values, measures)],
+                                 connector=dict(line=dict(color=COLORS["grid"])), increasing=dict(marker=dict(color="#1baf7a")),
+                                 decreasing=dict(marker=dict(color=COLORS["actual"])), totals=dict(marker=dict(color=COLORS["forecast"]))))
+    fig.update_layout(template="plotly_white", height=300, margin=dict(l=30, r=10, t=10, b=60), showlegend=False,
+                      yaxis=dict(title="EUR/MWh, base", gridcolor=COLORS["grid"]), xaxis=dict(tickangle=-30))
+    return fig
+
+
+def morning_brief() -> None:
+    """Page 1: one screen for the next delivery day, written for a trader."""
+    data = load_published(published_version())
+    if not data["status"]:
+        st.error("No published dataset found. The workflow has not run yet.")
+        st.stop()
+    brief = brief_from_published(data)
+    if "day" not in brief:
+        st.info("No forecast for the next delivery day yet.")
+        return
+    st.markdown("<style>.block-container{padding-top:1.6rem;padding-bottom:1rem}</style>", unsafe_allow_html=True)  # one laptop screen
+    day = brief["day"]
+    st.header(f"Morning brief: delivery day {day} ({pd.Timestamp(day):%A})")
+    issued = pd.Timestamp(brief["issued"]).tz_convert(PARIS)
+    if brief["premarket"]:
+        st.caption(f"Pre-market forecast, issued {issued:%H:%M} Paris on {issued:%Y-%m-%d}, before the EEX window opened at 11:15. "
+                   f"Model {model_label(brief['model'])}.")
+    else:
+        st.warning(f"No version was issued before the 11:15 Paris market window; this one was issued {issued:%H:%M} and is not tradeable.")
+    fair, negative = brief["fair"], brief["negative_hours"]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Fair value, base", f"{fair['base']:.1f}", help="daily mean of the hourly forecast, EUR/MWh")
+    c2.metric("Peak (08-20)", f"{fair['peak']:.1f}")
+    c3.metric("Off-peak", f"{fair['offpeak']:.1f}")
+    c4.metric("Negative-price hours", str(len(negative)), help="hours whose calibrated probability of a negative price is 5% or more")
+    if negative:
+        st.markdown("**Negative-price risk:** " + ", ".join(f"{h['hour']:02d}:00 ({100 * h['p']:.0f}%)" for h in negative) + " Paris.")
+    else:
+        st.caption("No hour at or above a 5% calibrated probability of a negative price.")
+    record = brief["record"]
+    st.markdown(f"**Track record.** {record['text']} The published pre-market version against the EEX French day-ahead future traded 11:15 to "
+                "12:00 Paris, settled at the auction result; traded prices are not republished. Research, not trading advice.")
+    left, right = st.columns([5, 6])
+    with left:
+        st.markdown(f"**What changed** (tomorrow against {brief['previous_day']})")
+        st.dataframe(format_fundamentals(brief["fundamentals"]), hide_index=True, use_container_width=True, height=283,
+                     column_config={"Quantity": st.column_config.TextColumn(width="medium"), "Tomorrow": st.column_config.TextColumn(width="small"),
+                                    "Previous day": st.column_config.TextColumn(width="small"), "Change": st.column_config.TextColumn(width="small")})
+        st.dataframe(neighbour_block(brief["fundamentals"]), use_container_width=True, height=108)  # neighbours: D-1 base (change), FR spread
+        st.caption("The model's inputs at issue time (ENTSO-E, Open-Meteo), EUR/MWh for prices; neighbours: D-1 base with the change in brackets, "
+                   "and the French minus neighbour spread."
+                   + (" Values are missing for versions published before the drivers were (2026-10-13)."
+                      if brief["previous_drivers"].empty or brief["current_drivers"].empty else ""))
+    with right:
+        st.markdown("**Why fair value moved** (yesterday's pre-market forecast to today's, base, EUR/MWh)")
+        result = brief["waterfall"]
+        if result["complete"]:
+            st.plotly_chart(waterfall_chart(result), use_container_width=True)
+            st.markdown(f"**{brief['summary']}**")
+            st.caption("LightGBM's own contributions per feature, daily means, grouped; the steps sum to the change in the base forecast. "
+                       "\"Model refit\" appears only when the model changed between the two versions.")
+        else:
+            st.info("The waterfall needs the drivers of two consecutive pre-market versions; they are published with every version since "
+                    "2026-10-13, so it fills in with the next pre-market run after two days have them.")
+
+
+def forecast_and_record() -> None:
+    """Page 2: the market headline, tomorrow's forecast, the record, the probabilities, the shape and the method."""
     st.title("French day-ahead price forecast")
     st.caption("Hourly forecast made with information available at 12:00 Paris time the day before delivery. "
                "Public, automatically updated, for research and discussion, not trading advice.")
@@ -637,6 +918,12 @@ def main() -> None:
     st.caption("Forecasts and derived numbers are the author's own and carry no endorsement by the data providers. "
                "Fundamentals come from ENTSO-E, RTE and Open-Meteo; spot prices are the EPEX auction results as published by ENTSO-E; "
                "traded prices are EEX day-ahead futures, collected locally and not republished. Nothing here is trading advice.")
+
+
+def main() -> None:
+    st.set_page_config(page_title="French day-ahead price forecast", layout="wide")
+    pages = [st.Page(morning_brief, title="Morning brief", default=True), st.Page(forecast_and_record, title="Forecast and record")]
+    st.navigation(pages).run()
 
 
 if __name__ == "__main__":
