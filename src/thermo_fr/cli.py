@@ -372,6 +372,27 @@ def cmd_market_fetch(args) -> None:
         print("Nothing stored. Fall back to: thermo-fr market paste --date <delivery day> --text \"...\"")
 
 
+def cmd_market_snapshot(args) -> None:
+    """Laptop only, before the window opens: store the latest EEX base trade before 11:15 Paris for the delivery days traded today."""
+    import logging
+
+    from .forecast.jobs import setup_logging
+    from .forecast.market import delivery_days_to_collect, run_snapshot
+
+    setup_logging("market-snapshot")
+    log = logging.getLogger("thermo_fr.market")
+    days = list(args.date) if args.date else delivery_days_to_collect()
+    outcomes = run_snapshot(days, plugin=Path(args.plugin), early_path=Path(args.path), log_path=Path(args.log), raw_dir=Path(args.raw_dir),
+                            spacing_s=args.spacing, log=log.info)
+    counts = {}
+    for o in outcomes:
+        counts[o.status] = counts.get(o.status, 0) + 1
+    print("market snapshot for " + ", ".join(days) + ": " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
+    for o in outcomes:
+        if o.status != "stored":
+            print(f"  {o.delivery_date} {o.product}: {o.message}")
+
+
 def cmd_market_evaluate(args) -> None:
     from .forecast.market import evaluate, format_table, load_market
     from .forecast.store import Store
@@ -814,6 +835,15 @@ def main(argv=None) -> None:
     mfetch.add_argument("--raw-dir", default="data/market/raw", help="where raw responses are kept (git-ignored)")
     mfetch.add_argument("--spacing", type=float, default=10.0, help="seconds between requests")
     mfetch.set_defaults(func=cmd_market_fetch)
+    msnap = mkt_sub.add_parser("snapshot", help="laptop only, 10:20 London: store the latest EEX base trade before the 11:15 Paris window for "
+                                                 "tomorrow (Friday: Saturday to Monday) with the local, git-ignored collector; shown on the local brief only")
+    msnap.add_argument("--date", nargs="*", default=None, help="delivery days; default tomorrow (Friday: Saturday to Monday)")
+    msnap.add_argument("--plugin", default="local/eex_fetch.py", help="the local collector module (its snapshot() function)")
+    msnap.add_argument("--path", default="data/market/eex_fr_da_early.csv", help="the git-ignored snapshot file")
+    msnap.add_argument("--log", default="data/market/fetch_log.csv", help="the collection log shared with market fetch")
+    msnap.add_argument("--raw-dir", default="data/market/raw", help="where raw responses are kept (git-ignored; snapshots in their own folder)")
+    msnap.add_argument("--spacing", type=float, default=10.0, help="seconds between requests")
+    msnap.set_defaults(func=cmd_market_snapshot)
     mpub = mkt_sub.add_parser("publish", help="laptop only: write published/market.json from the local store and push that one file from a "
                                               "dedicated worktree of origin/main (.publish-worktree; rebase onto the workflow's commits, never force); "
                                               "the main working tree is never used, whatever branch or state it is in")

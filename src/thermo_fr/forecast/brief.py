@@ -16,16 +16,19 @@ shown as its own step, "model refit". Nothing from EEX is stored in the drivers 
 import numpy as np
 import pandas as pd
 
+from ..config import LOCAL_TZ
 from .features import CALENDAR, CALENDAR_STRUCTURE, LAGS, NEIGHBOURS, NUCLEAR, PEAK_HOURS, SAME_TYPE_LAGS
 
 EXPECTED_VALUE = "expected_value"  # the contribution column LightGBM appends: the model's average prediction
 AVERAGE_GROUP = "model average"
 REFIT_STEP = "model refit"
+FRENCH_GROUP = "recent French prices (model following the market)"  # the price lags: the model carrying the last traded level forward
+LEGACY_GROUPS = {"recent French prices": FRENCH_GROUP}  # the group's name in drivers.csv files exported before 2026-10-14
 NEGATIVE_THRESHOLD = 0.05  # an hour is listed as a negative-price hour from this calibrated probability
 MIN_STEP = 0.5  # groups moving less than this (EUR/MWh) are not named in the one-line summary
 
 GROUPS = {
-    "recent French prices": list(LAGS) + list(SAME_TYPE_LAGS),
+    FRENCH_GROUP: list(LAGS) + list(SAME_TYPE_LAGS),
     "neighbour prices": list(NEIGHBOURS),
     "wind": ["wind100_ms", "wind_proxy_mw", "wind_fc_mw"],
     "solar": ["radiation_wm2", "solar_proxy_mw", "solar_fc_mw"],
@@ -39,6 +42,7 @@ _GROUP_OF = {feature: group for group, features in GROUPS.items() for feature in
 
 # the "What changed" table: label, unit, feature whose daily mean is shown, divisor; the neighbour rows add the FR spread
 FUNDAMENTALS = [
+    ("French D-1 base", "EUR/MWh", "price_lag1_mean", 1.0),  # first: the spreads below are measured against it
     ("Load forecast", "GW", "load_fc_mw", 1000.0),
     ("Temperature", "C", "temp_c", 1.0),
     ("Wind proxy", "GW", "wind_proxy_mw", 1000.0),
@@ -81,7 +85,7 @@ def grouped(drivers: pd.DataFrame | None) -> pd.Series:
     if drivers is None or drivers.empty:
         return out
     frame = drivers.copy()
-    frame["group"] = frame["group"] if "group" in frame else frame["feature"].map(group_of)
+    frame["group"] = (frame["group"].replace(LEGACY_GROUPS) if "group" in frame else frame["feature"].map(group_of))
     sums = pd.to_numeric(frame["contribution"], errors="coerce").groupby(frame["group"]).sum()
     for group, total in sums.items():
         out[group] = float(total)  # a group outside GROUP_ORDER ("other") is appended
@@ -157,6 +161,19 @@ def fundamentals_table(current: pd.DataFrame | None, previous: pd.DataFrame | No
     return pd.DataFrame(rows, columns=["quantity", "unit", "tomorrow", "previous", "change", "fr_spread"])
 
 
+def neighbour_block(table: pd.DataFrame) -> pd.DataFrame:
+    """The five neighbours as a compact two-line block: one column per zone, a "D-1 base" row (value, change against the previous day
+    in brackets) and an "FR spread" row (French minus neighbour, tomorrow). Text cells; a missing value reads n/a, a missing change is left out."""
+    rows = table.set_index("quantity")
+    prices, spreads = {}, {}
+    for label, _ in NEIGHBOUR_ROWS:
+        row = rows.loc[f"{label} D-1 base"]
+        value = "n/a" if np.isnan(row["tomorrow"]) else f"{row['tomorrow']:.0f}"
+        prices[label] = value + ("" if np.isnan(row["change"]) else f" ({row['change']:+.0f})")
+        spreads[label] = "n/a" if np.isnan(row["fr_spread"]) else f"{row['fr_spread']:+.0f}"
+    return pd.DataFrame([prices, spreads], index=["D-1 base", "FR spread"], columns=[label for label, _ in NEIGHBOUR_ROWS])
+
+
 def _delta(current, previous, feature: str, divisor: float = 1.0) -> float:
     return (feature_value(current, feature) - feature_value(previous, feature)) / divisor
 
@@ -180,7 +197,7 @@ def step_phrase(group: str, current: pd.DataFrame | None, previous: pd.DataFrame
         if not np.isnan(temp):
             return f"temperature {temp:+.1f} C"
         return "load and temperature"
-    if group == "recent French prices":
+    if group == FRENCH_GROUP:
         return with_change("French D-1 base", "price_lag1_mean", "", 1.0, 0)
     if group == "neighbour prices":
         return with_change("neighbour D-1 prices, DE", "price_de_lu_lag1", "", 1.0, 0)
@@ -191,7 +208,11 @@ def step_phrase(group: str, current: pd.DataFrame | None, previous: pd.DataFrame
 
 def summary_line(result: dict, current: pd.DataFrame | None, previous: pd.DataFrame | None, day_names: tuple[str, str] | None = None,
                  min_step: float = MIN_STEP) -> str:
-    """One line from the two largest steps, e.g. "Fair value down 14: wind +5.8 GW (-11), French D-1 base -9 (-4)"."""
+    """One line from the two largest steps, e.g. "Fair value down 14: wind +5.8 GW (-11), French D-1 base -9 (-4)".
+
+    When the largest step is the French price lags, the line says so plainly: "Fair value down 14, mostly the model following the
+    market: French D-1 base -9 (-11), wind +5.8 GW (-4)".  The total is -14 here too.
+    """
     if not result.get("complete"):
         return ""
     change = result["change"]
@@ -199,6 +220,8 @@ def summary_line(result: dict, current: pd.DataFrame | None, previous: pd.DataFr
     top = sorted((s for s in result["steps"] if abs(s["change"]) >= min_step), key=lambda s: -abs(s["change"]))[:2]
     if not top:
         return head + "."
+    if top[0]["group"] == FRENCH_GROUP:
+        head += ", mostly the model following the market"
     parts = [f"{step_phrase(s['group'], current, previous, day_names)} ({s['change']:+.0f})" for s in top]
     return f"{head}: " + ", ".join(parts) + "."
 
@@ -222,13 +245,46 @@ def record_strip(summary: dict | None, min_windows: int = 20) -> dict:
     return out
 
 
-def early_trade(market_rows: pd.DataFrame | None, delivery_day: str, fair_base: float, record: dict | None) -> dict | None:
-    """Local dashboard only: the gap between the base fair value and the latest EEX base trade of the morning for the delivery day.
+BEFORE_WINDOW_LABEL = "Latest EEX base trade before the window ({time} Paris)"
+WINDOW_CLOSE_LABEL = "EEX window close, after the forecast was issued"
 
-    The latest row is the one with the latest window end; its close is the latest traded price. Labelled with the model's live hit
-    rate (`record` is market.evaluate()["summary"]). Returns None without a row. Never published: the caller is the local app.
+
+def _hit_rate_phrase(record: dict | None) -> str:
+    record = record or {}
+    windows = int(record.get("scored_days", 0) or 0)
+    if windows and record.get("hit_rate") is not None:
+        return f"the model's live hit rate is {100 * float(record['hit_rate']):.0f}% over {windows} windows"
+    return "no scored window yet, so no live hit rate"
+
+
+def early_trade(market_rows: pd.DataFrame | None, delivery_day: str, fair_base: float, record: dict | None,
+                early_rows: pd.DataFrame | None = None) -> dict | None:
+    """Local dashboard only: the gap between the base fair value and the latest EEX base trade for the delivery day.
+
+    Two sources, in order. `early_rows` is the morning snapshot file (market.load_early): its latest trade before the window is one a
+    trader could have seen after the forecast was issued and before the window opened, so the gap is shown as fair value against that
+    trade, labelled BEFORE_WINDOW_LABEL with the trade time. Without a snapshot, `market_rows` (the window file) gives the close of the
+    latest window, which came after the forecast was issued: labelled WINDOW_CLOSE_LABEL and worded as a check on the forecast, not a
+    gap to trade. Both carry the model's live hit rate (`record` is market.evaluate()["summary"]). Returns None without any row.
+    Never published: the caller is the local app.
     """
-    if market_rows is None or market_rows.empty or np.isnan(fair_base):
+    if np.isnan(fair_base):
+        return None
+    hit = _hit_rate_phrase(record)
+    if early_rows is not None and not early_rows.empty:
+        rows = early_rows[(early_rows["delivery_date"] == delivery_day) & (early_rows["product"] == "base")]
+        if not rows.empty:
+            last = rows.sort_values("trade_time_utc").iloc[-1]
+            price, time = float(last["price"]), str(last["trade_time_paris"])
+            gap = fair_base - price
+            direction = "above" if gap > 0 else "below" if gap < 0 else "at"
+            snapshot = pd.Timestamp(last["snapshot_at_utc"]).tz_convert(LOCAL_TZ).strftime("%H:%M")
+            count = last.get("trades_before_window")
+            traded = "" if _blank_count(count) else f", {int(count)} trades before the window"
+            return {"kind": "before_window", "label": BEFORE_WINDOW_LABEL.format(time=time), "price": price, "trade_time_paris": time,
+                    "trade_date": str(last.get("trade_date", "")), "gap": gap, "direction": direction,
+                    "text": f"Fair value {abs(gap):.1f} EUR/MWh {direction} that trade (tape read at {snapshot} Paris{traded}); {hit}."}
+    if market_rows is None or market_rows.empty:
         return None
     rows = market_rows[(market_rows["delivery_date"] == delivery_day) & (market_rows["product"] == "base")]
     if rows.empty:
@@ -236,14 +292,21 @@ def early_trade(market_rows: pd.DataFrame | None, delivery_day: str, fair_base: 
     last = rows.sort_values("window_end").iloc[-1]
     price = float(last["close"])
     gap = fair_base - price
-    record = record or {}
-    windows = int(record.get("scored_days", 0) or 0)
-    label = (f"the model's live hit rate is {100 * float(record['hit_rate']):.0f}% over {windows} windows" if windows and record.get("hit_rate") is not None
-             else "no scored window yet, so no live hit rate")
-    return {"price": price, "window": f"{last['window_start']}-{last['window_end']}", "trade_date": str(last.get("trade_date", "")),
+    close_side = "below" if gap > 0 else "above" if gap < 0 else "at"  # where the close sits relative to the fair value
+    window = f"{last['window_start']}-{last['window_end']}"
+    return {"kind": "window_close", "label": WINDOW_CLOSE_LABEL, "price": price, "window": window, "trade_date": str(last.get("trade_date", "")),
             "gap": gap, "direction": "above" if gap > 0 else "below" if gap < 0 else "at",
-            "text": f"Fair value {abs(gap):.1f} EUR/MWh {'above' if gap > 0 else 'below' if gap < 0 else 'at'} the latest EEX base trade "
-                    f"({last['window_start']}-{last['window_end']} Paris, close); {label}."}
+            "text": f"The {window} Paris window closed {abs(gap):.1f} EUR/MWh {close_side} fair value. It traded after the forecast was issued, "
+                    f"so this checks the forecast and is not a gap to trade; {hit}."}
+
+
+def _blank_count(value) -> bool:
+    if value is None:
+        return True
+    try:
+        return bool(np.isnan(float(value)))
+    except (TypeError, ValueError):
+        return True
 
 
 def day_name(day: str) -> str:

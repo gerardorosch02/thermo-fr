@@ -42,6 +42,14 @@ for a weekday, the Friday before for Saturday, Sunday and Monday deliveries
 forecast used is the latest honest version issued before the window opened, so every day is scored with the model that was live at the time; a
 day whose only forecasts came later is reported as skipped, never scored
 with hindsight.
+
+A second, smaller file, data/market/eex_fr_da_early.csv (git-ignored too),
+holds the laptop's snapshot of the base tape taken before the window opens:
+the latest trade before MARKET_WINDOW_START Paris, with its time. The local
+dashboard's brief shows the gap between the fair value and that trade; the
+window close, which comes after the forecast is issued, is shown only as a
+check when no snapshot exists. See run_snapshot. Nothing of either file is
+exported.
 """
 
 import datetime as dt
@@ -63,6 +71,10 @@ DEFAULT_PLUGIN = Path("local/eex_fetch.py")  # git-ignored; see run_fetcher
 COLUMNS = ["delivery_date", "product", "trade_date", "window_start", "window_end", "open", "high", "low", "close", "vwap",
            "trades", "volume_mwh", "source", "note"]
 LOG_COLUMNS = ["logged_at_utc", "delivery_date", "product", "status", "message"]
+EARLY_PATH = Path("data/market/eex_fr_da_early.csv")  # git-ignored: the latest base trade before the window, from the morning snapshot
+EARLY_COLUMNS = ["delivery_date", "product", "trade_date", "snapshot_at_utc", "trade_time_utc", "trade_time_paris", "price", "volume_mwh",
+                 "trades_before_window", "volume_before_window_mwh", "source", "note"]
+SNAPSHOT_PRODUCTS = ("base",)
 FETCH_STATUSES = ("stored", "exists", "skipped", "error")
 PRODUCTS = ("base", "peak")
 PEAK_HOURS = range(8, 20)  # 08:00 to 20:00 Paris, the EEX / EPEX peak block
@@ -554,8 +566,9 @@ class FetchOutcome:
     row: MarketRow | None = None
 
 
-def load_plugin(path=DEFAULT_PLUGIN):
-    """Import the local collector module from its file. It must define fetch(delivery_dates, window, raw_dir, spacing_s, log) -> list[FetchOutcome].
+def load_plugin(path=DEFAULT_PLUGIN, required: str = "fetch"):
+    """Import the local collector module from its file. It must define fetch(delivery_dates, window, raw_dir, spacing_s, log) -> list[FetchOutcome]
+    (or, for the morning snapshot, snapshot(delivery_dates, products, raw_dir, spacing_s, log) -> list[TapeOutcome]; `required` names which).
 
     The module lives outside the package, in a git-ignored folder, because it
     depends on the undocumented page structure of a third party's website
@@ -568,8 +581,8 @@ def load_plugin(path=DEFAULT_PLUGIN):
     spec = importlib.util.spec_from_file_location("thermo_fr_market_collector", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    if not hasattr(module, "fetch"):
-        raise AttributeError(f"{path} defines no fetch() function")
+    if not hasattr(module, required):
+        raise AttributeError(f"{path} defines no {required}() function")
     return module
 
 
@@ -625,6 +638,132 @@ def run_fetcher(delivery_dates: list[str], plugin=DEFAULT_PLUGIN, market_path=DE
         elif o.status not in FETCH_STATUSES:
             o = FetchOutcome(day, product, "error", f"unknown status {o.status!r}: {o.message}")
         outcomes.append(o)
+    for o in outcomes:
+        log_fetch(o.status, o.message, o.delivery_date, o.product, log_path, now=now)
+        log(f"{o.delivery_date} {o.product}: {o.status}, {o.message}")
+    return outcomes
+
+
+# ---------------------------------------------------------------------------
+# The morning snapshot: the latest base trade before the window opens (laptop only, never published)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TapeOutcome:
+    """What a collector module reports for one delivery day and product when asked for the tape so far rather than a window."""
+
+    delivery_date: str
+    product: str
+    status: str  # tape (frame attached), skipped (with the reason), error
+    message: str = ""
+    tape: pd.DataFrame | None = None  # one row per trade: time_utc (tz-aware UTC), price, volume_mwh
+    source: str = ""
+
+
+def load_early(path=EARLY_PATH) -> pd.DataFrame:
+    """The stored snapshot rows, or an empty frame with the right columns."""
+    path = Path(path)
+    if not path.exists() or path.stat().st_size == 0:
+        return pd.DataFrame(columns=EARLY_COLUMNS)
+    text_columns = ("delivery_date", "product", "trade_date", "snapshot_at_utc", "trade_time_utc", "trade_time_paris", "source", "note")
+    frame = pd.read_csv(path, dtype={c: str for c in text_columns}).reindex(columns=EARLY_COLUMNS)
+    frame["note"] = frame["note"].fillna("")
+    return frame
+
+
+def latest_before_window(tape: pd.DataFrame | None, delivery_date: str, trade_date: str = "", window_start: str = MARKET_WINDOW_START) -> dict | None:
+    """The last trade of the tape before the window opened on the trade date, with the count and volume traded before it; None without one."""
+    if tape is None or tape.empty:
+        return None
+    traded = pd.Timestamp(trade_date) if trade_date else pd.Timestamp(trade_date_for(delivery_date))
+    opens = pd.Timestamp(f"{traded:%Y-%m-%d} {window_start}", tz=LOCAL_TZ).tz_convert("UTC")
+    times = pd.to_datetime(tape["time_utc"], utc=True)
+    before = tape.assign(time_utc=times)[times < opens].sort_values("time_utc")
+    if before.empty:
+        return None
+    last = before.iloc[-1]
+    volumes = pd.to_numeric(before["volume_mwh"], errors="coerce") if "volume_mwh" in before else pd.Series(dtype=float)
+    return {"trade_time_utc": last["time_utc"].strftime("%Y-%m-%dT%H:%M:%SZ"), "trade_time_paris": last["time_utc"].tz_convert(LOCAL_TZ).strftime("%H:%M"),
+            "price": float(last["price"]), "volume_mwh": float(volumes.iloc[-1]) if len(volumes) else float("nan"),
+            "trades_before_window": int(len(before)), "volume_before_window_mwh": float(volumes.sum()) if len(volumes) else float("nan")}
+
+
+def find_same_early(existing: pd.DataFrame, values: dict) -> pd.DataFrame:
+    return existing[(existing["delivery_date"] == values["delivery_date"]) & (existing["product"] == values["product"])
+                    & (existing["trade_time_utc"] == values["trade_time_utc"])]
+
+
+def add_early(values: dict, path=EARLY_PATH) -> pd.DataFrame:
+    """Append one snapshot row (keys of EARLY_COLUMNS); the same delivery day, product and trade is stored once."""
+    if values["product"] not in PRODUCTS:
+        raise MarketDataError(f"product must be one of {PRODUCTS}, not {values['product']!r}")
+    if _blank(values.get("price")) or np.isnan(float(values["price"])):
+        raise MarketDataError("the snapshot row needs a price")
+    traded = values.get("trade_date") or trade_date_for(values["delivery_date"])
+    opens = pd.Timestamp(f"{traded} {MARKET_WINDOW_START}", tz=LOCAL_TZ).tz_convert("UTC")
+    if pd.Timestamp(values["trade_time_utc"]).tz_convert("UTC") >= opens:
+        raise MarketDataError(f"trade at {values['trade_time_utc']} is not before the window opened at {MARKET_WINDOW_START} Paris on {traded}")
+    existing = load_early(path)
+    if not find_same_early(existing, values).empty:
+        raise MarketDataError(f"the {values['product']} trade of {values['trade_time_paris']} Paris for {values['delivery_date']} is already stored")
+    row = {c: values.get(c, "") for c in EARLY_COLUMNS}
+    row["trade_date"] = traded
+    frame = pd.concat([existing, pd.DataFrame([row])], ignore_index=True) if len(existing) else pd.DataFrame([row])
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.reindex(columns=EARLY_COLUMNS).to_csv(path, index=False, lineterminator="\n")
+    return load_early(path)
+
+
+def run_snapshot(delivery_dates: list[str], plugin=DEFAULT_PLUGIN, early_path=EARLY_PATH, log_path=FETCH_LOG_PATH, raw_dir=RAW_DIR,
+                 products=SNAPSHOT_PRODUCTS, spacing_s: float = 10.0, log=print, now=None) -> list[FetchOutcome]:
+    """Before the window opens: read the base tape so far and store the latest trade before MARKET_WINDOW_START Paris for each delivery day.
+
+    Scheduled on the laptop at 10:20 London (11:20 Paris): with the page's display delay the tape then reaches about 11:05 Paris,
+    so the stored trade is one a trader could have seen before the window, after the pre-market forecast was issued. The local
+    module must define snapshot(delivery_dates, products, raw_dir, spacing_s, log) -> list[TapeOutcome] and keep its raw responses
+    apart from the window fetch's cache, so the 12:20 fetch still asks for the full day. A trade at or after the window open is
+    never stored from here; a snapshot that finds the trade an earlier one stored is logged as exists. Every outcome goes to the
+    same collection log as the window fetch, prefixed "snapshot:". The file is git-ignored and nothing of it is exported.
+    """
+    stamp = pd.Timestamp(now).tz_convert("UTC") if now is not None else pd.Timestamp.now(tz="UTC")
+    wanted = [(day, product) for day in delivery_dates for product in products]
+    try:
+        module = load_plugin(plugin, required="snapshot")
+        reported = module.snapshot(sorted({d for d, _ in wanted}), tuple(products), Path(raw_dir), spacing_s, log)
+    except FetchBlocked as exc:
+        reported = [TapeOutcome(day, product, "error", f"blocked: {exc}") for day, product in wanted]
+    except Exception as exc:  # noqa: BLE001
+        reported = [TapeOutcome(day, product, "error", f"{exc.__class__.__name__}: {exc}") for day, product in wanted]
+    by_key = {(o.delivery_date, o.product): o for o in reported}
+    outcomes: list[FetchOutcome] = []
+    for day, product in wanted:
+        o = by_key.get((day, product)) or TapeOutcome(day, product, "error", "the collector reported nothing for this day and product")
+        if o.status == "tape":
+            try:
+                picked = latest_before_window(o.tape, day)
+                if picked is None:
+                    count = 0 if o.tape is None else len(o.tape)
+                    out = FetchOutcome(day, product, "skipped", f"snapshot: {count} trades on the tape, none before {MARKET_WINDOW_START} Paris")
+                else:
+                    values = {"delivery_date": day, "product": product, "trade_date": trade_date_for(day),
+                              "snapshot_at_utc": stamp.strftime("%Y-%m-%dT%H:%M:%SZ"), **picked, "source": o.source or "collector",
+                              "note": o.message or "snapshot before the window"}
+                    if not find_same_early(load_early(early_path), values).empty:
+                        out = FetchOutcome(day, product, "exists", f"snapshot: the latest {product} trade before the window "
+                                                                   f"({picked['trade_time_paris']} Paris) is already stored")
+                    else:
+                        add_early(values, early_path)
+                        out = FetchOutcome(day, product, "stored", f"snapshot: latest {product} trade before the window at {picked['trade_time_paris']} "
+                                                                   f"Paris, {picked['trades_before_window']} trades before the window")
+            except Exception as exc:  # noqa: BLE001
+                out = FetchOutcome(day, product, "error", f"snapshot: {exc.__class__.__name__}: {exc}")
+        elif o.status in ("skipped", "error"):
+            out = FetchOutcome(day, product, o.status, f"snapshot: {o.message}")
+        else:
+            out = FetchOutcome(day, product, "error", f"snapshot: unknown status {o.status!r}: {o.message}")
+        outcomes.append(out)
     for o in outcomes:
         log_fetch(o.status, o.message, o.delivery_date, o.product, log_path, now=now)
         log(f"{o.delivery_date} {o.product}: {o.status}, {o.message}")

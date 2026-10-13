@@ -23,6 +23,7 @@ import streamlit as st
 from thermo_fr.dashboard import brief as bq
 from thermo_fr.dashboard import data as q
 from thermo_fr.dashboard import probability_text as pt
+from thermo_fr.forecast import brief as fb
 
 COLORS = {"honest_v2": "#2a78d6", "honest": "#6f5fc6", "extended": "#1baf7a", "actual": "#eb6834", "benchmark": "#52514e", "grid": "#e6e5e1"}
 BAND_RGBA = {"honest_v2": ("rgba(42,120,214,0.14)", "rgba(42,120,214,0.30)"), "honest": ("rgba(111,95,198,0.14)", "rgba(111,95,198,0.30)"),
@@ -182,7 +183,7 @@ def brief_panel(path, version, market_version, day, previous, feature_set):
 
 def waterfall_chart(result: dict) -> go.Figure:
     frame = bq.waterfall_frame(result)
-    fig = go.Figure(go.Waterfall(x=frame["label"], y=frame["value"], measure=frame["measure"], text=[f"{v:+.0f}" if m == "relative" else f"{v:.0f}"
+    fig = go.Figure(go.Waterfall(x=[str(label).replace(" (", "<br>(") for label in frame["label"]], y=frame["value"], measure=frame["measure"], text=[f"{v:+.0f}" if m == "relative" else f"{v:.0f}"
                                  for v, m in zip(frame["value"], frame["measure"])], textposition="outside", connector=dict(line=dict(color="#e6e5e1")),
                                  increasing=dict(marker=dict(color="#1baf7a")), decreasing=dict(marker=dict(color="#eb6834")),
                                  totals=dict(marker=dict(color="#2a78d6"))))
@@ -195,8 +196,8 @@ def morning_brief() -> None:
     """Page 1: one screen for the next delivery day, written for a trader."""
     ctx = st.session_state["ctx"]
     db, feature_set, today, tomorrow = ctx["db"], ctx["feature_set"], ctx["today"], ctx["tomorrow"]
-    st.markdown("<style>.block-container{padding-top:2.2rem;padding-bottom:1rem}</style>", unsafe_allow_html=True)  # one laptop screen
-    panel = brief_panel(db, ctx["version"], q.db_version(q.MARKET_PATH), tomorrow, today, feature_set)
+    st.markdown("<style>.block-container{padding-top:1.6rem;padding-bottom:1rem}</style>", unsafe_allow_html=True)  # one laptop screen
+    panel = brief_panel(db, ctx["version"], q.db_version(q.MARKET_PATH) + q.db_version(bq.EARLY_PATH), tomorrow, today, feature_set)
     st.header(f"Morning brief: delivery day {tomorrow} ({pd.Timestamp(tomorrow):%A})")
     meta = panel["meta"]
     if meta is None:
@@ -225,14 +226,14 @@ def morning_brief() -> None:
         st.markdown(f"**Track record.** {record['text']} Scored on the {record['versions']}.")
     early = panel["early_trade"]
     if early is not None:
-        st.markdown(f"**Early EEX trade (local only).** {early['text']}")
+        st.markdown(f"**{early['label']}, local only.** {early['text']}")
     left, right = st.columns([5, 6])
     with left:
         st.markdown(f"**What changed** (tomorrow against {panel['previous_day']})")
-        st.dataframe(bq.format_fundamentals(panel["fundamentals"]), hide_index=True, use_container_width=True, height=423,
+        st.dataframe(bq.format_fundamentals(panel["fundamentals"]), hide_index=True, use_container_width=True, height=283,
                      column_config={"Quantity": st.column_config.TextColumn(width="medium"), "Tomorrow": st.column_config.TextColumn(width="small"),
-                                    "Previous day": st.column_config.TextColumn(width="small"), "Change": st.column_config.TextColumn(width="small"),
-                                    "FR spread": st.column_config.TextColumn(width="small", help="French minus neighbour D-1 base, tomorrow")})
+                                    "Previous day": st.column_config.TextColumn(width="small"), "Change": st.column_config.TextColumn(width="small")})
+        st.dataframe(fb.neighbour_block(panel["fundamentals"]), use_container_width=True, height=108)  # neighbours: D-1 base (change), FR spread
         notes = []
         if panel["current_note"] not in ("headline", "no version"):
             notes.append(f"tomorrow's values {panel['current_note']}")
@@ -240,8 +241,8 @@ def morning_brief() -> None:
             notes.append("no stored values for the previous day")
         elif panel["previous_source"] != "the previous day's pre-market version":
             notes.append(f"previous day from {panel['previous_source']}")
-        st.caption("The model's inputs at issue time; neighbour rows: D-1 day-ahead base and the French spread."
-                   + (" " + "; ".join(notes).capitalize() + "." if notes else ""))
+        st.caption("The model's inputs at issue time, EUR/MWh for prices; neighbours: D-1 base with the change in brackets, and the French minus "
+                   "neighbour spread." + (" " + "; ".join(notes).capitalize() + "." if notes else ""))
     with right:
         st.markdown("**Why fair value moved** (yesterday's pre-market forecast to today's, base, EUR/MWh)")
         result = panel["waterfall"]

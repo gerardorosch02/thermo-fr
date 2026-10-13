@@ -402,8 +402,11 @@ PEAK_HOURS = range(8, 20)  # 08:00 to 20:00 Paris
 NEGATIVE_THRESHOLD = 0.05
 MIN_STEP = 0.5
 AVERAGE_GROUP, REFIT_STEP = "model average", "model refit"
-GROUP_ORDER = ["recent French prices", "neighbour prices", "wind", "solar", "load and temperature", "nuclear", "calendar", AVERAGE_GROUP]
-FUNDAMENTALS = [("Load forecast", "GW", "load_fc_mw", 1000.0), ("Temperature", "C", "temp_c", 1.0), ("Wind proxy", "GW", "wind_proxy_mw", 1000.0),
+FRENCH_GROUP = "recent French prices (model following the market)"
+LEGACY_GROUPS = {"recent French prices": FRENCH_GROUP}  # the group's name in drivers.csv files exported before 2026-10-14
+GROUP_ORDER = [FRENCH_GROUP, "neighbour prices", "wind", "solar", "load and temperature", "nuclear", "calendar", AVERAGE_GROUP]
+FUNDAMENTALS = [("French D-1 base", "EUR/MWh", "price_lag1_mean", 1.0),
+                ("Load forecast", "GW", "load_fc_mw", 1000.0), ("Temperature", "C", "temp_c", 1.0), ("Wind proxy", "GW", "wind_proxy_mw", 1000.0),
                 ("Solar proxy", "GW", "solar_proxy_mw", 1000.0), ("Latest nuclear output", "GW", "nuclear_d1_early_mw", 1000.0),
                 ("Residual load", "GW", "residual_v2_mw", 1000.0)]
 NEIGHBOUR_ROWS = [("DE", "de_lu"), ("BE", "be"), ("ES", "es"), ("IT-North", "it_north"), ("CH", "ch")]
@@ -424,7 +427,7 @@ def grouped(drivers) -> pd.Series:
     out = pd.Series(0.0, index=GROUP_ORDER, dtype=float)
     if drivers is None or drivers.empty:
         return out
-    sums = pd.to_numeric(drivers["contribution"], errors="coerce").groupby(drivers["group"]).sum()
+    sums = pd.to_numeric(drivers["contribution"], errors="coerce").groupby(drivers["group"].replace(LEGACY_GROUPS)).sum()
     for group, total in sums.items():
         out[group] = float(total)
     return out
@@ -480,6 +483,17 @@ def fundamentals_table(current, previous) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["quantity", "unit", "tomorrow", "previous", "change", "fr_spread"])
 
 
+def neighbour_block(table: pd.DataFrame) -> pd.DataFrame:
+    rows = table.set_index("quantity")
+    prices, spreads = {}, {}
+    for label, _ in NEIGHBOUR_ROWS:
+        row = rows.loc[f"{label} D-1 base"]
+        value = "n/a" if _nan(row["tomorrow"]) else f"{row['tomorrow']:.0f}"
+        prices[label] = value + ("" if _nan(row["change"]) else f" ({row['change']:+.0f})")
+        spreads[label] = "n/a" if _nan(row["fr_spread"]) else f"{row['fr_spread']:+.0f}"
+    return pd.DataFrame([prices, spreads], index=["D-1 base", "FR spread"], columns=[label for label, _ in NEIGHBOUR_ROWS])
+
+
 def _delta(current, previous, feature, divisor=1.0) -> float:
     return (feature_value(current, feature) - feature_value(previous, feature)) / divisor
 
@@ -502,7 +516,7 @@ def step_phrase(group, current, previous, day_names=None) -> str:
         if not _nan(temp):
             return f"temperature {temp:+.1f} C"
         return "load and temperature"
-    if group == "recent French prices":
+    if group == FRENCH_GROUP:
         return with_change("French D-1 base", "price_lag1_mean", "", 1.0, 0)
     if group == "neighbour prices":
         return with_change("neighbour D-1 prices, DE", "price_de_lu_lag1", "", 1.0, 0)
@@ -519,6 +533,8 @@ def summary_line(result, current, previous, day_names=None, min_step=MIN_STEP) -
     top = sorted((s for s in result["steps"] if abs(s["change"]) >= min_step), key=lambda s: -abs(s["change"]))[:2]
     if not top:
         return head + "."
+    if top[0]["group"] == FRENCH_GROUP:
+        head += ", mostly the model following the market"
     return f"{head}: " + ", ".join(f"{step_phrase(s['group'], current, previous, day_names)} ({s['change']:+.0f})" for s in top) + "."
 
 
@@ -577,18 +593,18 @@ def format_fundamentals(table: pd.DataFrame) -> pd.DataFrame:
         digits = 1 if unit in ("GW", "C") else 0
         return f"{value:+.{digits}f}" if signed else f"{value:.{digits}f}"
 
-    return pd.DataFrame({"Quantity": table["quantity"] + " (" + table["unit"] + ")",
-                         "Tomorrow": [fmt(v, u) for v, u in zip(table["tomorrow"], table["unit"])],
-                         "Previous day": [fmt(v, u) for v, u in zip(table["previous"], table["unit"])],
-                         "Change": [fmt(v, u, signed=True) for v, u in zip(table["change"], table["unit"])],
-                         "FR spread": [("" if _nan(v) else f"{v:+.0f}") for v in table["fr_spread"]]})
+    kept = table[table["quantity"].isin([label for label, *_ in FUNDAMENTALS])].reset_index(drop=True)
+    return pd.DataFrame({"Quantity": kept["quantity"] + " (" + kept["unit"] + ")",
+                         "Tomorrow": [fmt(v, u) for v, u in zip(kept["tomorrow"], kept["unit"])],
+                         "Previous day": [fmt(v, u) for v, u in zip(kept["previous"], kept["unit"])],
+                         "Change": [fmt(v, u, signed=True) for v, u in zip(kept["change"], kept["unit"])]})
 
 
 def waterfall_chart(result: dict) -> go.Figure:
     labels = ["yesterday"] + [s["group"] for s in result["steps"]] + ["today"]
     values = [result["start"]] + [s["change"] for s in result["steps"]] + [result["end"]]
     measures = ["absolute"] + ["relative"] * len(result["steps"]) + ["total"]
-    fig = go.Figure(go.Waterfall(x=labels, y=values, measure=measures, textposition="outside",
+    fig = go.Figure(go.Waterfall(x=[label.replace(" (", "<br>(") for label in labels], y=values, measure=measures, textposition="outside",
                                  text=[f"{v:+.0f}" if m == "relative" else f"{v:.0f}" for v, m in zip(values, measures)],
                                  connector=dict(line=dict(color=COLORS["grid"])), increasing=dict(marker=dict(color="#1baf7a")),
                                  decreasing=dict(marker=dict(color=COLORS["actual"])), totals=dict(marker=dict(color=COLORS["forecast"]))))
@@ -607,7 +623,7 @@ def morning_brief() -> None:
     if "day" not in brief:
         st.info("No forecast for the next delivery day yet.")
         return
-    st.markdown("<style>.block-container{padding-top:2.2rem;padding-bottom:1rem}</style>", unsafe_allow_html=True)  # one laptop screen
+    st.markdown("<style>.block-container{padding-top:1.6rem;padding-bottom:1rem}</style>", unsafe_allow_html=True)  # one laptop screen
     day = brief["day"]
     st.header(f"Morning brief: delivery day {day} ({pd.Timestamp(day):%A})")
     issued = pd.Timestamp(brief["issued"]).tz_convert(PARIS)
@@ -632,11 +648,12 @@ def morning_brief() -> None:
     left, right = st.columns([5, 6])
     with left:
         st.markdown(f"**What changed** (tomorrow against {brief['previous_day']})")
-        st.dataframe(format_fundamentals(brief["fundamentals"]), hide_index=True, use_container_width=True, height=423,
+        st.dataframe(format_fundamentals(brief["fundamentals"]), hide_index=True, use_container_width=True, height=283,
                      column_config={"Quantity": st.column_config.TextColumn(width="medium"), "Tomorrow": st.column_config.TextColumn(width="small"),
-                                    "Previous day": st.column_config.TextColumn(width="small"), "Change": st.column_config.TextColumn(width="small"),
-                                    "FR spread": st.column_config.TextColumn(width="small", help="French minus neighbour D-1 base, tomorrow")})
-        st.caption("The model's inputs at issue time (ENTSO-E, Open-Meteo); neighbour rows: D-1 day-ahead base and the French spread."
+                                    "Previous day": st.column_config.TextColumn(width="small"), "Change": st.column_config.TextColumn(width="small")})
+        st.dataframe(neighbour_block(brief["fundamentals"]), use_container_width=True, height=108)  # neighbours: D-1 base (change), FR spread
+        st.caption("The model's inputs at issue time (ENTSO-E, Open-Meteo), EUR/MWh for prices; neighbours: D-1 base with the change in brackets, "
+                   "and the French minus neighbour spread."
                    + (" Values are missing for versions published before the drivers were (2026-10-13)."
                       if brief["previous_drivers"].empty or brief["current_drivers"].empty else ""))
     with right:

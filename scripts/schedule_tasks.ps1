@@ -57,6 +57,12 @@ machine is asleep or hibernating rather than shut down:
                           collector module; the second trigger is the single
                           retry and stores nothing the first one already has.
                           This task runs here only, never in GitHub Actions.
+  thermo-fr market snapshot  weekdays at 10:20 local time (11:20 Paris): reads the EEX base
+                          tape so far with the same local collector and stores the latest
+                          trade before the 11:15 Paris window (with the page's display delay
+                          the tape reaches about 11:05) in data/market/eex_fr_da_early.csv,
+                          git-ignored. The local brief shows the gap between the fair value
+                          and that trade; nothing of it is published. Laptop only.
   thermo-fr outage snapshot  weekdays at 09:00 and Saturday and Sunday at 10:00 local
                           time: saves the ENTSO-E unavailability notices of French
                           units (raw, paged) under data/entsoe/outage_snapshots/,
@@ -92,6 +98,7 @@ if ($Python -eq "") { $Python = (Get-Command python).Source }
 $morningName = "thermo-fr morning-run"
 $settleName = "thermo-fr settle"
 $marketName = "thermo-fr market fetch"
+$snapshotName = "thermo-fr market snapshot"
 $outageName = "thermo-fr outage snapshot"
 $fuelName = "thermo-fr fuel snapshot"
 $marketPublishName = "thermo-fr market publish"
@@ -111,6 +118,7 @@ if ($Remove) {
     Remove-IfPresent $morningName
     Remove-IfPresent $settleName
     Remove-IfPresent $marketName
+    Remove-IfPresent $snapshotName
     Remove-IfPresent $outageName
     Remove-IfPresent $fuelName
     Remove-IfPresent $marketPublishName
@@ -123,6 +131,7 @@ if ($Install) {
     Remove-IfPresent $morningName
     Remove-IfPresent $settleName
     Remove-IfPresent $marketName
+    Remove-IfPresent $snapshotName
     Remove-IfPresent $outageName
     Remove-IfPresent $fuelName
     Remove-IfPresent $marketPublishName
@@ -197,6 +206,12 @@ if ($Install) {
         -Description "thermo-fr: collect the EEX day-ahead trading window for tomorrow with the local collector (laptop only)" | Out-Null
     Write-Host "Installed task '$marketName' (weekdays 11:20 and 11:35 local time, 12:20 and 12:35 Paris)"
 
+    $snapshotTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $weekdays -At "10:20"
+    $snapshotAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr market snapshot" -WorkingDirectory $repo
+    Register-ScheduledTask -TaskName $snapshotName -Action $snapshotAction -Trigger $snapshotTrigger -Settings $settings `
+        -Description "thermo-fr: store the latest EEX base trade before the 11:15 Paris window with the local collector (laptop only, never published)" | Out-Null
+    Write-Host "Installed task '$snapshotName' (weekdays 10:20 local time, 11:20 Paris)"
+
     $outageTriggers = @(
         (New-ScheduledTaskTrigger -Weekly -DaysOfWeek $weekdays -At "09:00"),
         (New-ScheduledTaskTrigger -Weekly -DaysOfWeek @("Saturday", "Sunday") -At "10:00")
@@ -222,7 +237,7 @@ if ($Install) {
 }
 
 if ($Show -or $Install) {
-    foreach ($name in @($morningName, $dispatchName, $settleDispatchName, $refitDispatchName, $settleName, $marketName, $outageName, $fuelName, $marketPublishName)) {
+    foreach ($name in @($morningName, $dispatchName, $settleDispatchName, $refitDispatchName, $settleName, $marketName, $snapshotName, $outageName, $fuelName, $marketPublishName)) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -eq $task) { Write-Host "Task '$name' is not installed"; continue }
         $info = Get-ScheduledTaskInfo -TaskName $name

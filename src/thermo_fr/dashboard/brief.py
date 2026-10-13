@@ -5,7 +5,8 @@ when it exists); "what changed" and "why fair value moved" come from the drivers
 headline version issued before drivers were stored (before 2026-10-13) has none; the brief then uses the latest version of the day
 that has them and says so. The previous day's fundamentals fall back to its stored inputs when its versions carry no drivers.
 
-The early EEX trade line reads the local market file (git-ignored) and exists in this module only: nothing of it is exported.
+The early EEX trade line reads the local snapshot file (the latest base trade before the window, from the 10:20 London snapshot) and,
+without one, the local window file; both are git-ignored and the line exists in this module only: nothing of it is exported.
 """
 
 from pathlib import Path
@@ -16,7 +17,7 @@ import pandas as pd
 from ..config import LOCAL_TZ
 from ..forecast import brief as b
 from ..forecast.market import DEFAULT_PATH as MARKET_PATH
-from ..forecast.market import MIN_PUBLIC_DAYS, evaluate, load_market
+from ..forecast.market import EARLY_PATH, MIN_PUBLIC_DAYS, evaluate, load_early, load_market
 from ..forecast.store import Store
 
 INPUT_FALLBACK = {"load_fc_mw": "load_fc_mw", "temp_fc_c": "temp_c", "wind_proxy_mw": "wind_proxy_mw", "solar_proxy_mw": "solar_proxy_mw"}
@@ -67,7 +68,7 @@ def hourly_probabilities(store: Store, forecast_id: int) -> pd.DataFrame:
 
 
 def brief_panel(path, delivery_day: str, previous_day: str, feature_set: str = "honest_v2", market_path=MARKET_PATH,
-                min_windows: int = MIN_PUBLIC_DAYS) -> dict:
+                min_windows: int = MIN_PUBLIC_DAYS, early_path=EARLY_PATH) -> dict:
     """Everything the brief page shows, as plain values."""
 
     def read(store: Store):
@@ -94,7 +95,7 @@ def brief_panel(path, delivery_day: str, previous_day: str, feature_set: str = "
         summary = evaluate(store, rows, feature_set=feature_set)["summary"] if not rows.empty else {}
         out["record"] = b.record_strip(summary, min_windows)
         out["record"]["versions"] = summary.get("versions", "local versions")
-        out["early_trade"] = b.early_trade(rows, delivery_day, out.get("fair", {}).get("base", float("nan")), summary)
+        out["early_trade"] = b.early_trade(rows, delivery_day, out.get("fair", {}).get("base", float("nan")), summary, load_early(early_path))
         return out
 
     return _with_store(path, read)
@@ -109,18 +110,21 @@ def waterfall_frame(result: dict) -> pd.DataFrame:
 
 
 def format_fundamentals(table: pd.DataFrame) -> pd.DataFrame:
-    """The "What changed" table as text: value, change and the FR spread, with the units in the quantity column."""
+    """The "What changed" table as text: value and change for the FUNDAMENTALS rows, units in the quantity column.
+
+    The neighbour rows are not in it: they are shown as the two-line block of brief.neighbour_block under the table.
+    """
     def fmt(value, unit, signed=False):
         if value is None or (isinstance(value, float) and np.isnan(value)):
             return "n/a"
         digits = 1 if unit in ("GW", "C") else 0
         return f"{value:+.{digits}f}" if signed else f"{value:.{digits}f}"
 
+    kept = table[table["quantity"].isin([label for label, *_ in b.FUNDAMENTALS])].reset_index(drop=True)
     shown = pd.DataFrame({
-        "Quantity": table["quantity"] + " (" + table["unit"] + ")",
-        "Tomorrow": [fmt(v, u) for v, u in zip(table["tomorrow"], table["unit"])],
-        "Previous day": [fmt(v, u) for v, u in zip(table["previous"], table["unit"])],
-        "Change": [fmt(v, u, signed=True) for v, u in zip(table["change"], table["unit"])],
-        "FR spread": [("" if np.isnan(v) else f"{v:+.0f}") for v in table["fr_spread"]],
+        "Quantity": kept["quantity"] + " (" + kept["unit"] + ")",
+        "Tomorrow": [fmt(v, u) for v, u in zip(kept["tomorrow"], kept["unit"])],
+        "Previous day": [fmt(v, u) for v, u in zip(kept["previous"], kept["unit"])],
+        "Change": [fmt(v, u, signed=True) for v, u in zip(kept["change"], kept["unit"])],
     })
     return shown

@@ -105,6 +105,19 @@ def test_summary_line_names_the_two_largest_groups_with_their_fundamental():
     result = b.waterfall(previous, current)
     assert result["change"] == pytest.approx(-14.0)
     assert b.summary_line(result, current, previous) == "Fair value down 14: wind +5.8 GW (-11), French D-1 base -9 (-4)."
+    # the French price lags as the largest group: the line says plainly that the model is following the market
+    following = drivers_from({"wind_proxy_mw": 8000.0, "price_lag1_mean": 86.0, "load_fc_mw": 50200.0, "temp_c": 12.5},
+                             {"wind_proxy_mw": 0.0, "price_lag1": 19.0, "load_fc_mw": 11.0, "expected_value": 60.0})
+    result_f = b.waterfall(previous, following)
+    assert result_f["steps"][0]["group"] == b.FRENCH_GROUP == "recent French prices (model following the market)"
+    assert b.summary_line(result_f, following, previous) == ("Fair value down 14, mostly the model following the market: French D-1 base -9 (-11), "
+                                                             "wind +5.8 GW (-4).")
+    pub_prev, pub_fol = previous.assign(group=previous["feature"].map(b.group_of)), following.assign(group=following["feature"].map(b.group_of))
+    assert public.summary_line(public.waterfall(pub_prev, pub_fol), pub_fol, pub_prev) == b.summary_line(result_f, following, previous)
+    # a drivers.csv exported before the rename still lands in the renamed group, on both sides
+    legacy = pub_fol.assign(group=pub_fol["group"].replace({b.FRENCH_GROUP: "recent French prices"}))
+    assert public.grouped(legacy)[b.FRENCH_GROUP] == pytest.approx(19.0) and b.grouped(legacy)[b.FRENCH_GROUP] == pytest.approx(19.0)
+    assert "recent French prices" not in public.grouped(legacy).index
     assert b.step_phrase("load and temperature", current, previous) == "temperature +0.5 C"  # the load moved less than 0.3 GW
     assert b.step_phrase("calendar", current, previous, ("Fri", "Sat")) == "calendar (Fri to Sat)"
     assert b.step_phrase("neighbour prices", current, previous) == "neighbour D-1 prices, DE"  # no DE value in these tables
@@ -118,16 +131,26 @@ def test_fundamentals_table_rows_units_and_spreads():
                             "price_ch_lag1": 85.0, "spread_ch_lag1": -5.0}, {})
     previous = drivers_from({"load_fc_mw": 46240.7, "temp_c": 15.0, "wind_proxy_mw": 2830.7}, {})
     table = b.fundamentals_table(current, previous)
-    assert table["quantity"].tolist() == ["Load forecast", "Temperature", "Wind proxy", "Solar proxy", "Latest nuclear output", "Residual load",
-                                          "DE D-1 base", "BE D-1 base", "ES D-1 base", "IT-North D-1 base", "CH D-1 base"]
+    assert table["quantity"].tolist() == ["French D-1 base", "Load forecast", "Temperature", "Wind proxy", "Solar proxy", "Latest nuclear output",
+                                          "Residual load", "DE D-1 base", "BE D-1 base", "ES D-1 base", "IT-North D-1 base", "CH D-1 base"]
     row = table.set_index("quantity")
+    assert row.loc["French D-1 base", "tomorrow"] == 80.0 and np.isnan(row.loc["French D-1 base", "change"])  # the spreads are measured against it
     assert row.loc["Load forecast", "tomorrow"] == pytest.approx(45.2407) and row.loc["Load forecast", "change"] == pytest.approx(-1.0)
     assert row.loc["Wind proxy", "change"] == pytest.approx(-2.0) and np.isnan(row.loc["Solar proxy", "change"])
     assert row.loc["DE D-1 base", "fr_spread"] == -10.0 and row.loc["CH D-1 base", "tomorrow"] == 85.0 and np.isnan(row.loc["BE D-1 base", "tomorrow"])
+    # the table shows the seven fundamentals with the French D-1 base on top; the neighbours are the two-line block
     shown = bq.format_fundamentals(table)
-    assert shown["Quantity"].iloc[0] == "Load forecast (GW)" and shown["Change"].iloc[0] == "-1.0" and shown["Tomorrow"].iloc[1] == "16.3"
-    assert shown["FR spread"].iloc[6] == "-10" and shown["Previous day"].iloc[3] == "n/a" and shown["Change"].iloc[3] == "n/a"
+    assert list(shown.columns) == ["Quantity", "Tomorrow", "Previous day", "Change"] and len(shown) == 7
+    assert shown["Quantity"].iloc[0] == "French D-1 base (EUR/MWh)" and shown["Tomorrow"].iloc[0] == "80" and shown["Change"].iloc[0] == "n/a"
+    assert shown["Quantity"].iloc[1] == "Load forecast (GW)" and shown["Change"].iloc[1] == "-1.0" and shown["Tomorrow"].iloc[2] == "16.3"
+    assert shown["Previous day"].iloc[4] == "n/a" and shown["Change"].iloc[4] == "n/a"
     assert public.format_fundamentals(table).equals(shown)
+    block = b.neighbour_block(table)
+    assert list(block.columns) == ["DE", "BE", "ES", "IT-North", "CH"] and list(block.index) == ["D-1 base", "FR spread"]
+    assert block.loc["D-1 base"].tolist() == ["90", "n/a", "n/a", "n/a", "85"] and block.loc["FR spread"].tolist() == ["-10", "n/a", "n/a", "n/a", "-5"]
+    assert public.neighbour_block(table).equals(block)
+    with_change = b.fundamentals_table(current, drivers_from({"price_de_lu_lag1": 87.0, "price_ch_lag1": 85.0}, {}))
+    assert b.neighbour_block(with_change).loc["D-1 base"].tolist() == ["90 (+3)", "n/a", "n/a", "n/a", "85 (+0)"]
     assert np.isnan(b.fundamentals_table(current, None)["change"]).all()
 
 
@@ -140,20 +163,38 @@ def test_record_strip_shows_the_count_always_and_the_aggregates_from_twenty_wind
     assert b.record_strip(None)["windows"] == 0 and not b.record_strip({"scored_windows": 25})["show"]  # a count without aggregates (collecting)
 
 
-def test_early_trade_uses_the_latest_window_close_and_the_live_hit_rate():
-    rows = pd.DataFrame([
+def test_early_trade_prefers_the_snapshot_before_the_window_and_labels_the_window_close_as_a_check():
+    """Every price here is made up."""
+    windows = pd.DataFrame([
         {"delivery_date": "2026-10-14", "product": "base", "trade_date": "2026-10-13", "window_start": "08:00", "window_end": "09:00", "close": 101.0},
-        {"delivery_date": "2026-10-14", "product": "base", "trade_date": "2026-10-13", "window_start": "09:30", "window_end": "10:00", "close": 104.0},
-        {"delivery_date": "2026-10-14", "product": "peak", "trade_date": "2026-10-13", "window_start": "09:30", "window_end": "10:30", "close": 130.0},
-        {"delivery_date": "2026-10-15", "product": "base", "trade_date": "2026-10-14", "window_start": "08:00", "window_end": "09:00", "close": 90.0},
+        {"delivery_date": "2026-10-14", "product": "base", "trade_date": "2026-10-13", "window_start": "11:15", "window_end": "12:00", "close": 104.0},
+        {"delivery_date": "2026-10-14", "product": "peak", "trade_date": "2026-10-13", "window_start": "11:15", "window_end": "12:00", "close": 130.0},
+        {"delivery_date": "2026-10-15", "product": "base", "trade_date": "2026-10-14", "window_start": "11:15", "window_end": "12:00", "close": 90.0},
     ])
-    early = b.early_trade(rows, "2026-10-14", 96.5, {"scored_days": 4, "hit_rate": 0.5})
-    assert early["price"] == 104.0 and early["gap"] == pytest.approx(-7.5) and early["direction"] == "below" and early["window"] == "09:30-10:00"
-    assert early["text"] == "Fair value 7.5 EUR/MWh below the latest EEX base trade (09:30-10:00 Paris, close); the model's live hit rate is 50% over 4 windows."
-    assert "no scored window yet" in b.early_trade(rows, "2026-10-15", 96.5, {})["text"]
-    assert b.early_trade(rows, "2026-10-16", 96.5, {}) is None and b.early_trade(pd.DataFrame(), "2026-10-14", 96.5, {}) is None
-    assert b.early_trade(rows, "2026-10-14", float("nan"), {}) is None
-    assert not hasattr(public, "early_trade")  # the public app has no such thing
+    snapshots = pd.DataFrame([
+        {"delivery_date": "2026-10-14", "product": "base", "trade_date": "2026-10-13", "snapshot_at_utc": "2026-10-13T09:20:00Z",
+         "trade_time_utc": "2026-10-13T09:04:00Z", "trade_time_paris": "11:04", "price": 102.0, "volume_mwh": 24.0, "trades_before_window": 7},
+        {"delivery_date": "2026-10-14", "product": "base", "trade_date": "2026-10-13", "snapshot_at_utc": "2026-10-13T08:50:00Z",
+         "trade_time_utc": "2026-10-13T08:31:00Z", "trade_time_paris": "10:31", "price": 100.0, "volume_mwh": 24.0, "trades_before_window": 5},
+    ])
+    record = {"scored_days": 4, "hit_rate": 0.5}
+    # the snapshot wins: the latest trade before the window, with its time in the label; the gap is fair value against that trade
+    early = b.early_trade(windows, "2026-10-14", 96.5, record, snapshots)
+    assert early["kind"] == "before_window" and early["label"] == "Latest EEX base trade before the window (11:04 Paris)"
+    assert early["price"] == 102.0 and early["gap"] == pytest.approx(-5.5) and early["direction"] == "below"
+    assert early["text"] == ("Fair value 5.5 EUR/MWh below that trade (tape read at 11:20 Paris, 7 trades before the window); "
+                             "the model's live hit rate is 50% over 4 windows.")
+    # only the window close: labelled as such, after the forecast, and not framed as a gap to trade
+    close = b.early_trade(windows, "2026-10-14", 96.5, record, None)
+    assert close["kind"] == "window_close" and close["label"] == "EEX window close, after the forecast was issued"
+    assert close["price"] == 104.0 and close["gap"] == pytest.approx(-7.5) and close["window"] == "11:15-12:00"
+    assert close["text"] == ("The 11:15-12:00 Paris window closed 7.5 EUR/MWh above fair value. It traded after the forecast was issued, "
+                             "so this checks the forecast and is not a gap to trade; the model's live hit rate is 50% over 4 windows.")
+    assert b.early_trade(windows, "2026-10-14", 96.5, record, snapshots[snapshots["delivery_date"] == "2026-10-15"])["kind"] == "window_close"
+    assert "no scored window yet" in b.early_trade(windows, "2026-10-15", 96.5, {})["text"]
+    assert b.early_trade(windows, "2026-10-16", 96.5, {}, snapshots) is None and b.early_trade(pd.DataFrame(), "2026-10-14", 96.5, {}) is None
+    assert b.early_trade(windows, "2026-10-14", float("nan"), {}, snapshots) is None
+    assert not hasattr(public, "early_trade") and not hasattr(public, "BEFORE_WINDOW_LABEL")  # the public app has no such thing
 
 
 def test_morning_run_stores_the_drivers_and_the_public_dataset_carries_them(store, table, history, tmp_path, weights, solar_weights):  # noqa: F811
@@ -176,7 +217,7 @@ def test_morning_run_stores_the_drivers_and_the_public_dataset_carries_them(stor
     live_fit = store.save_forecast(99, DAY, "honest", pd.Timestamp("2024-04-09T07:40Z"), "gbm", "test", 500, True, curve_for(DAY))
     assert store.drivers(live_fit).empty  # a model fitted live stores no drivers
     # the local brief panel on this store
-    panel = bq.brief_panel(store.path, DAY, previous_day, "honest_v2", market_path=tmp_path / "no_market.csv")
+    panel = bq.brief_panel(store.path, DAY, previous_day, "honest_v2", market_path=tmp_path / "no_market.csv", early_path=tmp_path / "no_early.csv")
     assert panel["fair"]["base"] == pytest.approx(curve["forecast"].mean()) and panel["current_note"] == "headline"
     assert panel["previous_source"] == "the previous day's pre-market version" and panel["waterfall"]["complete"]
     assert sum(s["change"] for s in panel["waterfall"]["steps"]) == pytest.approx(panel["waterfall"]["change"], abs=1e-6)
@@ -218,7 +259,7 @@ def test_local_brief_falls_back_to_the_latest_version_with_drivers_and_to_the_st
     s.save_drivers(late, drivers_from({"load_fc_mw": 45000.0, "wind_proxy_mw": 900.0}, {"load_fc_mw": 20.0, "expected_value": 95.5}))
     index = curve_for(previous).index
     s.save_input_values(1, previous, pd.DataFrame({"load_fc_mw": 47000.0, "temp_fc_c": 14.0, "wind_proxy_mw": 2900.0, "solar_proxy_mw": 3000.0}, index=index))
-    panel = bq.brief_panel(s.path, day, previous, "honest_v2", market_path=tmp_path / "no_market.csv")
+    panel = bq.brief_panel(s.path, day, previous, "honest_v2", market_path=tmp_path / "no_market.csv", early_path=tmp_path / "no_early.csv")
     s.close()
     assert panel["meta"]["forecast_id"] == head and panel["fair"]["base"] == pytest.approx(111.5)  # the fair value stays the headline's
     assert panel["current_note"].startswith("from the version issued 17:00 Paris")
