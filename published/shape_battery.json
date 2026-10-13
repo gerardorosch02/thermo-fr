@@ -235,37 +235,37 @@
     }
   },
   "live": {
-    "days": 1,
+    "days": 2,
     "shape": {
-      "hours": 24,
-      "days": 1,
+      "hours": 48,
+      "days": 2,
       "model": {
-        "shape_mae": 14.18,
-        "spread_error": 11.0,
-        "cheapest2_hit_rate": 0.5,
+        "shape_mae": 15.05,
+        "spread_error": 9.15,
+        "cheapest2_hit_rate": 0.75,
         "dearest2_hit_rate": 0.5
       },
       "d1": {
-        "shape_mae": 17.22,
-        "spread_error": 28.68,
+        "shape_mae": 18.0,
+        "spread_error": 20.53,
         "cheapest2_hit_rate": 0.5,
         "dearest2_hit_rate": 0.5
       }
     },
     "battery": {
-      "days": 1,
-      "perfect_eur_per_day": 221.63,
+      "days": 2,
+      "perfect_eur_per_day": 261.48,
       "model": {
-        "eur_per_day": 188.24,
-        "share_of_perfect": 0.849,
-        "days_traded": 1,
+        "eur_per_day": 243.97,
+        "share_of_perfect": 0.933,
+        "days_traded": 2,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 188.24,
-        "share_of_perfect": 0.849,
-        "days_traded": 1,
+        "eur_per_day": 232.92,
+        "share_of_perfect": 0.891,
+        "days_traded": 2,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -285,6 +285,21 @@
         "discharge_d1": 18,
         "shape_mae_model": 14.175564236111109,
         "shape_mae_d1": 17.221666666666668
+      },
+      {
+        "delivery_day": "2026-10-14",
+        "hours": 24,
+        "value_perfect": 301.3271000000001,
+        "value_model": 299.7101,
+        "traded_model": true,
+        "charge_model": 13,
+        "discharge_model": 19,
+        "value_d1": 277.6051,
+        "traded_d1": true,
+        "charge_d1": 14,
+        "discharge_d1": 19,
+        "shape_mae_model": 15.91993055555556,
+        "shape_mae_d1": 18.779314236111116
       }
     ]
   },
