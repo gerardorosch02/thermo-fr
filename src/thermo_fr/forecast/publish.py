@@ -21,7 +21,7 @@ Files written by `export_published`:
                        commits and pushes that one file; the workflow never writes it and copies it into status.json unchanged
     drivers.csv        per version of the published sets and model feature: the feature's group (brief.py), the daily mean of the
                        feature and of its LightGBM contribution, plus the expected value row; the morning brief's "what changed"
-                       and "why fair value moved" come from it. Public inputs only, nothing from EEX
+                       and "why the model forecast moved" come from it. Public inputs only, nothing from EEX
     probabilistic.csv  per version and hour of the published sets: the probability of a negative price, calibrated (p_negative) with the
                        raw classifier output alongside (p_negative_raw) and a flag (calibrated); the quantile band and the spike probability
                        are computed and stored locally every day but not published, under evaluation);

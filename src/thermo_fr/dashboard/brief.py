@@ -1,7 +1,7 @@
 """The morning brief's read layer for the local dashboard: everything from the SQLite store and the local market file.
 
-The brief is for the next delivery day. Fair value and the negative-price hours come from the headline version (the pre-market one
-when it exists); "what changed" and "why fair value moved" come from the drivers stored with the versions (brief.driver_table). A
+The brief is for the next delivery day. The model forecast and the negative-price hours come from the headline version (the pre-market one
+when it exists); "what changed" and "why the model forecast moved" come from the drivers stored with the versions (brief.driver_table). A
 headline version issued before drivers were stored (before 2026-10-13) has none; the brief then uses the latest version of the day
 that has them and says so. The previous day's fundamentals fall back to its stored inputs when its versions carry no drivers.
 
@@ -75,7 +75,7 @@ def brief_panel(path, delivery_day: str, previous_day: str, feature_set: str = "
         meta, curve, _ = store.headline_forecast(delivery_day, feature_set)
         out = {"delivery_day": delivery_day, "previous_day": previous_day, "feature_set": feature_set, "meta": meta, "curve": curve}
         if meta is not None:
-            out["fair"] = b.fair_value(curve.reset_index())
+            out["level"] = b.model_forecast(curve.reset_index())
             out["negative_hours"] = b.negative_hours(hourly_probabilities(store, int(meta["forecast_id"])))
             out["issued_paris"] = pd.Timestamp(meta["issued_at_utc"]).tz_convert(LOCAL_TZ)
         current, current_meta, current_note = drivers_for_day(store, delivery_day, feature_set)
@@ -95,14 +95,14 @@ def brief_panel(path, delivery_day: str, previous_day: str, feature_set: str = "
         summary = evaluate(store, rows, feature_set=feature_set)["summary"] if not rows.empty else {}
         out["record"] = b.record_strip(summary, min_windows)
         out["record"]["versions"] = summary.get("versions", "local versions")
-        out["early_trade"] = b.early_trade(rows, delivery_day, out.get("fair", {}).get("base", float("nan")), summary, load_early(early_path))
+        out["early_trade"] = b.early_trade(rows, delivery_day, out.get("level", {}).get("base", float("nan")), summary, load_early(early_path))
         return out
 
     return _with_store(path, read)
 
 
 def waterfall_frame(result: dict) -> pd.DataFrame:
-    """Rows for a plotly waterfall: yesterday's fair value, one step per group, today's fair value."""
+    """Rows for a plotly waterfall: yesterday's model forecast, one step per group, today's model forecast."""
     rows = [{"label": "yesterday", "value": result["start"], "measure": "absolute"}]
     rows += [{"label": s["group"], "value": s["change"], "measure": "relative"} for s in result["steps"]]
     rows.append({"label": "today", "value": result["end"], "measure": "total"})

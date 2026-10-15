@@ -130,7 +130,7 @@ def contributions_with(path, X: pd.DataFrame) -> pd.DataFrame:
     """LightGBM's per-feature contributions (pred_contrib=True) for each row of X, plus the model's expected value.
 
     One column per model feature and a last column `expected_value`; each row sums to the prediction of that
-    row, which is what lets the morning brief split a change in fair value between feature groups (brief.py).
+    row, which is what lets the morning brief split a change in the model forecast between feature groups (brief.py).
     """
     booster, aligned = _aligned(path, X)
     raw = np.asarray(booster.predict(aligned, pred_contrib=True), dtype=float)

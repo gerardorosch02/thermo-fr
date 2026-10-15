@@ -294,7 +294,7 @@ def morning_run(store: Store, delivery_day: str | None = None, kind: str = "sche
                 forecast_id = store.save_forecast(
                     run_id, day, feature_set, issued_at, model_name, kind, curve.attrs["train_hours"], curve.attrs["passes_gate"], curve
                 )
-                if "contributions" in curve.attrs:  # a stored model: what the brief explains the fair value with
+                if "contributions" in curve.attrs:  # a stored model: what the brief explains the model forecast with
                     store.save_drivers(forecast_id, driver_table(curve.attrs["features"], curve.attrs["contributions"]))
                 if stored is not None and suffix == "":
                     probabilistic_curve(store, run_id, day, forecast_id, predict_set, Path(stored).parent, merged, now=now)

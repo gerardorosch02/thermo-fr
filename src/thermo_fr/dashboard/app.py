@@ -5,7 +5,7 @@ reads only the SQLite database written by the scheduled jobs; the only way it
 touches the network is the "Refresh now" button, which runs morning-run once
 in a subprocess.
 
-Two pages: the morning brief (first, one screen for a trader: fair value, what
+Two pages: the morning brief (first, one screen for a trader: model forecast, what
 changed, why it moved, the live record, the early EEX trade gap) and the full
 set of panels (forecast, inputs, versus the market, errors, calibration, shape,
 data status).
@@ -209,11 +209,11 @@ def morning_brief() -> None:
                    f"Model {str(meta['model']).split(':', 1)[-1]}.")
     else:
         st.warning(f"No version was issued before the 11:15 Paris market window; this one was issued {issued:%H:%M} and is not tradeable.")
-    fair, negative = panel["fair"], panel["negative_hours"]
+    level, negative = panel["level"], panel["negative_hours"]
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Fair value, base", f"{fair['base']:.1f}", help="daily mean of the hourly forecast, EUR/MWh")
-    c2.metric("Peak (08-20)", f"{fair['peak']:.1f}")
-    c3.metric("Off-peak", f"{fair['offpeak']:.1f}")
+    c1.metric("Model forecast, base", f"{level['base']:.1f}", help="daily mean of the hourly forecast, EUR/MWh")
+    c2.metric("Peak (08-20)", f"{level['peak']:.1f}")
+    c3.metric("Off-peak", f"{level['offpeak']:.1f}")
     c4.metric("Negative-price hours", str(len(negative)), help="hours whose calibrated probability of a negative price is 5% or more")
     if negative:
         st.markdown("**Negative-price risk:** " + ", ".join(f"{h['hour']:02d}:00 ({100 * h['p']:.0f}%)" for h in negative) + " Paris.")
@@ -244,7 +244,7 @@ def morning_brief() -> None:
         st.caption("The model's inputs at issue time, EUR/MWh for prices; neighbours: D-1 base with the change in brackets, and the French minus "
                    "neighbour spread." + (" " + "; ".join(notes).capitalize() + "." if notes else ""))
     with right:
-        st.markdown("**Why fair value moved** (yesterday's pre-market forecast to today's, base, EUR/MWh)")
+        st.markdown("**Why the model forecast moved** (yesterday's pre-market forecast to today's, base, EUR/MWh)")
         result = panel["waterfall"]
         if result["complete"]:
             st.plotly_chart(waterfall_chart(result), use_container_width=True)
