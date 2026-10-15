@@ -104,14 +104,14 @@ def test_summary_line_names_the_two_largest_groups_with_their_fundamental():
                            {"wind_proxy_mw": -7.0, "price_lag1": 26.0, "load_fc_mw": 11.0, "expected_value": 60.0})
     result = b.waterfall(previous, current)
     assert result["change"] == pytest.approx(-14.0)
-    assert b.summary_line(result, current, previous) == "Model forecast down 14 EUR/MWh: wind -11, recent French prices -4."
+    assert b.summary_line(result, current, previous) == "Model forecast down 14.0 EUR/MWh: wind -11.0, recent French prices -4.0."
     # the French price lags as the largest group: the line says plainly that the model is following the market
     following = drivers_from({"wind_proxy_mw": 8000.0, "price_lag1_mean": 86.0, "load_fc_mw": 50200.0, "temp_c": 12.5},
                              {"wind_proxy_mw": 0.0, "price_lag1": 19.0, "load_fc_mw": 11.0, "expected_value": 60.0})
     result_f = b.waterfall(previous, following)
     assert result_f["steps"][0]["group"] == b.FRENCH_GROUP == "recent French prices (model following the market)"
-    assert b.summary_line(result_f, following, previous) == ("Model forecast down 14 EUR/MWh, mostly the model following the market: "
-                                                             "recent French prices -11, wind -4.")
+    assert b.summary_line(result_f, following, previous) == ("Model forecast down 14.0 EUR/MWh, mostly the model following the market: "
+                                                             "recent French prices -11.0, wind -4.0.")
     pub_prev, pub_fol = previous.assign(group=previous["feature"].map(b.group_of)), following.assign(group=following["feature"].map(b.group_of))
     assert public.summary_line(public.waterfall(pub_prev, pub_fol), pub_fol, pub_prev) == b.summary_line(result_f, following, previous)
     # a drivers.csv exported before the rename still lands in the renamed group, on both sides
