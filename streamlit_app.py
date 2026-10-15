@@ -39,9 +39,10 @@ QUANT_ITEM3 = ("The backtest's {sel_mae:.1f} EUR/MWh is an hourly error over {se
                "{sel_price:.1f}. On the record's days the hourly error was {rec_mae:.1f} EUR/MWh, {rec_share:.0f}% of the average price of "
                "{rec_price:.1f}, and the daily price moved {rec_move:.1f} EUR/MWh on average against {sel_move:.1f}. The record's "
                "{record_mae:.1f} scores the daily base or peak average rather than single hours. A look-ahead check found no leakage.")
-QUANT_ITEM4 = ("Borderline: binomial p = {p:.2f} over {windows} windows ({p_base:.2f} for the {base_windows} base windows alone). "
+QUANT_ITEM4 = ("Borderline: binomial p = {p:.2f} over {windows} windows ({p_base:.2f} for the {base_windows} base windows alone).{wrong} "
                "{base_windows} of the {windows} windows are base contracts, so this is mostly a base record. The average loss is clearer: a "
                "day-block bootstrap puts the 95% interval for the P&L at {lo:.1f} to {hi:.1f} EUR/MWh per window.")
+EEX_SHORT = "Benchmark: EEX French day-ahead futures, 11:15 to 12:00 Paris; no EEX data redistributed. Details in Method."
 EEX_ATTRIBUTION = ("Benchmark: EEX French day-ahead base and peak futures, trades between 11:15 and 12:00 Paris on the day before "
                    "delivery, from EEX's public website data (15-minute delay). Statistics are derived by the author; no EEX data are "
                    "redistributed. This project is not affiliated with or endorsed by EEX AG.")
@@ -53,7 +54,7 @@ AUTHOR_LINE = ("Built by [Gerardo Rosales](https://github.com/gerardorosch02). C
                "[github.com/gerardorosch02/thermo-fr](https://github.com/gerardorosch02/thermo-fr). Research, not trading advice.")
 NO_DATA = "No published data yet."
 NO_FORECAST = "No forecast for the next delivery day yet."
-COLLECTING = "Collecting, n = {n} of {needed} {unit}"
+COLLECTING = "{n} of {needed} {unit} so far; shown from {needed}"
 
 FINDINGS_HEADER = "Key findings"
 F1_TITLE = "1. The shape model beat simple shapes, then lost on the holdout."
@@ -74,17 +75,16 @@ ISSUED_PREMARKET = "Issued {time} Paris on {date}, before the EEX window opened 
 ISSUED_LATE = "No forecast was issued before the 11:15 Paris window. This one, issued at {time}, is not tradeable."
 STALE = "The latest forecast is for {day}, which has passed. Today's run may not have happened yet."
 LATER_VERSIONS = "Issued after the market window, not tradeable: {times} Paris."
-NEGATIVE_NONE = "No hour has a 5% or higher chance of a negative price."
 PEAK_BELOW_BASE = "Peak (08:00 to 20:00) is below base: the midday dip falls inside peak hours."
 NEGATIVE_SOME = "Likely negative: {hours} Paris."
-RECORD_STRIP = "Live record against the EEX future: {text}."
+RECORD_STRIP = "Live: {text}"
 RECORD_STRIP_READY = ("Live record, {n} windows: right on direction {hit:.0f}% of the time, {pnl:+.2f} EUR/MWh per window, error "
                       "{model:.1f} against the market's {market:.1f} EUR/MWh.")
 FORECAST_HEADER = "Tomorrow's forecast with its error band"
 FORECAST_CAPTION = ("Model forecast in EUR/MWh, with today's auction prices for reference. The band is the model's past error at each "
                     "hour in the backtest, not a probability forecast.")
 LEGEND_FORECAST, LEGEND_TODAY = "Model forecast", "Today's auction price"
-LEGEND_BAND = ("Past error, 10th to 90th percentile", "Past error, 25th to 75th percentile")
+LEGEND_BAND = ("Past error, 80% range", "Past error, 50% range")  # 10th to 90th and 25th to 75th percentile
 HOURLY_EXPANDER = "Hourly values"
 PROBABILITY_EXPANDER = "Tomorrow's chance of a negative price, by hour"
 UNCALIBRATED = "This forecast shows the uncalibrated probability."
@@ -100,10 +100,15 @@ NEIGHBOURS_LINE = "Previous-day base, EUR/MWh (France minus neighbour): {values}
 
 TRACK_INTRO = ("The headline market record is a walk-forward reissue: each delivery day from {period} forecast again with a model "
                "fitted only on earlier data. The live records of the forecasts published here before 11:15 Paris are still collecting.")
-UNIT_EEX = "EEX windows (one per day and contract, base or peak; pre-market forecasts only)"
-UNIT_MAE = "days with a pre-market forecast scored against the auction"
-UNIT_PROB = "days with probabilities scored (the pre-market version, or the latest where none)"
-UNIT_BATTERY = "days valued (the pre-market version, or the latest where none)"
+UNIT_EEX = "EEX windows"
+UNIT_DAYS = "days"
+HELP_EEX = ("One window per delivery day and contract (base or peak), counted when the forecast published here was issued before "
+            "11:15 Paris and a traded price exists.")
+HELP_MAE = "Days whose forecast published here was issued before 11:15 Paris, scored against the auction."
+HELP_PROB = "Settled days with probabilities: the pre-market version, or the latest version where none was issued before 11:15."
+HELP_BATTERY = ("Settled days valued with the battery: the pre-market version, or the latest version where none was issued before "
+                "11:15. The live record uses the shape of the level forecast; the shape model runs in the backtest only.")
+NOT_COUNTED = " Not counted, issued after 11:15: {dates}."
 MARKET_HEADER = "Versus the market"
 MARKET_TAKEAWAY = ("The model does not beat the traded price: over {windows} walk-forward windows it was right on direction {hit:.0f}% "
                    "of the time and {pnl_phrase} per window.")
@@ -122,7 +127,6 @@ MARKET_LIVE = "Live"
 ERROR_HEADER = "Model error against the auction"
 ERROR_HOLDOUT = "On the frozen holdout ({window}) the model's hourly error against the auction was {mae:.1f} EUR/MWh."
 ERROR_LIVE = "The model's own error, no other comparison: MAE {mae:.1f} EUR/MWh over {n} days."
-ERROR_NOT_SCORED = "Not scored, issued after the market window: {dates}."
 ERROR_CHART = "Pre-market forecast and auction price, last {days} days"
 ERROR_DAILY_CAPTION = "Daily MAE against the auction, with a 7-day rolling mean."
 
@@ -142,13 +146,14 @@ SHAPE_TAKEAWAY = ("A shape model beat yesterday's shape on the selection window 
 SHAPE_NOTE = ("The shape is each hour's price minus the day's mean. The battery is 1 MW / 2 MWh at {rt} round-trip efficiency, one "
               "cycle a day on day-ahead prices only: two hours charging, then two discharging, chosen on the forecast and settled at "
               "the auction. No degradation, no ancillary services.")
-SHAPE_WHY = ("On the holdout the model's average shape error was lower ({m:.2f} against {d1:.2f} EUR/MWh) yet the battery earned less: "
-             "battery value depends on the cheapest and most expensive hours and the day's spread, where yesterday's shape did better (spread "
-             "error {ms:.1f} against {ds:.1f} EUR/MWh).")
+SHAPE_WHY = ("The model's shape error on the holdout ({m:.2f}) was {vs_d1} yesterday's ({d1:.2f}) but {vs_st} the last similar "
+             "day's ({st:.2f}), and the battery earned less: battery value depends on the cheapest and most expensive hours and the day's "
+             "spread, where yesterday's shape did better (spread error {ms:.1f} against {ds:.1f} EUR/MWh).")
+SHAPE_LEVEL = ("Holdout values are about twice the selection values because prices were higher: the auction averaged {hold:.1f} "
+               "EUR/MWh on the holdout against {sel:.1f} on the selection window.")
 SHAPE_METHODS = (("model", "Shape model"), ("d1", "Yesterday's shape"), ("same_type", "Last similar day (same day type)"),
                  ("perfect", "Perfect foresight"))
 SHAPE_LIVE_READY = "Live, {n} days: {value:.1f} EUR/day, {share:.0f}% of perfect foresight; yesterday's shape {d1:.1f} EUR/day."
-SHAPE_LIVE_NOTE = "The live record uses the shape of the level forecast; the shape model runs in the backtest only."
 SHAPE_LIVE_SERIES = "Level forecast's shape"
 
 METHOD_MD = """
@@ -181,12 +186,11 @@ METHOD_MD = """
 - Quantiles and a spike probability are computed but not shown until they pass their tests.
 - Why the backtest error is lower than the trading record's, and whether the hit rate is significant: see Track record.
 
-#### Next steps (not yet tested)
-- Fresher weather: the D-1 00Z run instead of runs issued two days ahead (later D-1 runs arrive after the 10:05 issue time).
-- Nuclear availability from outage notices: snapshots saved daily since 10 Oct 2026; ENTSO-E serves only the latest revision, so the
-  history has to be built forward.
+#### Missing drivers (not yet tested)
 - Gas price: the free history did not match the exchange index closely enough under the pre-registered check.
-- Carbon (EUA price) was tested and rejected on the selection window.
+- Nuclear availability: outage notices snapshotted daily since 10 Oct 2026; ENTSO-E keeps only the latest revision.
+- Fresher weather: the D-1 00Z run instead of runs issued two days ahead; later D-1 runs arrive after the 10:05 issue time.
+- Carbon (EUA price): tested and rejected on the selection window.
 """
 METHOD_SOURCES = "Data sources and attribution"
 SOURCES = ["ENTSO-E Transparency Platform: prices, load forecast, generation. Cited as the source under its terms.",
@@ -234,6 +238,7 @@ def quant_item4(walkforward: dict) -> str:
         w = walkforward
         lo, hi = w["bootstrap"]["mean_pnl_per_mwh"]["ci95"]
         return QUANT_ITEM4.format(windows=w["windows"], base_windows=w["base_only"]["windows"], p=w["binomial_p_two_sided"],
+                                  wrong=" The calls were wrong more often than right." if w["hit_rate"] < 0.5 else "",
                                   p_base=w["base_only"]["binomial_p_two_sided"], lo=lo, hi=hi)
     except (KeyError, TypeError, ValueError):
         return PENDING
@@ -241,7 +246,7 @@ def quant_item4(walkforward: dict) -> str:
 
 # ============================================================================ chart style (one template for every chart)
 BLUE, ORANGE, GREY, AQUA = "#3987e5", "#eb6834", "#898781", "#1baf7a"
-BAND = ("rgba(57,135,229,0.22)", "rgba(57,135,229,0.50)")
+BAND = ("rgba(134,182,239,0.20)", "rgba(57,135,229,0.55)")  # outer: lighter hue, low opacity; inner: the series blue, strong
 GRID = "rgba(137,135,129,0.25)"
 CHART_CONFIG = {"displayModeBar": False, "responsive": True}
 
@@ -257,6 +262,14 @@ def style(fig: go.Figure, ytitle: str = "", xtitle: str = "", height: int = 320,
     fig.update_xaxes(title_text=xtitle, showgrid=False, zeroline=False, automargin=True)
     fig.update_yaxes(title_text=ytitle, gridcolor=GRID, zeroline=False, automargin=True)
     return fig
+
+
+def forecast_ink() -> str:
+    """The forecast line over the error band: near-white on a dark theme, deep blue on a light one."""
+    try:
+        return "#f0efec" if st.context.theme.type == "dark" else "#0d366b"
+    except Exception:  # older Streamlit, or no browser context
+        return "#0d366b"
 
 
 def show(fig: go.Figure) -> None:
@@ -562,7 +575,7 @@ def tomorrow_chart(by_hour: pd.DataFrame, day: str, previous: str) -> go.Figure:
         fig.add_trace(go.Scatter(x=x, y=by_hour["actual_today"], name=LEGEND_TODAY, mode="lines",
                                  line=dict(color=GREY, width=2, dash="dot"), hovertemplate="%{y:.1f}"))
     fig.add_trace(go.Scatter(x=x, y=by_hour["forecast"], name=LEGEND_FORECAST, mode="lines",
-                             line=dict(color=BLUE, width=2.5), hovertemplate="%{y:.1f}"))
+                             line=dict(color=forecast_ink(), width=2.5), hovertemplate="%{y:.1f}"))
     fig = style(fig, "EUR/MWh", "Hour (Paris)", height=340)
     fig.update_xaxes(dtick=3, range=[-0.3, 23.3])
     return fig
@@ -714,9 +727,7 @@ def summary_line(result, current, previous, day_names=None, min_step=MIN_STEP) -
     top = sorted((s for s in result["steps"] if abs(s["change"]) >= min_step), key=lambda s: -abs(s["change"]))[:2]
     if not top:
         return head + "."
-    if top[0]["group"] == FRENCH_GROUP:
-        head += ", mostly the model following the market"
-    return f"{head}: " + ", ".join(f"{s['group'].split(' (')[0]} {s['change']:+.1f}" for s in top) + "."
+    return f"{head}, mostly from " + " and ".join(f"{s['group'].split(' (')[0]} ({s['change']:+.1f})" for s in top) + "."
 
 
 def drivers_of(drivers: pd.DataFrame, day: str, issued: str, feature_set: str) -> pd.DataFrame:
@@ -755,13 +766,15 @@ def brief_from_published(data: dict) -> dict:
     return out
 
 
-GROUP_ALSO = {FRENCH_GROUP: "; hourly lags and older days also count", "neighbour prices": "; other zones and spreads also count"}
+GROUP_ALSO = {"neighbour prices": "; other zones and spreads also count"}
 
 
 def driver_label(group: str, current, previous, day_names) -> str:
     name = f"<b>{GROUP_LABELS.get(group, group.capitalize())}</b>"
     if group in (REFIT_STEP, "calendar"):
         return name
+    if group == FRENCH_GROUP:  # many lags move at once; the daily base alone can point the other way
+        return f"{name}<br><span style='font-size:11px'>hourly prices of recent days</span>"
     return f"{name}<br><span style='font-size:11px'>{step_phrase(group, current, previous, day_names)}{GROUP_ALSO.get(group, '')}</span>"
 
 
@@ -798,6 +811,11 @@ def lower_first(text: str) -> str:
     return text[:1].lower() + text[1:]
 
 
+def live_line(text: str, definition: str) -> None:
+    """Every live counter in one form: "Live: n of N <unit> so far; shown from N.", what it counts in the tooltip."""
+    st.markdown(f"**{MARKET_LIVE}:** {text}", help=definition)
+
+
 def pnl_phrase(pnl: float) -> str:
     return f"lost {abs(pnl):.2f} EUR/MWh" if pnl < 0 else f"made {pnl:.2f} EUR/MWh"
 
@@ -808,7 +826,7 @@ def live_market_text(market: dict) -> str:
     if gate["ready"] and market.get("hit_rate") is not None:
         return RECORD_STRIP_READY.format(n=gate["n"], hit=100 * market["hit_rate"], pnl=market["mean_pnl_per_mwh"],
                                          model=market["model_mae"], market=market["market_mae"])
-    return RECORD_STRIP.format(text=lower_first(gate["text"]))
+    return RECORD_STRIP.format(text=gate["text"] + ".")
 
 
 # ============================================================================ pages
@@ -890,9 +908,7 @@ def overview() -> None:
         st.caption(PEAK_BELOW_BASE)
     if negative:
         st.markdown(NEGATIVE_SOME.format(hours=", ".join(f"{h['hour']:02d}:00 ({format_probability(h['p'])})" for h in negative)))
-    else:
-        st.caption(NEGATIVE_NONE)
-    st.caption(live_market_text(data["status"].get("market") or data.get("market") or {}))
+    st.caption(live_market_text(data["status"].get("market") or data.get("market") or {}), help=HELP_EEX)
 
     st.subheader(FORECAST_HEADER)
     previous = (stamp - pd.Timedelta(days=1)).strftime("%Y-%m-%d")
@@ -966,8 +982,8 @@ def market_section(data: dict) -> None:
                     st.markdown(text)
     market = data["status"].get("market") or data.get("market") or {}
     gate = live_gate(market.get("scored_windows", market.get("scored_days", 0)), MIN_MARKET_WINDOWS, UNIT_EEX)
-    st.markdown(f"**{MARKET_LIVE}:** " + (live_market_text(market) if gate["ready"] else lower_first(gate["text"]) + "."))
-    st.caption(MARKET_RULE + " " + EEX_ATTRIBUTION)
+    live_line(live_market_text(market) if gate["ready"] else gate["text"] + ".", HELP_EEX)
+    st.caption(MARKET_RULE + " " + EEX_SHORT)
 
 
 def error_section(data: dict) -> None:
@@ -976,15 +992,14 @@ def error_section(data: dict) -> None:
     previous_set = status.get("fallback_model_file", "").split("/")[-1].replace(".txt", "")
     record, tables = live_record(data.get("scores_all", data["scores"]), status.get("feature_set", ""), previous_set)
     head = record["default"]
-    gate = live_gate(head.get("days_in_window", 0), MIN_LIVE_DAYS, UNIT_MAE)
-    st.markdown(f"**{MARKET_LIVE}:** " + (ERROR_LIVE.format(mae=head["model_mae"], n=gate["n"]) if gate["ready"] else lower_first(gate["text"]) + "."))
+    gate = live_gate(head.get("days_in_window", 0), MIN_LIVE_DAYS, UNIT_DAYS)
+    late = [d["delivery_day"] for d in head.get("late_only_days") or []]
+    live_line(ERROR_LIVE.format(mae=head["model_mae"], n=gate["n"]) if gate["ready"] else gate["text"] + ".",
+              HELP_MAE + (NOT_COUNTED.format(dates=", ".join(day_text(d) for d in late)) if late else ""))
     holdout = (status.get("model") or {}).get("frozen_holdout") or {}
     if holdout.get("mae") is not None:
         first, last = [pd.Timestamp(d.strip()) for d in holdout["window"].split(" to ")]
         st.markdown(ERROR_HOLDOUT.format(window=f"{day_text(first)} to {day_text(last)}", mae=holdout["mae"]))
-    late = [d["delivery_day"] for d in head.get("late_only_days") or []]
-    if late:
-        st.caption(ERROR_NOT_SCORED.format(dates=", ".join(day_text(d) for d in late)))
     if gate["ready"]:
         scores = tables["default"].tail(30).copy()
         scores["rolling"] = scores["mae"].rolling(7, min_periods=1).mean()
@@ -1050,11 +1065,11 @@ def calibration_section(data: dict) -> None:
     calibration = ((data["status"].get("probabilistic") or {}).get("calibration")) or {}
     st.caption(CALIB_NOTE.format(pairs=calibration.get("pairs_hours", 0)))
     live = ((data["status"].get("probabilistic") or {}).get("live")) or {}
-    gate = live_gate(live.get("days", 0), MIN_LIVE_DAYS, UNIT_PROB)
+    gate = live_gate(live.get("days", 0), MIN_LIVE_DAYS, UNIT_DAYS)
     negative = live.get("negative") or {}
     text = (f"{gate['n']} days, {negative.get('events', 0)} negative hours, Brier {negative.get('brier', float('nan')):.4f}."
-            if gate["ready"] else lower_first(gate["text"]) + ".")
-    st.markdown(f"**{MARKET_LIVE}:** {text}")
+            if gate["ready"] else gate["text"] + ".")
+    live_line(text, HELP_PROB)
 
 
 def shape_section(data: dict) -> None:
@@ -1087,24 +1102,29 @@ def shape_section(data: dict) -> None:
                                                                         "Holdout": st.column_config.NumberColumn(format="%.2f")})
     if hold:
         hs = hold["shape"]
-        if (hs["model"]["shape_mae"] < hs["d1"]["shape_mae"] and hold["battery"]["model"]["eur_per_day"] < hold["battery"]["d1"]["eur_per_day"]
-                and hs["model"]["spread_error"] > hs["d1"]["spread_error"]):
-            st.markdown(SHAPE_WHY.format(m=hs["model"]["shape_mae"], d1=hs["d1"]["shape_mae"], ms=hs["model"]["spread_error"],
-                                         ds=hs["d1"]["spread_error"]))
+        if hold["battery"]["model"]["eur_per_day"] < hold["battery"]["d1"]["eur_per_day"] and hs["model"]["spread_error"] > hs["d1"]["spread_error"]:
+            m = hs["model"]["shape_mae"]
+            st.markdown(SHAPE_WHY.format(m=m, d1=hs["d1"]["shape_mae"], st=hs["same_type"]["shape_mae"],
+                                         vs_d1="below" if m < hs["d1"]["shape_mae"] else "above",
+                                         vs_st="above" if m > hs["same_type"]["shape_mae"] else "below",
+                                         ms=hs["model"]["spread_error"], ds=hs["d1"]["spread_error"]))
+    comparison = (data["walkforward"] or {}).get("comparison") or {}
+    if (comparison.get("holdout") or {}).get("mean_price_eur_mwh") and (comparison.get("selection") or {}).get("mean_price_eur_mwh"):
+        st.markdown(SHAPE_LEVEL.format(hold=comparison["holdout"]["mean_price_eur_mwh"], sel=comparison["selection"]["mean_price_eur_mwh"]))
     found = re.search(r"(\d+)% round-trip", ((data["shape"] or {}).get("definitions") or {}).get("battery", ""))
     st.caption(SHAPE_NOTE.format(rt=f"{found.group(1)}%" if found else "the stated"))
     live = (data["shape"] or {}).get("live") or {}
-    gate = live_gate(live.get("days", 0), MIN_LIVE_DAYS, UNIT_BATTERY)
+    gate = live_gate(live.get("days", 0), MIN_LIVE_DAYS, UNIT_DAYS)
     if gate["ready"]:
         b = live["battery"]
         text = SHAPE_LIVE_READY.format(n=gate["n"], value=b["model"]["eur_per_day"], share=100 * (b["model"]["share_of_perfect"] or 0),
                                        d1=b["d1"]["eur_per_day"])
     else:
-        text = lower_first(gate["text"]) + "."
-    st.markdown(f"**{MARKET_LIVE}:** {text} {SHAPE_LIVE_NOTE}")
+        text = gate["text"] + "."
+    live_line(text, HELP_BATTERY)
     daily = pd.DataFrame(live.get("daily") or [])
     if not daily.empty:
-        with st.expander("Live battery value per day" + ("" if gate["ready"] else f" (n = {gate['n']}, collecting)")):
+        with st.expander("Live battery value per day" + ("" if gate["ready"] else f" ({gate['n']} so far)")):
             fig = go.Figure()
             x = pd.to_datetime(daily["delivery_day"]).dt.strftime("%d %b")
             for column, name, color in (("value_model", SHAPE_LIVE_SERIES, BLUE), ("value_d1", "Yesterday's shape", GREY),
