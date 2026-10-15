@@ -1,0 +1,91 @@
+{
+  "model": "honest_v2",
+  "kind": "walk-forward record, not live",
+  "period": {
+    "first_delivery_day": "2026-08-29",
+    "last_delivery_day": "2026-10-10"
+  },
+  "windows": 42,
+  "base_windows": 38,
+  "peak_windows": 4,
+  "days": 38,
+  "hits": 14,
+  "hit_rate": 0.333,
+  "mean_pnl_per_mwh": -2.43,
+  "model_mae": 28.54,
+  "market_mae": 5.07,
+  "share_model_beats_market": 0.071,
+  "metric_note": "model_mae and market_mae are errors of the product average (base or peak) against the auction's product average, not hourly errors",
+  "base_only": {
+    "windows": 38,
+    "hits": 14,
+    "hit_rate": 0.368,
+    "mean_pnl_per_mwh": -1.99,
+    "binomial_p_two_sided": 0.1433
+  },
+  "binomial_p_two_sided": 0.0436,
+  "bootstrap": {
+    "method": "moving-block bootstrap over delivery days, blocks of 3 days, 5000 resamples, numpy default_rng seed 42; percentile intervals; p-value from the centred bootstrap distribution",
+    "days": 38,
+    "hit_rate": {
+      "ci95": [
+        0.22,
+        0.475
+      ],
+      "p_two_sided": 0.0078
+    },
+    "mean_pnl_per_mwh": {
+      "ci95": [
+        -4.032,
+        -0.748
+      ],
+      "p_two_sided": 0.0026
+    }
+  },
+  "repricing_share": {
+    "slope": 0.446,
+    "se": 0.104,
+    "definition": "least-squares slope of (forecast minus the D-1 auction product average) on (traded VWAP minus the D-1 auction product average): the share of the market's same-morning move the model made"
+  },
+  "persistence": {
+    "hits": 13,
+    "model_calls_equal_persistence": 29,
+    "definition": "long when the D-1 auction product average is above the traded VWAP, short when below"
+  },
+  "period_mean_price_eur_mwh": 139.0,
+  "comparison": {
+    "selection": {
+      "days": 865,
+      "hours": 20752,
+      "first_day": "2024-02-17",
+      "last_day": "2026-06-30",
+      "hourly_mae_model": 15.7,
+      "hourly_mae_share_of_price": 0.26,
+      "mean_price_eur_mwh": 59.4,
+      "mean_abs_daily_change_eur_mwh": 16.9
+    },
+    "record_days": {
+      "days": 38,
+      "hours": 912,
+      "first_day": "2026-08-29",
+      "last_day": "2026-10-10",
+      "hourly_mae_model": 32.86,
+      "hourly_mae_share_of_price": 0.24,
+      "mean_price_eur_mwh": 139.0,
+      "mean_abs_daily_change_eur_mwh": 27.9
+    },
+    "holdout": {
+      "days": 102,
+      "hours": 2448,
+      "first_day": "2026-07-01",
+      "last_day": "2026-10-10",
+      "hourly_mae_model": 25.81,
+      "hourly_mae_share_of_price": 0.21,
+      "mean_price_eur_mwh": 123.4,
+      "mean_abs_daily_change_eur_mwh": 24.0
+    }
+  },
+  "comparison_note": "hourly MAE of the model, that MAE divided by the mean absolute hourly price, mean hourly auction price and mean absolute change of the daily mean price, on the strict selection window, the frozen holdout and the delivery days of the record",
+  "source": "walk-forward predictions with monthly retraining (backtest settings) in reports/forecast/predictions_honest_v2_holdout.csv, scored against the EEX French Day-Ahead Base and Peak window VWAP (11:15 to 12:00 Paris on the trade date) kept privately in data/market/eex_fr_da.csv; product averages as in forecast/market.py; written by forecast/walkforward_record.py (thermo-fr market walkforward-record); aggregates only, traded prices are not republished",
+  "written_at_utc": "2026-10-15T09:39:40Z"
+}

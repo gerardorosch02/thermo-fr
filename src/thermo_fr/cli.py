@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -418,6 +419,25 @@ def cmd_market_evaluate(args) -> None:
         print(result["bands"].to_string(index=False, na_rep=""))
     for skipped in s["skipped"]:
         print(f"skipped {skipped['delivery_date']} {skipped['product']}: {skipped['reason']}")
+
+
+def cmd_market_walkforward_record(args) -> None:
+    from .forecast.walkforward_record import run
+
+    def resolve(name):
+        if not name:
+            return None
+        path = Path(name)
+        if not path.exists() and args.fallback_root and (Path(args.fallback_root) / path).exists():
+            path = Path(args.fallback_root) / path
+        if not path.exists():
+            raise SystemExit(f"{name} not found here or under {args.fallback_root}")
+        return path
+
+    r = run(resolve(args.predictions), resolve(args.path), Path(args.out), selection_path=resolve(args.selection))
+    print(f"Wrote {args.out}: {r['windows']} windows ({r['base_windows']} base, {r['peak_windows']} peak), hit rate {100 * r['hit_rate']:.0f}% "
+          f"(binomial p {r['binomial_p_two_sided']}), mean P&L {r['mean_pnl_per_mwh']:+.2f} EUR/MWh, model {r['model_mae']:.2f} vs market "
+          f"{r['market_mae']:.2f} EUR/MWh")
 
 
 def _outage_api(zone: str):
@@ -875,6 +895,15 @@ def main(argv=None) -> None:
     meval.add_argument("--feature-set", default="honest_v2")
     meval.add_argument("--bands", nargs="+", type=float, default=[0.0, 1.0, 2.0, 5.0, 10.0], help="no-trade bands in EUR/MWh (in sample)")
     meval.set_defaults(func=cmd_market_evaluate)
+    mwf = mkt_sub.add_parser("walkforward-record", help="aggregates-only walk-forward record against EEX traded prices, written to "
+                                                         "published/market_walkforward.json (no per-window values, no traded prices)")
+    mwf.add_argument("--predictions", default="reports/forecast/predictions_honest_v2_holdout.csv")
+    mwf.add_argument("--selection", default="reports/forecast/predictions_honest_v2.csv", help="selection-window predictions; '' to skip")
+    mwf.add_argument("--path", default="data/market/eex_fr_da.csv", help="the private EEX window file")
+    mwf.add_argument("--fallback-root", default=os.environ.get("THERMO_DATA_ROOT", ""),
+                     help="another checkout to read an input file from when it is absent here (default: $THERMO_DATA_ROOT)")
+    mwf.add_argument("--out", default="published/market_walkforward.json")
+    mwf.set_defaults(func=cmd_market_walkforward_record)
 
     snap = sub.add_parser("outage-snapshot", help="Save today's ENTSO-E unavailability notices of French units, raw and paged (laptop only)")
     snap.add_argument("--out", default="data/entsoe/outage_snapshots", help="git-ignored folder; the retrieval time is in every file name")
