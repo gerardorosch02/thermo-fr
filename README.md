@@ -50,6 +50,7 @@ The full command reference is in [docs/operations.md](docs/operations.md).
 
 - The live record against the market is still small; the 42-window record above is a walk-forward reissue, not live trading.
 - The EEX history is too short to select models on, so variants are chosen on their own backtest error.
+- Attempts to close the gap to the market have not passed the holdout. The latest (October 2026: inputs describing the expected change from the previous day, and a target relative to yesterday's average) removed the systematic lag on the selection window but raised the holdout error from 25.81 to 26.19 EUR/MWh, so the model is unchanged ([docs/experiments.md](docs/experiments.md)).
 - Without a gas or carbon input the model lags regime changes, and it is weakest in the top 5% price hours (cold, calm winter evenings) and on low-price weekend and holiday middays.
 - The shaded band on the forecast chart is the model's past error at each hour, not a probability forecast. Price quantiles and a spike probability are computed daily but not shown: the quantile band under-covered on the holdout (73.8% for a nominal 80%) and the spike definition did not hold up.
 - ENTSO-E serves only the latest version of the load forecast and of outage notices, so possible revisions after 10:00 cannot be excluded and planned nuclear availability is not yet an input.

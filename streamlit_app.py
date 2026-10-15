@@ -160,6 +160,9 @@ METHOD_MD = """
 
 #### Limitations
 - Loses to the traded market: by 11:15 the market has repriced for the next day and the model makes less than half of that move.
+- Tried in October 2026: inputs describing the expected change from the previous day, and a target relative to yesterday's
+  average. They removed the systematic lag on the selection window but not the error on the holdout (26.19 against 25.81 EUR/MWh),
+  so the model is unchanged.
 - Weakest in regime changes, the top 5% price hours and low-price weekend and holiday middays.
 - The error band is past error, not a probability forecast. Quantiles and a spike probability are computed but not shown until
   they pass their tests.
