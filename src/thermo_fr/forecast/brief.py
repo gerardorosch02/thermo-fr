@@ -212,10 +212,8 @@ def step_phrase(group: str, current: pd.DataFrame | None, previous: pd.DataFrame
 
 def summary_line(result: dict, current: pd.DataFrame | None, previous: pd.DataFrame | None, day_names: tuple[str, str] | None = None,
                  min_step: float = MIN_STEP) -> str:
-    """One line from the two largest steps, e.g. "Model forecast down 14.0 EUR/MWh: wind -11.0, recent French prices -4.0."
-
-    When the largest step is the French price lags, the line says so plainly: "Model forecast down 14 EUR/MWh, mostly the model
-    following the market: recent French prices -11, wind -4." step_phrase gives the fundamental behind each group.
+    """One line from the two largest steps, e.g. "Model forecast down 14.0 EUR/MWh, mostly from wind (-11.0) and recent French prices
+    (-4.0)." The figures are the steps of the chart, to one decimal. step_phrase gives the fundamental behind each group.
     """
     if not result.get("complete"):
         return ""
@@ -225,10 +223,8 @@ def summary_line(result: dict, current: pd.DataFrame | None, previous: pd.DataFr
     top = sorted((s for s in result["steps"] if abs(s["change"]) >= min_step), key=lambda s: -abs(s["change"]))[:2]
     if not top:
         return head + "."
-    if top[0]["group"] == FRENCH_GROUP:
-        head += ", mostly the model following the market"
-    parts = [f"{s['group'].split(' (')[0]} {s['change']:+.1f}" for s in top]
-    return f"{head}: " + ", ".join(parts) + "."
+    parts = [f"{s['group'].split(' (')[0]} ({s['change']:+.1f})" for s in top]
+    return f"{head}, mostly from " + " and ".join(parts) + "."
 
 
 def record_strip(summary: dict | None, min_windows: int = 20) -> dict:
