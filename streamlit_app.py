@@ -12,7 +12,9 @@ section below.
 """
 
 import json
+import math
 import os
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -33,14 +35,13 @@ MIN_LIVE_DAYS = 20  # the model's own live error and the live battery value
 PENDING = "[pending]"
 # QUANT_ITEM3 and QUANT_ITEM4 are filled from published/market_walkforward.json (quant_item3, quant_item4); a text that cannot be
 # filled stays PENDING and is not shown.
-QUANT_ITEM3 = ("Why the backtest error is lower: the backtest's {sel_mae:.1f} EUR/MWh is an hourly error over {sel_period}, when "
-               "prices averaged {sel_price:.0f} EUR/MWh; the record covers {rec_period}, when prices averaged {rec_price:.0f} EUR/MWh "
-               "and the daily price moved {rec_move:.0f} EUR/MWh on average against {sel_move:.0f}. Measured against the price level the "
-               "error is similar ({sel_share:.0f}% and {rec_share:.0f}% of the average price). The record also scores the daily base or "
-               "peak average rather than single hours. A look-ahead check found no leakage.")
-QUANT_ITEM4 = ("Is {hit:.0f}% just bad luck? Partly. With {windows} windows, {hits} hits is only weakly different from a coin toss "
-               "(p = {p:.2f}; p = {p_base:.2f} for the base contract alone). The average loss is clearer: a day-block bootstrap puts the 95% "
-               "interval for the P&L at {lo:.1f} to {hi:.1f} EUR/MWh per window.")
+QUANT_ITEM3 = ("The backtest's {sel_mae:.1f} EUR/MWh is an hourly error over {sel_period}, {sel_share:.0f}% of the average price of "
+               "{sel_price:.1f}. On the record's days the hourly error was {rec_mae:.1f} EUR/MWh, {rec_share:.0f}% of the average price of "
+               "{rec_price:.1f}, and the daily price moved {rec_move:.1f} EUR/MWh on average against {sel_move:.1f}. The record's "
+               "{record_mae:.1f} scores the daily base or peak average rather than single hours. A look-ahead check found no leakage.")
+QUANT_ITEM4 = ("Borderline: binomial p = {p:.2f} over {windows} windows ({p_base:.2f} for the {base_windows} base windows alone). "
+               "{base_windows} of the {windows} windows are base contracts, so this is mostly a base record. The average loss is clearer: a "
+               "day-block bootstrap puts the 95% interval for the P&L at {lo:.1f} to {hi:.1f} EUR/MWh per window.")
 EEX_ATTRIBUTION = ("Benchmark: EEX French day-ahead base and peak futures, trades between 11:15 and 12:00 Paris on the day before "
                    "delivery, from EEX's public website data (15-minute delay). Statistics are derived by the author; no EEX data are "
                    "redistributed. This project is not affiliated with or endorsed by EEX AG.")
@@ -55,19 +56,17 @@ NO_FORECAST = "No forecast for the next delivery day yet."
 COLLECTING = "Collecting, n = {n} of {needed} {unit}"
 
 FINDINGS_HEADER = "Key findings"
-F1_TITLE = "1. Shape model beat naive shapes, then failed the holdout."
-F1_BODY = ("On {days} selection days a 1 MW / 2 MWh battery earned {model:.1f} EUR/day on the model's shape against {d1:.1f} on "
-           "yesterday's shape (perfect foresight {perfect:.1f}); on the {hold_days}-day holdout it earned {hold_model:.1f} against "
-           "{hold_d1:.1f}{verdict}.")
-F1_VERDICT = ", a shortfall the bootstrap says is real"
-F2_TITLE = "2. Negative-price probabilities are calibrated and beat climatology."
-F2_BODY = ("On the holdout ({events} negative hours out of {hours:,}) the Brier skill score is {bss:+.2f} against climatology and "
-           "{bss7:+.2f} against the last 7 days. Calibrated on {pairs:,} out-of-sample hours.")
+F1_TITLE = "1. The shape model beat simple shapes, then lost on the holdout."
+F1_BODY = ("A 1 MW / 2 MWh battery earned {model:.1f} EUR/day on the model's shape against {d1:.1f} on yesterday's ({days} selection "
+           "days), but {hold_model:.1f} against {hold_d1:.1f} on the {hold_days}-day holdout{interval}.")
+F1_INTERVAL = " (difference {diff:+.1f}, 95% interval {lo:+.1f} to {hi:+.1f})"
+F2_TITLE = "2. Negative-price probabilities have skill."
+F2_BODY = ("Brier skill {bss:+.2f} against climatology on the holdout ({events} negative hours of {hours:,}); close to calibrated "
+           "where most hours sit, under-confident above 40% ({high} hours).")
 F3_TITLE = "3. The level forecast does not beat the traded market."
-F3_BODY = ("Over {windows} walk-forward windows the model's direction against the EEX future was right {hit:.0f}% of the time and "
-           "{pnl_phrase} per window; the average error of its daily base or peak forecast was {model_mae:.1f} EUR/MWh against "
-           "{market_mae:.1f} for the traded price. By 11:15 the market has already repriced; the model makes about {share:.2f} of that "
-           "move, because its price inputs carry yesterday's level.")
+F3_BODY = ("Over {windows} walk-forward windows it was on the right side of the EEX future {hit:.0f}% of the time and {pnl_phrase} per "
+           "window; by 11:15 the market has repriced and the model makes about {share:.2f} of that move.")
+DETAILS_LINK = "Details in Track record"
 NOT_AVAILABLE = "The walk-forward record against the market is not available."
 
 TOMORROW_HEADER = "Delivery day {weekday} {day}"
@@ -76,6 +75,7 @@ ISSUED_LATE = "No forecast was issued before the 11:15 Paris window. This one, i
 STALE = "The latest forecast is for {day}, which has passed. Today's run may not have happened yet."
 LATER_VERSIONS = "Issued after the market window, not tradeable: {times} Paris."
 NEGATIVE_NONE = "No hour has a 5% or higher chance of a negative price."
+PEAK_BELOW_BASE = "Peak (08:00 to 20:00) is below base: the midday dip falls inside peak hours."
 NEGATIVE_SOME = "Likely negative: {hours} Paris."
 RECORD_STRIP = "Live record against the EEX future: {text}."
 RECORD_STRIP_READY = ("Live record, {n} windows: right on direction {hit:.0f}% of the time, {pnl:+.2f} EUR/MWh per window, error "
@@ -98,7 +98,12 @@ INPUTS_CAPTION = "Model inputs at issue time, from ENTSO-E and Open-Meteo. Chang
 NEIGHBOUR_NAMES = {"DE": "Germany", "BE": "Belgium", "ES": "Spain", "IT-North": "Italy North", "CH": "Switzerland"}
 NEIGHBOURS_LINE = "Previous-day base, EUR/MWh (France minus neighbour): {values}."
 
-TRACK_INTRO = "Each figure scores the forecast published here before 11:15 Paris against the auction result."
+TRACK_INTRO = ("The headline market record is a walk-forward reissue: each delivery day from {period} forecast again with a model "
+               "fitted only on earlier data. The live records of the forecasts published here before 11:15 Paris are still collecting.")
+UNIT_EEX = "EEX windows (one per day and contract, base or peak; pre-market forecasts only)"
+UNIT_MAE = "days with a pre-market forecast scored against the auction"
+UNIT_PROB = "days with probabilities scored (the pre-market version, or the latest where none)"
+UNIT_BATTERY = "days valued (the pre-market version, or the latest where none)"
 MARKET_HEADER = "Versus the market"
 MARKET_TAKEAWAY = ("The model does not beat the traded price: over {windows} walk-forward windows it was right on direction {hit:.0f}% "
                    "of the time and {pnl_phrase} per window.")
@@ -111,7 +116,7 @@ MARKET_CAUSE = ("By 11:15 the market has moved away from the previous day's auct
 MARKET_RULE = ("Long when the forecast is above the 11:15 to 12:00 Paris VWAP of the EEX French day-ahead future, short when below, "
                "settled at the auction. Walk-forward days use a model fitted on earlier data only.")
 MARKET_WHY = "Why the backtest error is lower"
-MARKET_SIGNIFICANT = "Is it significant?"
+MARKET_SIGNIFICANT = "Is {hit:.0f}% just bad luck?"
 MARKET_LIVE = "Live"
 
 ERROR_HEADER = "Model error against the auction"
@@ -122,18 +127,25 @@ ERROR_CHART = "Pre-market forecast and auction price, last {days} days"
 ERROR_DAILY_CAPTION = "Daily MAE against the auction, with a 7-day rolling mean."
 
 CALIB_HEADER = "Negative-price calibration"
-CALIB_TAKEAWAY = ("On the holdout the calibrated probability scores a Brier skill of {bss:+.2f} against climatology and {bss7:+.2f} "
-                  "against the last 7 days.")
+CALIB_TAKEAWAY = "On the holdout the probability scores a Brier skill of {bss:+.2f} against climatology and {bss7:+.2f} against the last 7 days."
+CALIB_DETAIL = ("Close to the diagonal below 40%, where {low:,} of {total:,} holdout hours sit (gaps of at most {gap:.0f} points). "
+                "Under-confident above 40%: in those {high} hours prices turned negative more often than forecast, for example "
+                "{fc:.0f}% forecast and {obs:.0f}% observed over {n} hours.")
+CALIB_DETAIL_MIXED = ("Close to the diagonal below 40%, where {low:,} of {total:,} holdout hours sit (gaps of at most {gap:.0f} points); "
+                      "the {high} hours above 40% are too few to read closely.")
 CALIB_NOTE = ("Benchmarks: the frequency at that hour and month over the past year, and over the last 7 days. Positive skill beats "
-              "the benchmark. Calibrated monthly on {pairs:,} out-of-sample hours. Each point groups hours with a similar forecast; "
-              "on the diagonal, a forecast of 30% came true 30% of the time.")
+              "the benchmark. Calibrated monthly on {pairs:,} out-of-sample hours. Marker size grows with the number of hours in a bin.")
 
 SHAPE_HEADER = "Shape and battery"
 SHAPE_TAKEAWAY = ("A shape model beat yesterday's shape on the selection window ({sel_model:.1f} against {sel_d1:.1f} EUR/day) but not "
                   "on the holdout ({hold_model:.1f} against {hold_d1:.1f} EUR/day).")
-SHAPE_NOTE = ("The shape is each hour's price minus the day's mean. The battery is 1 MW / 2 MWh at 88% round-trip efficiency: two "
-              "hours charging, then two discharging, chosen on the forecast and settled at the auction.")
-SHAPE_METHODS = (("model", "Shape model"), ("d1", "Yesterday's shape"), ("same_type", "Last day of the same type"),
+SHAPE_NOTE = ("The shape is each hour's price minus the day's mean. The battery is 1 MW / 2 MWh at {rt} round-trip efficiency, one "
+              "cycle a day on day-ahead prices only: two hours charging, then two discharging, chosen on the forecast and settled at "
+              "the auction. No degradation, no ancillary services.")
+SHAPE_WHY = ("On the holdout the model's average shape error was lower ({m:.2f} against {d1:.2f} EUR/MWh) yet the battery earned less: "
+             "battery value depends on the cheapest and most expensive hours and the day's spread, where yesterday's shape did better (spread "
+             "error {ms:.1f} against {ds:.1f} EUR/MWh).")
+SHAPE_METHODS = (("model", "Shape model"), ("d1", "Yesterday's shape"), ("same_type", "Last similar day (same day type)"),
                  ("perfect", "Perfect foresight"))
 SHAPE_LIVE_READY = "Live, {n} days: {value:.1f} EUR/day, {share:.0f}% of perfect foresight; yesterday's shape {d1:.1f} EUR/day."
 SHAPE_LIVE_NOTE = "The live record uses the shape of the level forecast; the shape model runs in the backtest only."
@@ -144,6 +156,8 @@ METHOD_MD = """
 - The auction closes at 12:00 Paris the day before delivery.
 - Inputs are dated by publication time; a test fails if any is stamped after the gate.
 - The forecast that counts is issued 10:05 to 11:00 Paris, before the EEX window at 11:15.
+- Since 1 Oct 2025 the auction clears 15-minute products; the model forecasts hourly prices and is scored against the hourly average
+  of the four quarter-hours.
 
 #### Model
 - LightGBM on hourly data since 2021, refitted monthly.
@@ -164,8 +178,15 @@ METHOD_MD = """
   average. They removed the systematic lag on the selection window but not the error on the holdout (26.19 against 25.81 EUR/MWh),
   so the model is unchanged.
 - Weakest in regime changes, the top 5% price hours and low-price weekend and holiday middays.
-- The error band is past error, not a probability forecast. Quantiles and a spike probability are computed but not shown until
-  they pass their tests.
+- Quantiles and a spike probability are computed but not shown until they pass their tests.
+- Why the backtest error is lower than the trading record's, and whether the hit rate is significant: see Track record.
+
+#### Next steps (not yet tested)
+- Fresher weather: the D-1 00Z run instead of runs issued two days ahead (later D-1 runs arrive after the 10:05 issue time).
+- Nuclear availability from outage notices: snapshots saved daily since 10 Oct 2026; ENTSO-E serves only the latest revision, so the
+  history has to be built forward.
+- Gas price: the free history did not match the exchange index closely enough under the pre-registered check.
+- Carbon (EUA price) was tested and rejected on the selection window.
 """
 METHOD_SOURCES = "Data sources and attribution"
 SOURCES = ["ENTSO-E Transparency Platform: prices, load forecast, generation. Cited as the source under its terms.",
@@ -199,9 +220,10 @@ def quant_item3(walkforward: dict) -> str:
         c = walkforward["comparison"]
         sel, rec = c["selection"], c["record_days"]
         return QUANT_ITEM3.format(sel_mae=sel["hourly_mae_model"], sel_period=_period(sel), sel_price=sel["mean_price_eur_mwh"],
-                                  rec_period=_period(rec), rec_price=rec["mean_price_eur_mwh"], rec_move=rec["mean_abs_daily_change_eur_mwh"],
-                                  sel_move=sel["mean_abs_daily_change_eur_mwh"], sel_share=100 * sel["hourly_mae_share_of_price"],
-                                  rec_share=100 * rec["hourly_mae_share_of_price"])
+                                  sel_share=100 * sel["hourly_mae_model"] / sel["mean_price_eur_mwh"], rec_mae=rec["hourly_mae_model"],
+                                  rec_price=rec["mean_price_eur_mwh"], rec_share=100 * rec["hourly_mae_model"] / rec["mean_price_eur_mwh"],
+                                  rec_move=rec["mean_abs_daily_change_eur_mwh"], sel_move=sel["mean_abs_daily_change_eur_mwh"],
+                                  record_mae=walkforward["model_mae"])
     except (KeyError, TypeError, ZeroDivisionError, ValueError):
         return PENDING
 
@@ -211,7 +233,7 @@ def quant_item4(walkforward: dict) -> str:
     try:
         w = walkforward
         lo, hi = w["bootstrap"]["mean_pnl_per_mwh"]["ci95"]
-        return QUANT_ITEM4.format(hit=100 * w["hit_rate"], windows=w["windows"], hits=w["hits"], p=w["binomial_p_two_sided"],
+        return QUANT_ITEM4.format(windows=w["windows"], base_windows=w["base_only"]["windows"], p=w["binomial_p_two_sided"],
                                   p_base=w["base_only"]["binomial_p_two_sided"], lo=lo, hi=hi)
     except (KeyError, TypeError, ValueError):
         return PENDING
@@ -219,7 +241,7 @@ def quant_item4(walkforward: dict) -> str:
 
 # ============================================================================ chart style (one template for every chart)
 BLUE, ORANGE, GREY, AQUA = "#3987e5", "#eb6834", "#898781", "#1baf7a"
-BAND = ("rgba(57,135,229,0.14)", "rgba(57,135,229,0.30)")
+BAND = ("rgba(57,135,229,0.22)", "rgba(57,135,229,0.50)")
 GRID = "rgba(137,135,129,0.25)"
 CHART_CONFIG = {"displayModeBar": False, "responsive": True}
 
@@ -251,10 +273,10 @@ def live_gate(n, needed: int, unit: str) -> dict:
     return {"n": n, "needed": needed, "ready": n >= needed, "text": COLLECTING.format(n=n, needed=needed, unit=unit)}
 
 
-def tile(label: str, value: str, note: str | None = None, help: str | None = None) -> None:
+def tile(label: str, value: str, note: str | None = None, help: str | None = None, width: int = 165) -> None:
     """A stat tile; the note sits under the value as plain grey text, without a delta arrow."""
     try:
-        st.metric(label, value, note, delta_color="off", delta_arrow="off", help=help, width=165)
+        st.metric(label, value, note, delta_color="off", delta_arrow="off", help=help, width=width)
     except TypeError:  # older Streamlit without delta_arrow or width
         st.metric(label, value, note, delta_color="off", help=help)
 
@@ -265,6 +287,14 @@ def tiles():
         return st.container(horizontal=True, gap="medium")
     except TypeError:
         return st.container()
+
+
+PAGES: dict = {}  # filled by main(): the st.Page objects, for in-page links (the top navigation collapses on a phone)
+
+
+def link(key: str, label: str) -> None:
+    if key in PAGES:
+        st.page_link(PAGES[key], label=label, icon=":material/arrow_forward:")
 
 
 def day_text(day) -> str:
@@ -680,13 +710,13 @@ def summary_line(result, current, previous, day_names=None, min_step=MIN_STEP) -
         return ""
     change = result["change"]
     head = ("Model forecast unchanged" if abs(change) < min_step
-            else f"Model forecast {'up' if change > 0 else 'down'} {abs(change):.0f} EUR/MWh")
+            else f"Model forecast {'up' if change > 0 else 'down'} {abs(change):.1f} EUR/MWh")
     top = sorted((s for s in result["steps"] if abs(s["change"]) >= min_step), key=lambda s: -abs(s["change"]))[:2]
     if not top:
         return head + "."
     if top[0]["group"] == FRENCH_GROUP:
         head += ", mostly the model following the market"
-    return f"{head}: " + ", ".join(f"{s['group'].split(' (')[0]} {s['change']:+.0f}" for s in top) + "."
+    return f"{head}: " + ", ".join(f"{s['group'].split(' (')[0]} {s['change']:+.1f}" for s in top) + "."
 
 
 def drivers_of(drivers: pd.DataFrame, day: str, issued: str, feature_set: str) -> pd.DataFrame:
@@ -725,21 +755,34 @@ def brief_from_published(data: dict) -> dict:
     return out
 
 
+GROUP_ALSO = {FRENCH_GROUP: "; hourly lags and older days also count", "neighbour prices": "; other zones and spreads also count"}
+
+
+def driver_label(group: str, current, previous, day_names) -> str:
+    name = f"<b>{GROUP_LABELS.get(group, group.capitalize())}</b>"
+    if group in (REFIT_STEP, "calendar"):
+        return name
+    return f"{name}<br><span style='font-size:11px'>{step_phrase(group, current, previous, day_names)}{GROUP_ALSO.get(group, '')}</span>"
+
+
 def drivers_chart(result: dict, current, previous, day_names) -> go.Figure:
-    """Horizontal bars: each group's step in EUR/MWh, largest on top, signed labels; start and end level in the title."""
+    """Horizontal bars: each group's step in EUR/MWh, largest on top, signed values, each label written above its bar so it keeps
+    the full width on a phone; start and end level in the title."""
     steps = sorted((s for s in result["steps"] if round(s["change"], 1) != 0), key=lambda s: abs(s["change"]))
-    labels = [f"<b>{GROUP_LABELS.get(s['group'], s['group'].capitalize())}</b><br>{step_phrase(s['group'], current, previous, day_names)}"
-              if s["group"] not in (REFIT_STEP, "calendar") else f"<b>{GROUP_LABELS.get(s['group'], s['group'])}</b>" for s in steps]
     values = [s["change"] for s in steps]
-    fig = go.Figure(go.Bar(y=labels, x=values, orientation="h", marker_color=[ORANGE if v > 0 else BLUE for v in values],
+    rows = list(range(len(steps)))
+    fig = go.Figure(go.Bar(y=rows, x=values, orientation="h", width=0.32, marker_color=[ORANGE if v > 0 else BLUE for v in values],
                            text=[f"{v:+.1f}" for v in values], textposition="outside", cliponaxis=False,
                            hovertemplate="%{x:+.1f} EUR/MWh<extra></extra>"))
+    for row, step in zip(rows, steps):
+        fig.add_annotation(text=driver_label(step["group"], current, previous, day_names), xref="paper", x=0, xanchor="left", y=row + 0.18,
+                           yanchor="bottom", showarrow=False, align="left", font=dict(size=12))
     title = f"Base forecast {result['start']:.1f} to {result['end']:.1f} EUR/MWh ({result['change']:+.1f})"
-    fig = style(fig, "", "EUR/MWh", height=max(220, 62 * len(steps) + 90), title=title)
+    fig = style(fig, "", "EUR/MWh", height=max(220, 74 * len(steps) + 80), title=title)
     span = max([abs(v) for v in values] + [1.0])
-    fig.update_xaxes(range=[-1.35 * span, 1.35 * span], showgrid=True, gridcolor=GRID, zeroline=True, zerolinecolor=GREY, zerolinewidth=1)
-    fig.update_yaxes(showgrid=False)
-    fig.update_layout(showlegend=False, hovermode="closest", bargap=0.35)
+    fig.update_xaxes(range=[-1.25 * span, 1.25 * span], showgrid=True, gridcolor=GRID, zeroline=True, zerolinecolor=GREY, zerolinewidth=1)
+    fig.update_yaxes(showgrid=False, showticklabels=False, range=[-0.4, len(steps) - 0.05])
+    fig.update_layout(showlegend=False, hovermode="closest")
     return fig
 
 
@@ -761,7 +804,7 @@ def pnl_phrase(pnl: float) -> str:
 
 def live_market_text(market: dict) -> str:
     """The live record against EEX: the collecting line below MIN_MARKET_WINDOWS, the pooled aggregates from there."""
-    gate = live_gate(market.get("scored_windows", market.get("scored_days", 0)), MIN_MARKET_WINDOWS, "windows")
+    gate = live_gate(market.get("scored_windows", market.get("scored_days", 0)), MIN_MARKET_WINDOWS, UNIT_EEX)
     if gate["ready"] and market.get("hit_rate") is not None:
         return RECORD_STRIP_READY.format(n=gate["n"], hit=100 * market["hit_rate"], pnl=market["mean_pnl_per_mwh"],
                                          model=market["model_mae"], market=market["market_mae"])
@@ -769,6 +812,22 @@ def live_market_text(market: dict) -> str:
 
 
 # ============================================================================ pages
+def calibration_split(backtest: dict, label: str = "holdout") -> dict | None:
+    """The calibrated reliability bins of a window split at 40%: hours and largest gap below, hours and the largest bin above."""
+    rel = pd.DataFrame((((backtest or {}).get(label) or {}).get("recalibration") or {}).get("calibrated", {}).get("reliability", []))
+    if rel.empty:
+        return None
+    rel = rel.dropna(subset=["mean_forecast", "observed_frequency"])
+    low, high = rel[rel["mean_forecast"] < 0.4], rel[rel["mean_forecast"] >= 0.4]
+    out = {"total": int(rel["n"].sum()), "low": int(low["n"].sum()), "high": int(high["n"].sum()),
+           "gap": float(100 * (low["observed_frequency"] - low["mean_forecast"]).abs().max()) if len(low) else float("nan"),
+           "under": bool(len(high) and (high["observed_frequency"] > high["mean_forecast"]).all())}
+    if len(high):
+        top = high.loc[high["n"].idxmax()]
+        out.update(fc=100 * float(top["mean_forecast"]), obs=100 * float(top["observed_frequency"]), n=int(top["n"]))
+    return out
+
+
 def findings(data: dict) -> None:
     st.subheader(FINDINGS_HEADER)
     sel, hold = (data["shape_backtest"] or {}).get("selection"), (data["shape_backtest"] or {}).get("holdout")
@@ -776,18 +835,17 @@ def findings(data: dict) -> None:
         st.markdown(f"**{F1_TITLE}**")
         if sel and hold:
             b, h = sel["battery"], hold["battery"]
-            real = (h["model"]["eur_per_day"] < h["d1"]["eur_per_day"]
-                    and ((hold.get("paired") or {}).get("battery_value", {}).get("d1") or {}).get("distinguishable_from_zero"))
-            st.markdown(F1_BODY.format(days=b["days"], model=b["model"]["eur_per_day"], d1=b["d1"]["eur_per_day"],
-                                       perfect=b["perfect_eur_per_day"], hold_days=h["days"], hold_model=h["model"]["eur_per_day"],
-                                       hold_d1=h["d1"]["eur_per_day"], verdict=F1_VERDICT if real else ""))
+            paired = ((hold.get("paired") or {}).get("battery_value") or {}).get("d1") or {}
+            interval = (F1_INTERVAL.format(diff=paired["mean_difference"], lo=paired["ci95_low"], hi=paired["ci95_high"])
+                        if {"mean_difference", "ci95_low", "ci95_high"} <= set(paired) else "")
+            st.markdown(F1_BODY.format(days=b["days"], model=b["model"]["eur_per_day"], d1=b["d1"]["eur_per_day"], hold_days=h["days"],
+                                       hold_model=h["model"]["eur_per_day"], hold_d1=h["d1"]["eur_per_day"], interval=interval))
     with st.container(border=True):
         st.markdown(f"**{F2_TITLE}**")
         r = ((data["prob_backtest"] or {}).get("holdout") or {}).get("recalibration")
-        calibration = ((data["status"].get("probabilistic") or {}).get("calibration")) or {}
-        if r:
-            st.markdown(F2_BODY.format(events=r["events"], hours=r["hours"], bss=r["calibrated"]["bss_vs_clim"],
-                                       bss7=r["calibrated"]["bss_vs_last7"], pairs=calibration.get("pairs_hours", 0)))
+        split = calibration_split(data["prob_backtest"])
+        if r and split:
+            st.markdown(F2_BODY.format(events=r["events"], hours=r["hours"], bss=r["calibrated"]["bss_vs_clim"], high=split["high"]))
     with st.container(border=True):
         st.markdown(f"**{F3_TITLE}**")
         m = market_record(data["walkforward"])
@@ -795,7 +853,8 @@ def findings(data: dict) -> None:
             st.markdown(NOT_AVAILABLE)
         else:
             st.markdown(F3_BODY.format(windows=m["windows"], hit=100 * m["hit_rate"], pnl_phrase=pnl_phrase(m["mean_pnl_per_mwh"]),
-                                       model_mae=m["model_mae"], market_mae=m["market_mae"], share=m["share"]))
+                                       share=m["share"]))
+    link("track", DETAILS_LINK)
 
 
 def overview() -> None:
@@ -825,8 +884,10 @@ def overview() -> None:
         tile("Base", eur(level["base"]), "EUR/MWh", help="Mean of the 24 hourly forecasts.")
         tile("Peak", eur(level["peak"]), "EUR/MWh", help="Mean of 08:00 to 20:00 Paris.")
         tile("Cheapest hour", f"{low['forecast']:.1f}", f"{int(low['hour']):02d}:00, EUR/MWh")
-        tile("Dearest hour", f"{high['forecast']:.1f}", f"{int(high['hour']):02d}:00, EUR/MWh")
-        tile("Likely negative hours", str(len(negative)), "5% chance or more", help="Calibrated probability of 5% or more.")
+        tile("Most expensive hour", f"{high['forecast']:.1f}", f"{int(high['hour']):02d}:00, EUR/MWh")
+        tile("Hours with a 5%+ chance of a negative price", str(len(negative)), help="Calibrated probability of 5% or more.", width=340)
+    if not _nan(level["peak"]) and not _nan(level["base"]) and level["peak"] < level["base"]:
+        st.caption(PEAK_BELOW_BASE)
     if negative:
         st.markdown(NEGATIVE_SOME.format(hours=", ".join(f"{h['hour']:02d}:00 ({format_probability(h['p'])})" for h in negative)))
     else:
@@ -899,12 +960,12 @@ def market_section(data: dict) -> None:
                                                  base_hit=100 * base["hit_rate"], base_pnl=base["mean_pnl_per_mwh"]))
         if m["share"] is not None and m["same"] is not None:
             st.markdown(MARKET_CAUSE.format(share=m["share"], same=m["same"], windows=m["windows"]))
-        for title, text in ((MARKET_WHY, quant_item3(w)), (MARKET_SIGNIFICANT, quant_item4(w))):
+        for title, text in ((MARKET_WHY, quant_item3(w)), (MARKET_SIGNIFICANT.format(hit=100 * m["hit_rate"]), quant_item4(w))):
             if not pending(text):
                 with st.expander(title):
                     st.markdown(text)
     market = data["status"].get("market") or data.get("market") or {}
-    gate = live_gate(market.get("scored_windows", market.get("scored_days", 0)), MIN_MARKET_WINDOWS, "windows")
+    gate = live_gate(market.get("scored_windows", market.get("scored_days", 0)), MIN_MARKET_WINDOWS, UNIT_EEX)
     st.markdown(f"**{MARKET_LIVE}:** " + (live_market_text(market) if gate["ready"] else lower_first(gate["text"]) + "."))
     st.caption(MARKET_RULE + " " + EEX_ATTRIBUTION)
 
@@ -915,7 +976,7 @@ def error_section(data: dict) -> None:
     previous_set = status.get("fallback_model_file", "").split("/")[-1].replace(".txt", "")
     record, tables = live_record(data.get("scores_all", data["scores"]), status.get("feature_set", ""), previous_set)
     head = record["default"]
-    gate = live_gate(head.get("days_in_window", 0), MIN_LIVE_DAYS, "days")
+    gate = live_gate(head.get("days_in_window", 0), MIN_LIVE_DAYS, UNIT_MAE)
     st.markdown(f"**{MARKET_LIVE}:** " + (ERROR_LIVE.format(mae=head["model_mae"], n=gate["n"]) if gate["ready"] else lower_first(gate["text"]) + "."))
     holdout = (status.get("model") or {}).get("frozen_holdout") or {}
     if holdout.get("mae") is not None:
@@ -936,7 +997,9 @@ def error_section(data: dict) -> None:
     forecasts, actuals = data["forecasts"], data["actuals"]
     if forecasts.empty or actuals.empty:
         return
-    joined = headline_rows(forecasts).merge(actuals[["timestamp_utc", "price"]], on="timestamp_utc", how="inner")
+    heads = headline_versions(forecasts)
+    heads = heads[heads["premarket"].astype(bool)][["delivery_day", "issued_at_utc"]]  # days issued only after the window are not drawn
+    joined = forecasts.merge(heads, on=["delivery_day", "issued_at_utc"]).merge(actuals[["timestamp_utc", "price"]], on="timestamp_utc")
     if joined.empty:
         return
     joined["t"] = pd.to_datetime(joined["timestamp_utc"], utc=True).dt.tz_convert(PARIS)
@@ -958,6 +1021,9 @@ def calibration_section(data: dict) -> None:
     r = (backtest.get("holdout") or {}).get("recalibration")
     if r:
         st.markdown("**" + CALIB_TAKEAWAY.format(bss=r["calibrated"]["bss_vs_clim"], bss7=r["calibrated"]["bss_vs_last7"]) + "**")
+    split = calibration_split(backtest)
+    if split:
+        st.markdown((CALIB_DETAIL if split["under"] else CALIB_DETAIL_MIXED).format(**split))
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", line=dict(color=GREY, width=1, dash="dot"), name="Perfect",
                              hoverinfo="skip"))
@@ -966,8 +1032,9 @@ def calibration_section(data: dict) -> None:
         if rel.empty:
             continue
         rel = rel.dropna(subset=["mean_forecast", "observed_frequency"])
+        sizes = [6 + 3.2 * math.log10(max(int(n), 1)) for n in rel["n"]]  # sparse bins read as small points
         fig.add_trace(go.Scatter(x=rel["mean_forecast"], y=rel["observed_frequency"], mode="lines+markers", name=name,
-                                 line=dict(color=color, width=2), marker=dict(size=8), customdata=rel["n"],
+                                 line=dict(color=color, width=1.5), marker=dict(size=sizes, line=dict(width=0)), customdata=rel["n"],
                                  hovertemplate="forecast %{x:.0%}, observed %{y:.0%}, %{customdata:,} hours<extra></extra>"))
     fig = style(fig, "Observed frequency", "Forecast probability", height=340, title="Reliability after recalibration")
     fig.update_xaxes(range=[0, 1], tickformat=".0%", showgrid=True, gridcolor=GRID)
@@ -983,7 +1050,7 @@ def calibration_section(data: dict) -> None:
     calibration = ((data["status"].get("probabilistic") or {}).get("calibration")) or {}
     st.caption(CALIB_NOTE.format(pairs=calibration.get("pairs_hours", 0)))
     live = ((data["status"].get("probabilistic") or {}).get("live")) or {}
-    gate = live_gate(live.get("days", 0), MIN_LIVE_DAYS, "days")
+    gate = live_gate(live.get("days", 0), MIN_LIVE_DAYS, UNIT_PROB)
     negative = live.get("negative") or {}
     text = (f"{gate['n']} days, {negative.get('events', 0)} negative hours, Brier {negative.get('brier', float('nan')):.4f}."
             if gate["ready"] else lower_first(gate["text"]) + ".")
@@ -1018,9 +1085,16 @@ def shape_section(data: dict) -> None:
                  "Holdout": hold["shape"][key]["shape_mae"] if hold else None} for key, name in SHAPE_METHODS[:3]]
         st.dataframe(pd.DataFrame(rows), hide_index=True, column_config={"Selection": st.column_config.NumberColumn(format="%.2f"),
                                                                         "Holdout": st.column_config.NumberColumn(format="%.2f")})
-    st.caption(SHAPE_NOTE)
+    if hold:
+        hs = hold["shape"]
+        if (hs["model"]["shape_mae"] < hs["d1"]["shape_mae"] and hold["battery"]["model"]["eur_per_day"] < hold["battery"]["d1"]["eur_per_day"]
+                and hs["model"]["spread_error"] > hs["d1"]["spread_error"]):
+            st.markdown(SHAPE_WHY.format(m=hs["model"]["shape_mae"], d1=hs["d1"]["shape_mae"], ms=hs["model"]["spread_error"],
+                                         ds=hs["d1"]["spread_error"]))
+    found = re.search(r"(\d+)% round-trip", ((data["shape"] or {}).get("definitions") or {}).get("battery", ""))
+    st.caption(SHAPE_NOTE.format(rt=f"{found.group(1)}%" if found else "the stated"))
     live = (data["shape"] or {}).get("live") or {}
-    gate = live_gate(live.get("days", 0), MIN_LIVE_DAYS, "days")
+    gate = live_gate(live.get("days", 0), MIN_LIVE_DAYS, UNIT_BATTERY)
     if gate["ready"]:
         b = live["battery"]
         text = SHAPE_LIVE_READY.format(n=gate["n"], value=b["model"]["eur_per_day"], share=100 * (b["model"]["share_of_perfect"] or 0),
@@ -1030,7 +1104,7 @@ def shape_section(data: dict) -> None:
     st.markdown(f"**{MARKET_LIVE}:** {text} {SHAPE_LIVE_NOTE}")
     daily = pd.DataFrame(live.get("daily") or [])
     if not daily.empty:
-        with st.expander("Live battery value per day" + ("" if gate["ready"] else f" ({gate['text'][0].lower() + gate['text'][1:]})")):
+        with st.expander("Live battery value per day" + ("" if gate["ready"] else f" (n = {gate['n']}, collecting)")):
             fig = go.Figure()
             x = pd.to_datetime(daily["delivery_day"]).dt.strftime("%d %b")
             for column, name, color in (("value_model", SHAPE_LIVE_SERIES, BLUE), ("value_d1", "Yesterday's shape", GREY),
@@ -1045,7 +1119,9 @@ def shape_section(data: dict) -> None:
 def track_record() -> None:
     data = data_or_stop()
     st.title("Track record")
-    st.markdown(TRACK_INTRO)
+    m = market_record(data["walkforward"])
+    if m is not None:
+        st.markdown(TRACK_INTRO.format(period=m["period"]))
     market_section(data)
     error_section(data)
     calibration_section(data)
@@ -1056,9 +1132,6 @@ def method() -> None:
     data = data_or_stop()
     st.title("Method")
     st.markdown(METHOD_MD)
-    for text in (quant_item3(data["walkforward"]), quant_item4(data["walkforward"])):
-        if not pending(text):
-            st.markdown(f"- {text}")
     st.markdown(f"#### {METHOD_SOURCES}")
     for line in SOURCES + [EEX_ATTRIBUTION]:
         st.markdown(f"- {line}")
@@ -1070,11 +1143,16 @@ def method() -> None:
 
 def main() -> None:
     st.set_page_config(page_title=TITLE, page_icon=":material/bolt:", layout="centered")
-    pages = [st.Page(overview, title="Overview", icon=":material/bolt:", default=True),
-             st.Page(track_record, title="Track record", icon=":material/insights:"),
-             st.Page(method, title="Method", icon=":material/menu_book:")]
-    st.navigation(pages, position="top").run()
+    PAGES.update(overview=st.Page(overview, title="Overview", icon=":material/bolt:", default=True),
+                 track=st.Page(track_record, title="Track record", icon=":material/insights:"),
+                 method=st.Page(method, title="Method", icon=":material/menu_book:"))
+    current = st.navigation(list(PAGES.values()), position="top")
+    current.run()
     st.divider()
+    with tiles():
+        for key, page in PAGES.items():
+            if page.title != current.title:
+                st.page_link(page, label=page.title, icon=page.icon)
     st.caption(AUTHOR_LINE)
 
 
