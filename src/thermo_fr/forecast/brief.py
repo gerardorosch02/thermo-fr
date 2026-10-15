@@ -1,11 +1,11 @@
-"""The morning brief: fair value, what changed in the fundamentals, and why the fair value moved.
+"""The morning brief: the model forecast, what changed in the fundamentals, and why the model forecast moved.
 
 Written for a power trader and shown as the first page of both dashboards. Everything here is arithmetic on
 what the morning run already stores; nothing calls an API.
 
-Why the fair value moved comes from LightGBM's own contributions (`Booster.predict(pred_contrib=True)`): for
+Why the model forecast moved comes from LightGBM's own contributions (`Booster.predict(pred_contrib=True)`): for
 every hour the prediction is exactly the sum of one contribution per feature plus the model's expected value,
-so the daily mean prediction (the base fair value) is the sum of the daily mean contributions. The morning
+so the daily mean prediction (the base model forecast) is the sum of the daily mean contributions. The morning
 run stores those daily means per feature next to each version (`forecast_drivers`), together with the daily
 mean of the feature itself, and the brief splits the change between yesterday's pre-market version and
 today's into feature groups (GROUPS below). The group changes sum to the change in the base prediction by
@@ -42,13 +42,13 @@ _GROUP_OF = {feature: group for group, features in GROUPS.items() for feature in
 
 # the "What changed" table: label, unit, feature whose daily mean is shown, divisor; the neighbour rows add the FR spread
 FUNDAMENTALS = [
-    ("French D-1 base", "EUR/MWh", "price_lag1_mean", 1.0),  # first: the spreads below are measured against it
+    ("French base, previous day", "EUR/MWh", "price_lag1_mean", 1.0),  # first: the spreads below are measured against it
     ("Load forecast", "GW", "load_fc_mw", 1000.0),
     ("Temperature", "C", "temp_c", 1.0),
-    ("Wind proxy", "GW", "wind_proxy_mw", 1000.0),
-    ("Solar proxy", "GW", "solar_proxy_mw", 1000.0),
+    ("Wind estimate", "GW", "wind_proxy_mw", 1000.0),
+    ("Solar estimate", "GW", "solar_proxy_mw", 1000.0),
     ("Latest nuclear output", "GW", "nuclear_d1_early_mw", 1000.0),
-    ("Residual load", "GW", "residual_v2_mw", 1000.0),
+    ("Load minus wind, solar and nuclear", "GW", "residual_v2_mw", 1000.0),
 ]
 NEIGHBOUR_ROWS = [("DE", "de_lu"), ("BE", "be"), ("ES", "es"), ("IT-North", "it_north"), ("CH", "ch")]
 DRIVER_COLUMNS = ["feature", "value", "contribution"]
@@ -92,7 +92,7 @@ def grouped(drivers: pd.DataFrame | None) -> pd.Series:
     return out
 
 
-def fair_value(curve: pd.DataFrame) -> dict:
+def model_forecast(curve: pd.DataFrame) -> dict:
     """Base, peak (08:00 to 20:00 Paris) and off-peak means of an hourly forecast curve with `hour` and `forecast` columns."""
     if curve is None or curve.empty:
         return {"base": float("nan"), "peak": float("nan"), "offpeak": float("nan"), "hours": 0}
@@ -118,7 +118,7 @@ def negative_hours(by_hour: pd.DataFrame | None, threshold: float = NEGATIVE_THR
 
 
 def waterfall(previous: pd.DataFrame | None, current: pd.DataFrame | None) -> dict:
-    """From yesterday's base fair value to today's, one step per feature group, in EUR/MWh.
+    """From yesterday's base model forecast to today's, one step per feature group, in EUR/MWh.
 
     Returns {"start", "end", "change", "steps": [{"group", "change"}], "complete"}; `complete` is False when
     either driver table is missing, in which case the steps are empty. The expected value's change, non-zero only
@@ -179,55 +179,60 @@ def _delta(current, previous, feature: str, divisor: float = 1.0) -> float:
 
 
 def step_phrase(group: str, current: pd.DataFrame | None, previous: pd.DataFrame | None, day_names: tuple[str, str] | None = None) -> str:
-    """The plain-English cause behind one group's step: the fundamental and how much it moved, where one stands for the group."""
-    def with_change(prefix: str, feature: str, unit: str, divisor: float = 1.0, digits: int = 1) -> str:
+    """The plain-English cause behind one group's step, e.g. "wind 5.8 GW higher" or "French base price 9 EUR/MWh lower"."""
+    def moved(name: str, feature: str, unit: str, divisor: float = 1.0, digits: int = 1) -> str:
         change = _delta(current, previous, feature, divisor)
-        return prefix if np.isnan(change) else f"{prefix} {change:+.{digits}f} {unit}".rstrip()
+        if np.isnan(change):
+            return name
+        if round(abs(change), digits) == 0:
+            return f"{name} unchanged"
+        return f"{name} {abs(change):.{digits}f} {unit} {'higher' if change > 0 else 'lower'}"
 
     if group == "wind":
-        return with_change("wind", "wind_proxy_mw", "GW", 1000.0)
+        return moved("wind", "wind_proxy_mw", "GW", 1000.0)
     if group == "solar":
-        return with_change("solar", "solar_proxy_mw", "GW", 1000.0)
+        return moved("solar", "solar_proxy_mw", "GW", 1000.0)
     if group == "nuclear":
-        return with_change("nuclear", "nuclear_d1_early_mw", "GW", 1000.0)
+        return moved("nuclear output", "nuclear_d1_early_mw", "GW", 1000.0)
     if group == "load and temperature":
         load, temp = _delta(current, previous, "load_fc_mw", 1000.0), _delta(current, previous, "temp_c")
         if not np.isnan(load) and (np.isnan(temp) or abs(load) >= 0.3):
-            return f"load {load:+.1f} GW"
+            return moved("load", "load_fc_mw", "GW", 1000.0)
         if not np.isnan(temp):
-            return f"temperature {temp:+.1f} C"
+            return moved("temperature", "temp_c", "C")
         return "load and temperature"
     if group == FRENCH_GROUP:
-        return with_change("French D-1 base", "price_lag1_mean", "", 1.0, 0)
+        return moved("French base price", "price_lag1_mean", "EUR/MWh", 1.0, 0)
     if group == "neighbour prices":
-        return with_change("neighbour D-1 prices, DE", "price_de_lu_lag1", "", 1.0, 0)
+        return moved("German base price", "price_de_lu_lag1", "EUR/MWh", 1.0, 0)
     if group == "calendar":
-        return f"calendar ({day_names[0]} to {day_names[1]})" if day_names else "calendar"
+        return f"calendar, {day_names[0]} to {day_names[1]}" if day_names else "calendar"
     return group
 
 
 def summary_line(result: dict, current: pd.DataFrame | None, previous: pd.DataFrame | None, day_names: tuple[str, str] | None = None,
                  min_step: float = MIN_STEP) -> str:
-    """One line from the two largest steps, e.g. "Fair value down 14: wind +5.8 GW (-11), French D-1 base -9 (-4)".
+    """One line from the two largest steps, e.g. "Model forecast down 14 EUR/MWh: wind -11, recent French prices -4."
 
-    When the largest step is the French price lags, the line says so plainly: "Fair value down 14, mostly the model following the
-    market: French D-1 base -9 (-11), wind +5.8 GW (-4)".  The total is -14 here too.
+    When the largest step is the French price lags, the line says so plainly: "Model forecast down 14 EUR/MWh, mostly the model
+    following the market: recent French prices -11, wind -4." step_phrase gives the fundamental behind each group.
     """
     if not result.get("complete"):
         return ""
     change = result["change"]
-    head = "Fair value unchanged" if abs(change) < min_step else f"Fair value {'up' if change > 0 else 'down'} {abs(change):.0f}"
+    head = ("Model forecast unchanged" if abs(change) < min_step
+            else f"Model forecast {'up' if change > 0 else 'down'} {abs(change):.0f} EUR/MWh")
     top = sorted((s for s in result["steps"] if abs(s["change"]) >= min_step), key=lambda s: -abs(s["change"]))[:2]
     if not top:
         return head + "."
     if top[0]["group"] == FRENCH_GROUP:
         head += ", mostly the model following the market"
-    parts = [f"{step_phrase(s['group'], current, previous, day_names)} ({s['change']:+.0f})" for s in top]
+    parts = [f"{s['group'].split(' (')[0]} {s['change']:+.0f}" for s in top]
     return f"{head}: " + ", ".join(parts) + "."
 
 
 def record_strip(summary: dict | None, min_windows: int = 20) -> dict:
-    """The live record against EEX next to the fair value: the window count always, the aggregates once `min_windows` exist.
+    """The live record against EEX next to the model forecast: the window count always, the aggregates once `min_windows` exist.
 
     `summary` is market.evaluate()["summary"] or the "market" section of status.json (keys scored_windows or scored_days,
     hit_rate, mean_pnl_per_mwh, model_mae, market_mae).
@@ -257,18 +262,18 @@ def _hit_rate_phrase(record: dict | None) -> str:
     return "no scored window yet, so no live hit rate"
 
 
-def early_trade(market_rows: pd.DataFrame | None, delivery_day: str, fair_base: float, record: dict | None,
+def early_trade(market_rows: pd.DataFrame | None, delivery_day: str, forecast_base: float, record: dict | None,
                 early_rows: pd.DataFrame | None = None) -> dict | None:
-    """Local dashboard only: the gap between the base fair value and the latest EEX base trade for the delivery day.
+    """Local dashboard only: the gap between the base model forecast and the latest EEX base trade for the delivery day.
 
     Two sources, in order. `early_rows` is the morning snapshot file (market.load_early): its latest trade before the window is one a
-    trader could have seen after the forecast was issued and before the window opened, so the gap is shown as fair value against that
+    trader could have seen after the forecast was issued and before the window opened, so the gap is shown as the model forecast against that
     trade, labelled BEFORE_WINDOW_LABEL with the trade time. Without a snapshot, `market_rows` (the window file) gives the close of the
     latest window, which came after the forecast was issued: labelled WINDOW_CLOSE_LABEL and worded as a check on the forecast, not a
     gap to trade. Both carry the model's live hit rate (`record` is market.evaluate()["summary"]). Returns None without any row.
     Never published: the caller is the local app.
     """
-    if np.isnan(fair_base):
+    if np.isnan(forecast_base):
         return None
     hit = _hit_rate_phrase(record)
     if early_rows is not None and not early_rows.empty:
@@ -276,14 +281,14 @@ def early_trade(market_rows: pd.DataFrame | None, delivery_day: str, fair_base: 
         if not rows.empty:
             last = rows.sort_values("trade_time_utc").iloc[-1]
             price, time = float(last["price"]), str(last["trade_time_paris"])
-            gap = fair_base - price
+            gap = forecast_base - price
             direction = "above" if gap > 0 else "below" if gap < 0 else "at"
             snapshot = pd.Timestamp(last["snapshot_at_utc"]).tz_convert(LOCAL_TZ).strftime("%H:%M")
             count = last.get("trades_before_window")
             traded = "" if _blank_count(count) else f", {int(count)} trades before the window"
             return {"kind": "before_window", "label": BEFORE_WINDOW_LABEL.format(time=time), "price": price, "trade_time_paris": time,
                     "trade_date": str(last.get("trade_date", "")), "gap": gap, "direction": direction,
-                    "text": f"Fair value {abs(gap):.1f} EUR/MWh {direction} that trade (tape read at {snapshot} Paris{traded}); {hit}."}
+                    "text": f"Model forecast {abs(gap):.1f} EUR/MWh {direction} that trade (tape read at {snapshot} Paris{traded}); {hit}."}
     if market_rows is None or market_rows.empty:
         return None
     rows = market_rows[(market_rows["delivery_date"] == delivery_day) & (market_rows["product"] == "base")]
@@ -291,12 +296,12 @@ def early_trade(market_rows: pd.DataFrame | None, delivery_day: str, fair_base: 
         return None
     last = rows.sort_values("window_end").iloc[-1]
     price = float(last["close"])
-    gap = fair_base - price
-    close_side = "below" if gap > 0 else "above" if gap < 0 else "at"  # where the close sits relative to the fair value
+    gap = forecast_base - price
+    close_side = "below" if gap > 0 else "above" if gap < 0 else "at"  # where the close sits relative to the model forecast
     window = f"{last['window_start']}-{last['window_end']}"
     return {"kind": "window_close", "label": WINDOW_CLOSE_LABEL, "price": price, "window": window, "trade_date": str(last.get("trade_date", "")),
             "gap": gap, "direction": "above" if gap > 0 else "below" if gap < 0 else "at",
-            "text": f"The {window} Paris window closed {abs(gap):.1f} EUR/MWh {close_side} fair value. It traded after the forecast was issued, "
+            "text": f"The {window} Paris window closed {abs(gap):.1f} EUR/MWh {close_side} the model forecast. It traded after the forecast was issued, "
                     f"so this checks the forecast and is not a gap to trade; {hit}."}
 
 

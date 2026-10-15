@@ -67,7 +67,7 @@ def test_public_app_carries_the_same_display_functions():
     for p in (0.0, 0.0004, 0.004, 0.01, 0.034, 0.07, 0.17, 0.5, math.nan):
         assert app.format_probability(p) == pt.format_probability(p)
     assert app.probability_axis_top(0.17) == pt.probability_axis_top(0.17) and app.show_half_line(0.6) == pt.show_half_line(0.6)
-    assert app.calibration_sentence(CALIBRATION, BACKTEST) == pt.calibration_sentence(CALIBRATION, BACKTEST)
+    assert not hasattr(app, "calibration_sentence")  # the public page states the calibration in its own words, from the same files
 
 
 def test_published_probabilities_keep_full_precision_and_carry_the_raw_value(tmp_path):

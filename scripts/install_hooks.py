@@ -18,8 +18,11 @@ from pathlib import Path
 HOOK = """#!/bin/sh
 # Installed by scripts/install_hooks.py: run the test suite before every commit and block it on any failure.
 cd "$(git rev-parse --show-toplevel)" || exit 1
+# git exports GIT_DIR, GIT_INDEX_FILE and others to hooks; tests that create temporary repositories must not inherit them,
+# or their git commands act on this repository. PYTHONPATH=src tests this checkout's code, also from a linked worktree.
+for name in $(env | grep -o '^GIT_[A-Za-z0-9_]*'); do unset "$name"; done
 echo "pre-commit: running the test suite ..."
-"{python}" -m pytest -q
+PYTHONPATH=src "{python}" -m pytest -q
 status=$?
 if [ $status -ne 0 ]; then
   echo "pre-commit: tests failed (exit $status); commit blocked"
@@ -30,7 +33,7 @@ exit 0
 
 
 def install(repo: Path, python: str | None = None) -> Path:
-    git_dir = Path(subprocess.run(["git", "rev-parse", "--git-dir"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip())
+    git_dir = Path(subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip())
     if not git_dir.is_absolute():
         git_dir = repo / git_dir
     hooks = git_dir / "hooks"
