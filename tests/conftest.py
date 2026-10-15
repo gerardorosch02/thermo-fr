@@ -1,10 +1,20 @@
 """Shared test helpers: a fake HTTP session and a no-op sleep so tests run offline and fast."""
 
 import json
+import os
 
 import pytest
 
 from thermo_fr.data import http
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_git_environment(monkeypatch):
+    """Drop GIT_* variables inherited from the caller. Inside a pre-commit hook git exports GIT_DIR, GIT_INDEX_FILE and
+    friends; a test that runs `git init` or `git config` on a temporary repository would otherwise act on the real one."""
+    for name in list(os.environ):
+        if name.startswith("GIT_"):
+            monkeypatch.delenv(name, raising=False)
 
 
 class FakeResponse:
