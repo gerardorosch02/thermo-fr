@@ -1,267 +1,70 @@
 # thermo-fr
 
-**Live dashboard:** [thermo-fr-cy6smxhzz5tj77jmvyqfng](https://thermo-fr-cy6smxhzz5tj77jmvyqfng.streamlit.app/) (updated on weekday mornings and after each auction; see [docs/public_dashboard.md](docs/public_dashboard.md) for how it is produced)
+An hourly forecast of the French day-ahead power price, issued before the 12:00 Paris auction gate, with a calibrated probability of negative prices and a model of the day's shape valued with a battery. Each forecast is scored against the auction result and against the EEX French day-ahead future traded 11:15 to 12:00 Paris.
 
-How much does French electricity demand rise when it gets colder, and what does that do to the day-ahead price?
+**Live app:** [thermo-fr-cy6smxhzz5tj77jmvyqfng.streamlit.app](https://thermo-fr-cy6smxhzz5tj77jmvyqfng.streamlit.app/), updated each weekday morning before the market window and each afternoon after the auction.
 
-France heats a large share of its homes with electricity, so its demand is unusually sensitive to temperature. RTE usually puts the winter figure at roughly 2,400 MW for each degree colder. This project estimates that number from public data, along with the matching day-ahead price effect, and checks the model out of sample.
+![Overview](docs/img/overview.png)
 
-## What it does
+## Findings
 
-1. Downloads hourly French actual load and day-ahead prices from one of several pluggable sources (see below), and hourly temperatures for eight French cities from the Open-Meteo archive.
-2. Builds a population-weighted national temperature and averages everything into local calendar days.
-3. Fits a piecewise-linear model. Above a threshold temperature, weather barely moves demand. Below it, each degree colder adds a fixed amount of load. The threshold is chosen by grid search.
-4. Fits the same shape to the day-ahead price, using the load model's threshold.
-5. Trains on all but the last 12 months and forecasts the last 12 months of load to check the model out of sample.
-6. Writes a summary and two charts to `reports/`.
+**1. The shape model added battery value on the selection window, but the holdout did not confirm it.** On the selection window (865 days, 2024-02-17 to 2026-06-30) a 1 MW / 2 MWh battery earned 125.7 EUR/day trading the model's shape, against 115.7 EUR/day on yesterday's shape and 138.7 EUR/day with perfect foresight; shape MAE was 11.29 against 15.89 EUR/MWh. On the frozen holdout (102 days, 2026-07-01 to 2026-10-10) it earned 257.1 EUR/day against 265.4 for yesterday's shape and 266.5 for the last day of the same type; shape MAE was 22.37 against 23.10 and 21.96 EUR/MWh. In that period of high, volatile prices the naive shapes were the better guide.
 
-## Results
+**2. Negative-price probabilities are calibrated and have skill.** On the holdout (2,448 hours, 158 of them negative) the recalibrated probability scores a Brier skill of +0.43 against climatology and +0.47 against the last 7 days. The recalibration is isotonic and fitted walk-forward on out-of-sample predictions only; the live version rests on 32,351 out-of-sample hours.
 
-Run on 2021-01-01 to 2025-12-31 (1,826 days) with RTE load, ENTSO-E day-ahead prices and Open-Meteo temperatures. All numbers below are copied from `reports/summary.json` and `reports/yearly.csv` as produced by `thermo-fr fit`.
+**3. The level forecast does not beat the traded market.** Over 42 walk-forward windows (38 base, 4 peak; delivery days 2026-08-29 to 2026-10-10), going long or short the EEX future at its 11:15 to 12:00 Paris VWAP on the model's signal was right 33% of the time and lost 2.43 EUR/MWh per window. Against the auction result the model's daily base or peak average was 28.5 EUR/MWh out, the traded price 5.1. By 11:15 the market has already repriced away from the previous day's auction; the model makes about 0.45 of that move, because its price inputs carry yesterday's level, and its long or short call matches simple persistence in 29 of 42 windows. With 42 windows the hit rate is only weakly different from a coin toss (binomial p = 0.04; 0.14 for the 38 base windows alone); the loss is clearer, with a day-block bootstrap 95% interval of -4.0 to -0.7 EUR/MWh per window. Aggregates: [published/market_walkforward.json](published/market_walkforward.json).
 
-- Heating threshold: 13.00 °C
-- Load: +1,605 MW per degree colder below the threshold (s.e. 22), R² 0.962
-- Price: +9.67 EUR/MWh per degree colder (s.e. 0.45), R² 0.874; excluding 2022: +6.58 (s.e. 0.30)
-- Out of sample, last 365 days trained to 2024-12-31: MAE 1,593 MW, MAPE 3.12%
+**Why the backtest error (15.7) is lower than the record's (28.5).** The backtest's figure is an hourly error over 2024-02-17 to 2026-06-30, when prices averaged 59.4 EUR/MWh and the daily price moved 16.9 EUR/MWh on average from one day to the next. The record covers 2026-08-29 to 2026-10-10, when prices averaged 139.0 EUR/MWh and moved 27.9, and it scores the daily base or peak average rather than single hours. Relative to the price level the hourly error is similar (26% and 24% of the average price). A look-ahead check (blanking every input not yet published at the gate and rebuilding the features) found no leakage.
 
-Year by year, with the threshold held at 13.00 °C:
+A live record against the market builds one window per weekday; the app shows its aggregates once 30 windows have settled.
 
-| Year | Load MW per °C (s.e.) | Price EUR/MWh per °C (s.e.) | Price R² | Mean price EUR/MWh | Price gradient, % of mean |
-|---|---|---|---|---|---|
-| 2021 | 1,649 (50) | 6.92 (0.74) | 0.863 | 109.2 | 6.33 |
-| 2022 | 1,763 (50) | 22.40 (1.69) | 0.754 | 275.9 | 8.12 |
-| 2023 | 1,694 (48) | 8.27 (0.53) | 0.714 | 96.9 | 8.54 |
-| 2024 | 1,456 (53) | 4.62 (0.56) | 0.647 | 58.0 | 7.96 |
-| 2025 | 1,469 (46) | 6.30 (0.50) | 0.722 | 61.1 | 10.31 |
+## How it works
 
-Load sensitivity has fallen: the 2024 and 2025 estimates are about 14% below the 2021 to 2023 average, in line with the demand reductions that followed the 2022 energy crisis. The price effect in EUR/MWh moves with the price level, 22.4 in 2022 against 4.6 to 8.3 in the other years, but as a share of each year's mean price it stays within 6 to 10%. A cold day therefore raises the day-ahead price by a fairly constant fraction, whatever gas costs that year.
+- **Information gate.** The auction closes at 12:00 Paris on the day before delivery. Every input is dated by when it is published, and a test fails if any input for delivery day D is stamped after 12:00 on D-1. The forecast used for scoring is issued between 10:05 and 11:00 Paris, before the EEX window opens at 11:15.
+- **Inputs.** ENTSO-E day-ahead load forecast (due 10:00 on D-1); French prices of D-1, D-2, D-7 and the last day of the same type; D-1 prices of DE-LU, BE, NL, ES, IT-North and CH; lagged actual nuclear output; Open-Meteo forecasts issued two days ahead (temperature, 100 m wind at 17 points, radiation at 21 points), turned into wind and solar generation proxies in MW; load minus wind, solar and nuclear; the calendar (holidays, bridge days, day type). ENTSO-E's own wind and solar forecasts are not used because they may arrive after the gate. There is no gas or carbon input: the price lags stand in for fuel costs.
+- **Models.** LightGBM for the hourly level and a LightGBM classifier for negative prices with an isotonic recalibration, both refitted monthly on history since 2021. The shape model (gradient boosting with each hour minus the day's mean as target) exists in the backtest only; the live battery record uses the shape of the level forecast.
+- **Protocol.** Each change is tested under a rule written before the run. Variants are chosen on a selection window (2024-02-17 to 2026-06-30, monthly walk-forward), and the chosen one is scored once on a frozen holdout (2026-07-01 to 2026-10-10). Every result, accepted or rejected, is in [docs/experiments.md](docs/experiments.md).
+- **Daily schedule.** A GitHub Actions workflow ([forecast.yml](.github/workflows/forecast.yml)) runs each step from a clean store and commits only `published/`. The author's laptop dispatches it: the forecast at 10:05 and 10:30 Paris on weekdays, scoring at 14:20 London daily, the model refit on the first weekday of each month. Backup crons cover scoring (13:15 UTC) and the refit (02:00 UTC); the morning forecast has no cron because GitHub ran scheduled jobs hours late. A forecast issued after 11:00 Paris is labelled not tradeable and never replaces the pre-market one.
 
-![Daily load against temperature](docs/img/load_vs_temperature.png)
+Method and backtests: [docs/forecast.md](docs/forecast.md). Data, terms and glossary: [docs/data.md](docs/data.md). Commands, schedules and code layout: [docs/operations.md](docs/operations.md). Publishing and deployment: [docs/public_dashboard.md](docs/public_dashboard.md). The temperature study the project started from: [docs/thermosensitivity.md](docs/thermosensitivity.md).
 
-![Daily day-ahead price against temperature](docs/img/price_vs_temperature.png)
-
-## Setup
+## Run it
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"            # add ",forecast" inside the brackets for the price forecast (LightGBM, scikit-learn)
+source .venv/bin/activate                  # Windows: .venv\Scripts\activate
+pip install -e ".[dev,forecast,dashboard]"
+pytest                                     # offline
+streamlit run streamlit_app.py             # the public app, reading published/ (no key needed)
+
+export ENTSOE_API_KEY="your-token"         # free, from transparency.entsoe.eu
+thermo-fr forecast-fetch                   # inputs from 2021 to the last complete month
+thermo-fr forecast-backtest                # monthly walk-forward backtest, report in reports/forecast/
+thermo-fr morning-run                      # tomorrow's inputs and forecast, into a local SQLite store
+thermo-fr settle                           # auction results, then score the stored forecasts
 ```
 
-Open-Meteo, Energy-Charts and RTE need no key. Only the `entsoe` source does.
-
-## Usage
-
-```bash
-thermo-fr demo                                      # offline, synthetic data with known answers
-thermo-fr fetch --start 2021-01-01 --end 2026-01-01 # real data, saved to data/hourly.csv
-thermo-fr fit                                       # results in reports/
-pytest                                              # run the tests, all offline
-```
-
-`fetch` takes `--load-source` and `--price-source`, each one of `rte`, `energy-charts`, `entsoe` or `csv`. The defaults are `rte` for load and `energy-charts` for prices, which need no key:
-
-```bash
-thermo-fr fetch --start 2021-01-01 --end 2026-01-01 --load-source rte --price-source energy-charts
-thermo-fr fetch --start 2021-01-01 --end 2026-01-01 --load-source csv --price-source csv --csv-dir data/csv
-```
-
-Next to `data/hourly.csv`, `fetch` writes `sources.json` (which source produced which series, with licence attribution and the dataset details) and `quality.json`. A short quality summary is printed: the share of missing hours per series, negative load, load outside 20,000 to 100,000 MW, and prices outside -500 to 4,000 EUR/MWh. Gaps are reported, never filled. `fit` copies the source information into `summary.json` and `summary.md`.
-
-## Day-ahead price forecast
-
-A second pipeline forecasts the hourly French day-ahead price for a delivery day using only information available when the auction closes, at 12:00 Paris time the day before. Method, timing findings and backtest results are in [docs/forecast.md](docs/forecast.md).
-
-**Versus the market.** The forecast has one benchmark: the EEX French Day-Ahead Base and Peak futures traded before the auction (the 11:15 to 12:00 Paris VWAP of the trade date), scored at the auction result. Walk-forward record, not live: honest_v2, the default model, reissued over 42 windows (38 base, 4 peak; delivery days 2026-08-29 to 2026-10-10) had a hit rate of 33%, a mean P&L of -2.43 EUR/MWh per window, and an error against the auction of 28.5 EUR/MWh where the traded VWAP's was 5.1; the model's error was the smaller one on 7% of windows (base contract alone: 38 windows, 37% hit rate, -1.99 per window; docs/experiments.md, holdout row of 2026-10-10). Live record: collecting data, 0 of 20 windows; the public app shows live aggregates once 20 pre-market windows have settled. Since 2026-10-12 the level forecast is benchmarked against EEX only: no same-hour-previous-day comparison is shown or published anywhere, the model's own MAE against the auction appears below the market headline with no other comparison, and model variants are still selected by their own strict-backtest MAE because the EEX history is too short to select on (that figure is a selection criterion, not a benchmark). The shape and battery panel and the negative-price probability have no EEX equivalent and keep their own reference comparisons inside their panels, below the market headline.
-
-```bash
-pip install -e ".[dev,forecast]"                  # adds LightGBM and scikit-learn
-export ENTSOE_API_KEY="your-token"
-thermo-fr forecast-fetch                           # inputs 2021-01-01 to the last complete month, into data/forecast/
-thermo-fr forecast-backtest                        # walk-forward 2024 and 2025, report in reports/forecast/
-thermo-fr forecast --date 2026-10-06               # one day's curve and chart, as of 12:00 the day before
-thermo-fr timing-probe                             # log which ENTSO-E items already exist for tomorrow
-thermo-fr market add --date 2026-10-10 --product base --window 11:15-12:00 --open 100.00 --high 102.00 --low 99.00 --close 101.00 --vwap 100.50 --source "EEX via trader"   # illustrative prices
-thermo-fr market paste --date 2026-10-10 --text "FR DA Base EEX Trades 11:15-12:00 O: 100.00 H: 102.00 L: 99.00 C: 101.00 VWAP: 100.50"
-thermo-fr market fetch                             # collect tomorrow's window with the local collector module (laptop scheduler only)
-thermo-fr market fetch --backfill 40               # one-off: the available history, one request every 10 seconds
-thermo-fr market snapshot                          # 10:20 London: the latest EEX base trade before the 11:15 Paris window, for the local brief only
-thermo-fr market evaluate                          # every recorded traded price against the forecast that was live before its window
-```
-
-Traded prices live in `data/market/eex_fr_da.csv` (columns: delivery_date, product, trade_date, window_start, window_end in Paris time, open, high, low, close, vwap, trades, volume_mwh, source, note; the trade date is the day before delivery, or the Friday before a Saturday, Sunday or Monday delivery, since the day futures for those three trade on Friday). The whole `data/` tree is git-ignored and a test checks that this file is; raw EEX prices are never committed, published or shown in the public app.
-
-Three ways in. `market fetch` collects the window itself: it runs a collector module that lives in `local/`, a git-ignored folder outside the package, because the module depends on the undocumented structure of EEX's public Market Data Hub page and on a request header that page expects, and EEX's notice says the data shown there is for information purposes. The public repository therefore carries only the contract the module must meet (`run_fetcher` in `forecast/market.py`: a `fetch(delivery_dates, window, raw_dir, spacing_s, log)` function returning one outcome per delivery day and product) and never the endpoint, the header or the contract codes. The module rebuilds the 11:15 to 12:00 Paris open, high, low, close and volume-weighted average from the trade-by-trade tape, with the trade count and the volume of the window, and marks the row "exact, from EEX tape"; it sends a plain user agent naming the project and a contact address, at most a handful of requests a day spaced ten seconds apart, no proxies and no rotation, and keeps the raw responses under `data/market/raw/` (git-ignored). It runs from the laptop's Task Scheduler only (weekdays at 12:20 Paris with one retry at 12:35, after the 15 minute display delay has passed the end of the window; on a Friday it also collects the Saturday, Sunday and Monday deliveries), never from GitHub Actions. A refusal, a changed page or a missing tape is logged to `data/market/fetch_log.csv`, shown in the dashboard's data status panel, and the day is skipped: nothing is guessed. `market snapshot` runs the same module once more, on weekdays at 10:20 London (11:20 Paris, before the window opens): it reads the base tape so far, which with the display delay reaches about 11:05 Paris, and stores the latest trade before 11:15 Paris with its time in `data/market/eex_fr_da_early.csv` (git-ignored, one request per delivery day, raw response kept apart from the window fetch's cache). It feeds the local brief's early-trade line and nothing else; it is never published. `market paste` is the fallback for such a day: it parses the free text a trader sends (product, window, O, H, L, C, VWAP; decimal commas accepted; the delivery date from `--date` or an ISO date in the text) and refuses anything incomplete. `market add` takes the numbers as flags. `market evaluate` scores each day with the latest honest forecast issued before the window opened, so a day whose only forecast came later is skipped, not scored with hindsight. It reports per day and in total: forecast, entry (the window VWAP, with the close as an alternative), auction result, direction, P&L per MWh, model error and market error against the auction, hit rate, cumulative P&L, how often the model's error was below the market's, and a few no-trade bands (trade only when the forecast is more than X from the entry), labelled in sample.
-
-The first scored record (the honest set, the model of 2026-10-10, before honest_v2 became the default): against EEX traded prices before the auction the model loses. Over 42 windows (38 base, 4 peak) for delivery days 2026-08-29 to 2026-10-10, the direction implied by the forecast against the window's VWAP (long above, short below), settled at the auction result, had a hit rate of 29% and a mean P&L of -2.5 EUR/MWh per window; the forecast's error against the auction was 27.0 EUR/MWh where the traded VWAP's was 5.1, and the forecast's error was the smaller one on 12% of windows. The main reason is that the model reacts to large moves about two days late, because its price lags carry yesterday's level into tomorrow's forecast, while the market reprices the same morning. October alone, when the base price fell from about 200 to about 50 EUR/MWh within a week: 13 windows, 15% hit rate, -4.5 per window, 34.9 against 6.3. The record was scored as a walk-forward so that nothing is in sample: late August and September with a model fitted on data through August, October with the published model (fitted on data through September) or, for the three windows where a live version existed before the window, with that live version. The peak contract rarely trades inside the window, which is why there are four peak rows; Sunday and Monday contracts, traded on Friday, had trades on the day but none inside it. The sample grows by one collected day per weekday (`thermo-fr market fetch`, `thermo-fr market evaluate`), and the public app shows aggregates once 20 days have a live pre-market forecast. The error band on the dashboards is the model's past error, not a probability forecast. A known weakness is the top 5% price hours, typically cold, calm winter evenings when gas sets the price, where the generation proxies make the backtest error slightly worse (23.2 against 22.6 EUR/MWh without them) while improving every other slice. Backtest, strict rows 2024-02-17 to 2025-12-31: honest set MAE 15.5 EUR/MWh; the wind proxy, the solar proxy and the calendar structure contributed 1.1, 0.25 and 0.3 of that (a selection figure, not a benchmark).
-
-Fundamentals v2 (October 2026). Three groups of inputs were added under a pre-registered protocol (docs/experiments.md): lagged actual nuclear generation, the day-ahead prices of six neighbouring zones for the previous day, and a residual load built from the load forecast, the generation proxies and the latest nuclear output. On the selection window every group passed the acceptance rule and the full set lowered the strict backtest MAE from 16.4 to 15.7 EUR/MWh. On the frozen holdout (July to October 2026) the gain was 0.4 EUR/MWh, the October crash was forecast no better than by the current set, and the lag diagnostic did not improve out of sample. The model still follows large moves about two days late because three price lags carry most of its weight. Against EEX traded prices the record barely moved (hit rate 33%, mean P&L -2.4 against -2.8 EUR/MWh per window, model error 28.5 against the market's 5.1). Planned nuclear availability could not be reconstructed as of the issue time from ENTSO-E, whose outage API serves only the latest revision of each notice; since 2026-10-10 the laptop saves a raw snapshot of the notices every morning (`thermo-fr outage-snapshot`, `data/entsoe/outage_snapshots/`, git-ignored, paged past the platform's 200-document cap) and `thermo-fr nuclear-availability` rebuilds planned availability for a delivery day as of any time from the snapshots taken before it, so a future branch can test the feature without look-ahead. The v2 model, `published/model/honest_v2.txt`, is the default since 2026-10-12; `honest.txt` is kept as the fallback for days on which a v2 input is missing, and every forecast version names the model that produced it.
-
-Probabilistic forecasts (October 2026). Next to the point forecast the default model computes, every day, three price quantiles (10th, 50th, 90th, LightGBM quantile objectives on the same honest_v2 inputs) with the 10-90 interval widened by a conformal margin from the last settled days, and two event probabilities, a negative price and a spike above the 95th percentile of the trailing year's hourly prices known at the issue time. The rules were pre-registered in `docs/experiments.md` and the outcomes are these. The negative-price probability was accepted on the selection window and confirmed on the holdout: 158 events, Brier skill +0.37 against climatology and +0.41 against the last 7 days. It is published: the public app shows it per hour with a calibration panel (Brier scores, skill scores, reliability tables) and its selection and holdout results. The quantile interval was accepted on the selection window (pinball 4.88 against 5.11 and 7.53 for the two benchmarks, 80.2% coverage) but under-covered on the holdout: 73.8% overall, 56% on the windiest days and 56% on holidays, because the trailing 90-day calibration window lagged the move to a high-price regime. The spike probability was accepted on the selection window but not confirmed on the holdout, where the trailing-year threshold labelled 41% of hours as spikes and the 7-day frequency beat the classifier, so the definition itself needs revisiting. Both are computed and stored locally every day so a live record builds, shown in the local dashboard labelled "under evaluation", and not published; the shaded band on the public chart remains the backtest error band. The five model files are refitted monthly with the point model in `published/model/`; a version issued without them carries no band and no probabilities. Recalibration (branch prob-recalibration, October 2026, pre-registered in docs/experiments.md): finer reliability bins showed the raw classifier well calibrated where it says under 1% but badly overconfident from 1% up (an hour it put at 1 to 10% went negative one time in four to six on both windows), and the yearly diagnostic showed why: the share of negative hours by calendar year was 0.73% in 2021, 0.05% in 2022, 1.68% in 2023, 4.01% in 2024, 5.86% in 2025 and 8.32% in 2026 to 10 October, while the mean raw forecast on the same rows was 0.65% in 2023, 2.14% in 2024, 4.33% in 2025 and 6.03% in 2026, lagging the realised share every year. A monotone (isotonic) recalibration fitted walk-forward on out-of-sample predictions only (at least 12 months of history before each month) was accepted on the selection window (Brier 0.0328 to 0.0306, skill against climatology +0.23 to +0.28 and against the last 7 days +0.24 to +0.29, calibration error over 10 bins 0.118 to 0.029) and confirmed once on the holdout (Brier 0.0337 to 0.0305, skill +0.37 to +0.43 and +0.41 to +0.47, calibration error 0.203 to 0.119). Live forecasts now apply a calibration fitted on every out-of-sample pair before the issue date (the walk-forward predictions plus the settled live pre-market versions since), refitted monthly with the models and stored as isotonic breakpoints under `published/model/`; the panels show the calibrated probability directly and the bin labels are retired; the raw probability stays in the local store and travels in the CSV as `p_negative_raw` so the monthly refit on GitHub Actions can extend the pairs.
-
-Shape and battery value (branch shape-and-battery, October 2026). The level forecast is scored on its hourly error; a storage asset trades the shape of the day, each hour's price minus the day's mean. `thermo-fr shape-backtest` runs a shape model (gradient boosting on the honest_v2 inputs with the shape as target, retrained monthly) against two benchmarks, yesterday's shape and the shape of the most recent earlier day of the same type, and values each with a battery: 1 MW / 2 MWh, 88% round-trip efficiency, one cycle a day, a two-hour charge block before a two-hour discharge block chosen on the forecast before the gate and settled at the auction result, skipped when the forecast spread does not cover the efficiency loss. On the selection window (865 strict days, 2024-02-17 to 2026-06-30) the shape model beats both benchmarks: hourly shape MAE 11.3 EUR/MWh against 15.9 for yesterday's shape and 15.1 for the same-type day, battery 125.7 EUR/day (91% of perfect foresight) against 115.7 (83%) and 117.5 (85%), so it met the pre-registered rule. On the frozen holdout (102 days, 2026-07-01 to 2026-10-10, evaluated once) it does not confirm: shape MAE 22.4 against 23.1 and 22.0, battery 257.1 EUR/day (92% of perfect) against 265.4 (95%) and 266.5 (96%); in a period of very high and volatile prices the day-before shape was the better guide, and the model's spread error (30.6 against 25.4 and 23.6) says why. A paired comparison with a moving-block bootstrap (blocks of 7 days, 5,000 resamples) says the holdout battery differences are distinguishable from zero and against the model (about -8 EUR/day against yesterday's shape and -9 against the same-type day), while the holdout shape MAE differences are not distinguishable from zero. Both dashboards carry a "Shape and battery value" panel with these aggregates and the live record of the pre-market version of each settled day; `published/shape_battery.json` holds the aggregates and the live daily values, nothing from EEX.
-
-Inputs: ENTSO-E day-ahead prices, day-ahead total load forecast and day-ahead wind and solar forecasts (RESTful API, cached under `data/cache/entsoe/`), Open-Meteo weather forecasts for the eight cities as they were issued two days ahead (previous-runs archive, cached under `data/cache/open-meteo/`), and two pre-gate generation proxies built the same way (`forecast/gen_proxy.py`): 100 m wind forecasts issued two days ahead at 17 points covering the French wind regions, passed through a turbine power curve (`forecast/wind_proxy.py`), and radiation forecasts issued two days ahead at 21 points covering the solar regions, as a ratio to 1,000 W/m2 (`forecast/solar_proxy.py`), each weighted in MW by non-negative least squares against ENTSO-E actual generation of that type, with the weights refitted at the start of each month on the trailing year. The calendar goes beyond hour, weekday and month: public holidays, the day type (working day, Saturday, Sunday or holiday), bridge days, the eve and the day after a holiday, the Christmas to New Year break, and the price of the most recent earlier day of the same type as an extra lag (`forecast/daytypes.py`). The honest feature set uses only inputs published before the gate; the `honest_wind` and `honest_base` variants drop the later additions so the backtest can measure them, and an extended set adds the ENTSO-E wind and solar forecasts, which the platform allows until 18:00 on D-1. A test fails if any feature for delivery day D is timestamped after 12:00 Paris on D-1.
-
-## Scheduled jobs and dashboard
-
-Two jobs keep a local SQLite database (`data/forecast.db`) up to date, and a Streamlit dashboard reads it. The jobs are the only code that calls the APIs.
-
-```bash
-pip install -e ".[dev,forecast,dashboard]"       # adds streamlit and plotly
-thermo-fr morning-run                             # tomorrow's inputs, timing log, both forecasts (new version each run); --refit fits live
-thermo-fr settle                                  # actual prices, then every unscored forecast version is scored
-thermo-fr dashboard                               # http://localhost:8501
-```
-
-`morning-run` fetches the ENTSO-E day-ahead load forecast, wind and solar forecasts and prices around the next delivery day, and the Open-Meteo weather forecasts issued two days ahead. For each input it records whether it is present for the delivery day, its hour count, revision number and a hash of its values, so the timing log (table `timing_log`) shows when each input first appeared relative to the 12:00 Paris gate and whether it changed between runs. It then stores the hourly inputs and a forecast for the honest feature set, predicted with the stored model `published/model/honest_v2.txt` (the same file the GitHub Actions workflow predicts with, so a local run and the workflow give the same curve for the same inputs; when one of its inputs is missing for the day the run predicts with the fallback `published/model/honest.txt` and records the fallback in the data status; `--refit` fits the model live on the inputs history instead, and a missing model file is recorded and falls back to a live fit), and, when the wind and solar forecasts exist, for the extended set, which has no stored model and is always fitted live. Every forecast is a new version stamped with its issue time; nothing is overwritten. A source that is down is logged in `data_status` and the run finishes as `partial` or `failed` instead of crashing. `settle` fetches the actual prices for today, tomorrow and every forecast day, stores them, and scores each version against them (the auction result); the same-hour-previous-day figure is still computed in the store for the backtests but is no longer published or shown. Both commands log to `logs/<command>_<date>.log`.
-
-Windows Task Scheduler entries (the jobs run as the current user and read `ENTSOE_API_KEY` from the user environment, so set it with `setx ENTSOE_API_KEY ...` once):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Install   # morning-run weekdays 07:00, 08:00, 09:15, 09:45, 10:30, 11:30; settle daily 14:00; market publish daily 14:30 (pushes published/market.json only); market fetch weekdays 11:20 and 11:35; market snapshot weekdays 10:20; outage snapshot weekdays 09:00 and weekends 10:00; fuel snapshot daily 22:15 (private collector, only if local\fuel_fetch.py exists) (local time, London intended; 09:15 and 09:45 London are pre-market runs at 10:15 and 10:45 Paris, 11:20 and 11:35 London are 12:20 and 12:35 Paris)
-powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Show
-powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Remove
-```
-
-All five tasks have "run task as soon as possible after a scheduled start is missed" and "wake the computer to run this task" turned on. Waking from sleep or hibernation also needs Windows to allow wake timers: Power Options, Sleep, Allow wake timers set to Enable for both plugged in and on battery (`powercfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 1`, the same with `/setdcvalueindex`, then `powercfg /setactive SCHEME_CURRENT`). A machine that is shut down cannot be woken by a task.
-
-The dashboard opens on the morning brief (branch desk-brief, 2026-10-13): one screen for the next delivery day written for a trader. Fair value as base, peak (08:00 to 20:00) and off-peak from the pre-market forecast with its issue time; the hours whose calibrated probability of a negative price is 5% or more; a "what changed" table of tomorrow's fundamentals against the previous delivery day (the French D-1 base first, since the spreads are measured against it, then load forecast, temperature, wind and solar proxies, the latest nuclear output and residual load), each with value and change, with the D-1 base prices of DE, BE, ES, IT-North and CH (change in brackets) and their French spreads as a two-row block under it; a waterfall from yesterday's base fair value to today's split into feature groups (recent French prices, labelled "model following the market" because the price lags carry the last traded level forward; neighbour prices; wind; solar; load and temperature; nuclear; calendar) using LightGBM's own per-feature contributions (`pred_contrib=True`, stored with every version as its drivers), with a one-line summary built from the two largest groups that says plainly when the French lags are the largest; the live record against EEX (the window count always, the hit rate, P&L and model against market error once 20 windows exist); and, on the local dashboard only, the gap between the fair value and the latest EEX base trade before the window (from the 10:20 London snapshot, with the trade time), labelled with the model's live hit rate, or, when only the window close exists, that close labelled as coming after the forecast was issued and not framed as a gap to trade. The second page, Forecast and record, shows tomorrow's pre-market forecast (the last version issued before the EEX market window opens at 11:15 Paris on the day before; versions issued later are listed underneath as "issued after the market window, not tradeable") with today's actual prices and a shaded band built from the backtest's error distribution at each hour (historical error, not a probability forecast); tomorrow's forecast load, wind, solar, residual load and temperature with the change against today's inputs; the last 30 settled days against the auction result with rolling MAE (the model's own error; the EEX traded price is the only benchmark); a "Versus the market" panel with the daily table and cumulative P&L of the forecast against the recorded EEX traded prices; the data status for tomorrow (arrival time of each input, anything missing or late), the market data collection log with any day the collector skipped or was refused, and the timing-probe summary across all logged days. A sidebar toggle switches between the honest and extended feature sets, with a note that the extended set may use information published after the gate until the timing log shows otherwise. Database reads are cached; the "Refresh now" button runs `morning-run` once.
-
-![Dashboard](docs/img/dashboard.png)
-
-## Public dashboard and automated updates
-
-`streamlit_app.py` is a public version of the dashboard that reads only `published/` and runs on Streamlit Community Cloud. A GitHub Actions workflow keeps that folder current without any local machine: on weekday mornings it fetches the days around the next delivery day and publishes the forecast made with the stored model, every afternoon it fetches the auction results and scores the stored forecasts, and on the first weekday of each month it fetches the full history, refits the honest model and commits the model file with its metadata. The morning runs are timed for the market and triggered from the laptop: GitHub's schedule trigger ran hours late or not at all in October 2026, so a scheduled task runs `thermo-fr dispatch` (a `gh workflow run` with the stored login, no secret on the command line) at 09:05 and 09:30 London, which is 10:05 and 10:30 Paris all year, and records each dispatch in the local store. The weekday morning crons that backed this up were removed on 2026-10-13: on 12 October GitHub delivered them 9 to 12 hours late, and a run that arrives after the window cannot back up a pre-market forecast, it only adds after-window versions and failure risk. The settle is dispatched the same way at 14:20 London, so the public record is scored the same afternoon; its 13:15 UTC cron stays as a backup, and a second settle of the same day changes nothing: the same prices are stored again, nothing new is scored, and the workflow commits nothing when only the stamps in `status.json` changed (`thermo-fr publish-unchanged`). The monthly refit is dispatched the same way, on the first weekday of the month at 07:00 London, with the 02:00 UTC cron as a backup; the refit is idempotent (`thermo-fr refit-model --once-per-month`): when the model metadata already shows a refit in the current month, the second trigger exits as already refitted without committing, the metadata records which trigger (dispatch or cron) produced the fit, and the local dashboard's data status shows the last refit's date and trigger, red when the month has none by the 5th. `thermo-fr schedule-step` decides a dispatched morning-run by the Paris clock: one that starts between 10:05 and 11:00 Paris, after the load forecast deadline and before the 11:15 market window, is the pre-market run; one that starts later runs for information only and its version is labelled "issued after the market window, not tradeable", never replacing a pre-market version. Issue times are the run's wall clock, never a scheduled time. The public app's headline for each day is the pre-market version. The token lives in a repository secret and is never printed or committed. `published/` holds the last 90 days of forecasts (with issue times), actual prices, daily errors against the auction result, tomorrow's latest forecast, the backtest error band, the negative-price probabilities, the drivers of each version (`drivers.csv`: per model feature, the daily mean of the feature and of its LightGBM contribution, grouped, from which the public morning brief builds its fundamentals table and waterfall; public inputs only, nothing from EEX) and the model; no inputs history is kept in the repository. The public app's first page is the same morning brief as the local one, minus the early-trade line; its arithmetic is a copy of `forecast/brief.py` kept equal by a test. In `probabilistic.csv` and `tomorrow_probabilistic.csv` the column `p_negative` is the calibrated probability of a negative price, the one the public app shows; `p_negative_raw` is the classifier's uncalibrated output, published only so that the monthly refit on GitHub Actions can extend the calibration's out-of-sample pairs, and shown nowhere; `calibrated` is 1 when the calibration was applied to that version. Of the market comparison the public app shows aggregates only (days scored, hit rate, mean P&L per MWh, model against market error), and only once 20 days are scored (`MIN_PUBLIC_DAYS` in `forecast/market.py`), because with a handful of days the mean P&L and the public auction result would let a reader back out the traded prices; until then it says "Versus the market: collecting data, n of 20 days". The prices themselves stay local. The aggregates score the version the public saw: before scoring, the laptop fetches main and archives the versions in `published/forecasts.csv` as committed there, and a delivery day counts only if one of those versions was issued before the market window; a day for which the laptop holds an earlier local version but the public site does not is not counted (the local dashboard still scores the local versions, labelled as such). The aggregates reach the public dataset through one file: after its 14:00 settle the laptop writes `published/market.json` and pushes that file alone (`thermo-fr market publish`, scheduled at 14:30 London; pull with rebase first, one retry, never a force push). It does so in a dedicated worktree of origin/main (`.publish-worktree`, git-ignored, created on first use and reset to the fetched branch each time), never in the main working tree, so a feature branch or uncommitted work checked out on the laptop can neither block the publish nor be pushed by it; and the workflow's publish step copies it into `status.json` unchanged and never writes it, so the two machines never edit the same file. The file holds aggregates only: a test fails if a per-day market value (a forecast, an entry price, an auction result or a day's P&L) appears in it, and below 20 scored days it carries the count, the definition sentence and the stamps alone. The laptop's commit is signed with the identity of the repository's local git config, which the publish reads itself and pins on the commit so no global setting can put another address on it; the commit skips the local pre-commit hook (one generated file, not code), and its outcome, including a failed push, is recorded as a run in the local store and shown on the local dashboard's market panel.
-
-```bash
-thermo-fr publish                   # export the public dataset from the local database
-thermo-fr import-published          # the reverse, used by the workflow to restore its state
-thermo-fr refit-model               # fetch the full history and save published/model/honest_v2.txt and honest.txt, their metadata, wind_proxy.json and solar_proxy.json
-thermo-fr morning-run --feature-sets honest_v2   # what the workflow runs: predict with the stored default model, honest.txt as fallback (the default locally too)
-streamlit run streamlit_app.py      # the public app, locally
-```
-
-Setup steps (secret, Streamlit deployment, live link) and the data-terms notes are in [docs/public_dashboard.md](docs/public_dashboard.md).
-
-## Glossary
-
-Three kinds of price appear in this project and the words are kept apart throughout the code, the dashboards and these documents:
-
-| Term | Meaning | Source here |
-|---|---|---|
-| **Fundamentals** | the inputs the forecast is built from: load forecast, actual and forecast wind and solar generation, prices of earlier days, weather | ENTSO-E Transparency Platform, RTE eCO2mix, Open-Meteo |
-| **Spot**, or the **auction result** | the EPEX day-ahead clearing prices for France, published around 12:50 CET on the day before delivery; what the forecast tries to predict and what every error is measured against | ENTSO-E A44 (the same figures the exchange publishes) |
-| **Market**, or the **traded price** | the EEX French Day-Ahead Base and Peak futures traded on the morning before the auction, liquid from about 08:00 to 12:30 Paris and tradeable until about 12:00; where the market already stands when the forecast is issued | EEX, entered by hand into a local, git-ignored file |
-
-ENTSO-E data is never called market data here. The **benchmark** of the level forecast is the traded price: the window VWAP of the EEX future, scored at the auction result (hit rate, mean P&L per MWh, model error against the auction next to the market's, window count). **Forecast error** (MAE against the auction result) is the model's own error and is shown with no other comparison; until 2026-10-12 it was compared with the spot price of the same hour on the previous day, a figure that is no longer published and survives only in the historical rows of docs/experiments.md and docs/forecast.md.
-
-## Data sources
-
-| Name | Series | Key | Where the data comes from |
-|---|---|---|---|
-| `rte` | load | none | RTE eCO2mix national consumption on ODRE, `eco2mix-national-cons-def` (definitive and consolidated) plus `eco2mix-national-tr` (real time) for the most recent weeks |
-| `energy-charts` | load, prices | none | Energy-Charts API by Fraunhofer ISE: `/price?bzn=FR` and the `Load` series of `/public_power?country=fr` |
-| `entsoe` | load, prices, day-ahead forecasts | `ENTSOE_API_KEY` | ENTSO-E Transparency Platform RESTful API, raw XML cached under `data/cache/entsoe/` |
-| `csv` | load, prices | none | CSV files exported by hand from the ENTSO-E Transparency Platform website, placed in `--csv-dir` |
-
-Raw responses from `rte` and `energy-charts` are cached under `data/cache/`, so a rerun downloads nothing. Delete that directory to refresh. Requests are spaced out to respect the published rate limits (about 2 per minute on the Energy-Charts price endpoint), and retried with exponential backoff on 429 and 503. If a service stays down, the fetch stops with a clear error instead of writing partial data.
-
-### Attribution and licences
-
-- Energy-Charts data is published by Fraunhofer ISE at https://energy-charts.info under the CC BY 4.0 licence. French day-ahead prices on Energy-Charts originate from Bundesnetzagentur | SMARD.de. Whenever this source is used the attribution is written into `sources.json`, `summary.json` and `summary.md`.
-- RTE eCO2mix data is published on https://opendata.reseaux-energies.fr under the Licence Ouverte v2.0 (Etalab).
-- Weather data by Open-Meteo.com, https://open-meteo.com, CC BY 4.0.
-- ENTSO-E Transparency Platform data is subject to the platform's terms of use.
-
-### ENTSO-E API key (only for the `entsoe` source)
-
-1. Register for a free account at https://transparency.entsoe.eu.
-2. Email transparency@entsoe.eu with the subject "Restful API access" and the email address of your account in the body.
-3. Once access is granted, generate the token in your account settings, then:
-
-```bash
-export ENTSOE_API_KEY="your-token"   # Windows: set ENTSOE_API_KEY=your-token
-```
-
-### CSV exports from the ENTSO-E website (the `csv` source)
-
-Export "Actual Total Load" and "Day-ahead Prices" for the France bidding zone as CSV and put the files in one directory. Files are recognised by their header, so names do not matter and one file per year is fine; empty files are skipped and timestamps repeated across files are dropped. The current export writes "MTU (UTC)" intervals such as "01/01/2025 00:00:00 - 01/01/2025 00:15:00", which are taken as UTC. Older exports with "MTU (CET/CEST)" or "Time (CET/CEST)" are parsed as Paris local time, and the repeated 02:00 hour on the autumn daylight-saving day is resolved by file order. Both 15-minute and hourly files work. When a Sequence column lists more than one auction, only the main day-ahead coupling result ("Without Sequence", else the lowest sequence number) is kept.
-
-## Design choices
-
-- **UTC everywhere, local time only for grouping into days.** The spring daylight-saving day has 23 hours and the autumn one has 25. Converting to Paris time only at the grouping step keeps both days intact, and the tests check this for every source.
-- **Sub-hourly data is averaged to hourly.** The day-ahead market moved to 15-minute products in 2025, so prices and load are resampled to hourly means before anything else.
-- **Fixed effects for each calendar month.** The slope is learned from day-to-day weather swings within a month, not from the gap between summer and winter. This stops changes in gas prices, demand trends or policy from leaking into the temperature estimate.
-- **Population weighting.** Paris carries more weight than Strasbourg because that is where the heating load is. The weights are approximate metropolitan populations.
-- **Weekday and public-holiday controls.** French holidays come from the `holidays` package.
-- **Sources are interchangeable.** Every source implements the same two methods, `load(start, end)` and `day_ahead_prices(start, end)`, returning hourly tz-aware UTC series named `load_mw` and `price_eur_mwh`. A source that lacks a series says so instead of guessing.
+The full command reference is in [docs/operations.md](docs/operations.md).
 
 ## Limitations
 
-- Standard errors are conditional on the chosen threshold, so they understate the true uncertainty a little.
-- The model is daily. Hourly shape, especially the evening peak, would need a separate model.
-- The price effect mixes the demand response with anything else that tends to happen on cold days (low wind, plant outages). Adding nuclear availability and renewable output would separate them.
-- The out-of-sample check uses actual temperatures, so it measures the model, not the weather forecast.
-- RTE's consolidated data omits the repeated hour on the autumn daylight-saving day, so that day has 24 of its 25 hours. It is kept, since the daily table only requires 22.
+- The live record against the market is still small; the 42-window record above is a walk-forward reissue, not live trading.
+- The EEX history is too short to select models on, so variants are chosen on their own backtest error.
+- Without a gas or carbon input the model lags regime changes, and it is weakest in the top 5% price hours (cold, calm winter evenings) and on low-price weekend and holiday middays.
+- The shaded band on the forecast chart is the model's past error at each hour, not a probability forecast. Price quantiles and a spike probability are computed daily but not shown: the quantile band under-covered on the holdout (73.8% for a nominal 80%) and the spike definition did not hold up.
+- ENTSO-E serves only the latest version of the load forecast and of outage notices, so possible revisions after 10:00 cannot be excluded and planned nuclear availability is not yet an input.
 
-## Layout
+## Data sources
 
-```
-src/thermo_fr/
-  config.py              cities, weights, settings, plausibility ranges
-  data/sources.py        the Source interface and get_source() factory
-  data/http.py           rate-limited GET with retries, plus the raw-response cache
-  data/weather.py        Open-Meteo temperatures and population weighting
-  data/entsoe_rest.py    ENTSO-E RESTful API client: prices, load, day-ahead forecasts (needs a key)
-  data/entsoe_client.py  the entsoe source built on it
-  data/weather_forecast.py Open-Meteo forecasts as issued (previous runs) and the historical-forecast proxy
-  data/wind_points.py    100 m wind forecasts as issued at 17 points in the wind regions
-  data/solar_points.py   radiation forecasts as issued at 21 points in the solar regions
-  forecast/timing.py     the 12:00 Paris gate, issue-time rules, look-ahead check
-  forecast/inputs.py     one hourly table of every forecast input, plus the API-versus-CSV price comparison
-  forecast/daytypes.py   day types, bridge days, holiday neighbours, the comparable day of the same type
-  forecast/features.py   honest and extended feature sets in Paris delivery hours
-  forecast/gen_proxy.py  shared method of the generation proxies: NNLS weights per point, monthly point-in-time refits
-  forecast/wind_proxy.py pre-gate wind generation proxy: turbine power curve on 100 m wind forecasts
-  forecast/solar_proxy.py pre-gate solar generation proxy: irradiance ratio on radiation forecasts
-  forecast/models.py     benchmarks, LightGBM, ridge
-  forecast/backtest.py   monthly walk-forward, metrics by slice, worst days
-  forecast/report.py     reports/forecast/ tables and charts
-  forecast/day.py        one delivery day as of 12:00 the day before
-  forecast/probe.py      timing probe for tomorrow's ENTSO-E items (superseded by morning-run)
-  forecast/store.py      SQLite store: runs, data status, timing log, inputs, forecast versions, actuals, scores, error band
-  forecast/jobs.py       morning-run and settle
-  data/outages.py        daily raw snapshots of the ENTSO-E unavailability notices of French units, and planned nuclear availability as of a time
-  forecast/probabilistic.py  quantile forecasts with a conformal 10-90 band, negative-price and spike probabilities, their benchmarks, metrics and model files
-  forecast/shape.py      the shape of the day (price minus the day's mean): shape model, D-1 and same-type benchmarks, metrics, battery backtest
-  forecast/brief.py      the morning brief: fair value, feature groups, the waterfall from LightGBM's contributions, the fundamentals table
-  forecast/market.py     EEX traded prices (local file: collected, pasted or typed), the paste parser, the collector contract and log, the forecast scored against them, the pre-market headline rule
-  forecast/schedule.py   which step a scheduled GitHub Actions run performs, from the Paris clock (pre-market window 10:05 to 11:00)
-  dashboard/data.py      read-only queries for the dashboard
-  dashboard/brief.py     the brief's read layer (store, local market file; the early-trade line lives here only)
-  dashboard/app.py       the Streamlit app
-scripts/schedule_tasks.ps1   install, show or remove the Task Scheduler entries
-scripts/install_hooks.py     install the local git pre-commit hook that runs the test suite and blocks a commit on any failure (python scripts/install_hooks.py; local only, not part of the workflow)
-local/                 git-ignored: the EEX collector module (`market fetch` and `market snapshot` load it from here) and the private collector and loader for gas and carbon prices; nothing in it is committed. The public timing rules fuel_index_lag1 (end-of-day indices known from 22:00 CET on D-2) and fuel_morning_trades (D-1 trades up to the issue time) in forecast/timing.py are what the private loader checks itself against
-scripts/screenshot_dashboard.py  full-page screenshot of the running dashboard
-forecast/publish.py      export and import of the public dataset under published/
-forecast/refit.py        monthly refit: model file and metadata under published/model/
-streamlit_app.py         public dashboard reading published/ only (Streamlit Community Cloud entry point)
-.github/workflows/forecast.yml  scheduled morning-run and settle, committing published/
-  data/energy_charts.py  Energy-Charts load and prices (no key)
-  data/rte_eco2mix.py    RTE eCO2mix load from ODRE (no key)
-  data/csv_source.py     ENTSO-E CSV exports made by hand
-  data/quality.py        missing-hour and plausibility checks
-  data/dataset.py        hourly to daily, DST-safe, calendar features
-  model.py               threshold search and regression
-  report.py              summary, charts, out-of-sample check
-  synthetic.py           synthetic data with known answers
-  cli.py                 command line
-tests/                   DST handling, weighting, parameter recovery, every source offline
-tests/fixtures/          small ENTSO-E style CSV samples covering both DST days
-```
+- **ENTSO-E Transparency Platform** (transparency.entsoe.eu): day-ahead prices for France and its neighbours, the load forecast and actual generation. Used under the platform's terms, with the platform cited as the source; no endorsement by ENTSO-E is implied.
+- **Open-Meteo** (open-meteo.com): weather forecasts as issued, CC BY 4.0.
+- **RTE eCO2mix via ODRE** (opendata.reseaux-energies.fr): load history for the temperature study, Licence Ouverte v2.0 (Etalab).
+- **EEX**: benchmark only. French day-ahead base and peak futures, trades between 11:15 and 12:00 Paris on the day before delivery, from EEX's public website data (15-minute delay). Statistics are derived by the author; no EEX data are redistributed, and only pooled statistics over at least 30 windows are shown. This project is not affiliated with or endorsed by EEX AG.
+
+Details and the optional Energy-Charts source: [docs/data.md](docs/data.md). Forecasts and derived figures are the author's own. Research, not trading advice.
 
 ## Licence
 
-The code is released under the MIT licence (see `LICENSE`). The data keep their own licences, listed under Attribution and licences above.
+Code under the MIT licence (see [LICENSE](LICENSE)). The data keep their own licences, listed above.
+
+Built by Gerardo Rosales ([github.com/gerardorosch02](https://github.com/gerardorosch02)).
