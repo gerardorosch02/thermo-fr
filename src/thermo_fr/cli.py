@@ -243,11 +243,52 @@ def cmd_morning_run(args) -> None:
         fallback = Path(args.fallback_model_file) if args.fallback_model_file else None
         summary = morning_run(store, args.date, kind=args.kind, inputs_path=Path(args.data), cache_dir=Path(args.cache_dir),
                               reports_dir=Path(args.reports_dir), feature_sets=tuple(args.feature_sets), model_file=model_file, fallback_model_file=fallback,
-                              wind_weights=Path(args.wind_weights), solar_weights=Path(args.solar_weights))
+                              wind_weights=Path(args.wind_weights), solar_weights=Path(args.solar_weights),
+                              shadow_window_dir=Path(args.shadow_dir) / "fresh" if args.save_shadow_window else None)
     finally:
         store.close()
     print(f"morning-run {summary['status']}: delivery day {summary['delivery_day']}, "
           f"forecasts {', '.join(summary['forecasts']) or 'none'}" + (f"; errors: {summary['errors']}" if summary["errors"] else ""))
+
+
+def cmd_shadow_run(args) -> None:
+    from .forecast.jobs import setup_logging
+    from .forecast.shadow import shadow_run
+    from .forecast.store import Store
+
+    setup_logging("shadow-run", logs_dir=Path(args.logs_dir))
+    store = Store(Path(args.db))
+    try:
+        summary = shadow_run(store, args.date, kind=args.kind, inputs_path=Path(args.data), fresh_dir=Path(args.shadow_dir) / "fresh")
+    finally:
+        store.close()
+    print(f"shadow-run {summary['status']}: delivery day {summary['delivery_day']}" + (f"; {summary.get('message')}" if summary.get("message") else ""))
+
+
+def cmd_shadow_settle(args) -> None:
+    from .forecast.jobs import setup_logging
+    from .forecast.shadow import shadow_settle
+    from .forecast.store import Store
+
+    setup_logging("shadow-settle", logs_dir=Path(args.logs_dir))
+    store = Store(Path(args.db))
+    try:
+        shadow_settle(store, kind=args.kind)
+    finally:
+        store.close()
+
+
+def cmd_shadow_init(args) -> None:
+    from .forecast.jobs import setup_logging
+    from .forecast.shadow import shadow_init
+    from .forecast.store import Store
+
+    setup_logging("shadow-init", logs_dir=Path(args.logs_dir))
+    store = Store(Path(args.db))
+    try:
+        shadow_init(store, inputs_path=Path(args.data), fresh_dir=Path(args.shadow_dir) / "fresh")
+    finally:
+        store.close()
 
 
 def cmd_settle(args) -> None:
@@ -899,7 +940,32 @@ def main(argv=None) -> None:
                          help="used instead of --model-file when an input that model needs is missing for the day (recorded in data_status)")
     morning.add_argument("--wind-weights", default="published/model/wind_proxy.json", help="wind proxy calibration written by refit-model")
     morning.add_argument("--solar-weights", default="published/model/solar_proxy.json", help="solar proxy calibration written by refit-model")
+    morning.add_argument("--save-shadow-window", action="store_true",
+                         help="laptop only: also save the freshly fetched inputs window for the S2 shadow (under --shadow-dir/fresh)")
+    morning.add_argument("--shadow-dir", default="data/shadow")
     morning.set_defaults(func=cmd_morning_run)
+
+    shr = sub.add_parser("shadow-run", help="laptop only: issue the S2 shadow (and S1, LEAR) next to the latest pre-market honest_v2 version; never published")
+    shr.add_argument("--date", default=None, help="delivery day, default tomorrow (Paris)")
+    shr.add_argument("--kind", default="scheduled", choices=("scheduled", "manual", "test"))
+    shr.add_argument("--db", default="data/forecast.db")
+    shr.add_argument("--data", default="data/forecast/inputs.csv")
+    shr.add_argument("--shadow-dir", default="data/shadow")
+    shr.add_argument("--logs-dir", default="logs")
+    shr.set_defaults(func=cmd_shadow_run)
+
+    shs = sub.add_parser("shadow-settle", help="laptop only: score the shadow versions; the pre-registered statistics at day 40 only")
+    shs.add_argument("--kind", default="scheduled", choices=("scheduled", "manual", "test"))
+    shs.add_argument("--db", default="data/forecast.db")
+    shs.add_argument("--logs-dir", default="logs")
+    shs.set_defaults(func=cmd_shadow_settle)
+
+    shi = sub.add_parser("shadow-init", help="laptop only, once: store S2's weight state from the 2026-09-01 to 10-13 walk-forward (never shown)")
+    shi.add_argument("--db", default="data/forecast.db")
+    shi.add_argument("--data", default="data/forecast/inputs.csv")
+    shi.add_argument("--shadow-dir", default="data/shadow")
+    shi.add_argument("--logs-dir", default="logs")
+    shi.set_defaults(func=cmd_shadow_init)
 
     stl = sub.add_parser("settle", help="Fetch actual prices and score the stored forecasts")
     stl.add_argument("--kind", default="scheduled", choices=("scheduled", "manual", "test"))
