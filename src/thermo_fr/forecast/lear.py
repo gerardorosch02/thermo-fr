@@ -35,7 +35,8 @@ import numpy as np
 import pandas as pd
 
 from .daytypes import day_table
-from .features import FEATURE_TIMINGS, LEAR_BLOCK_TIMINGS, LEAR_COLUMNS, build_features
+from .features import (FEATURE_TIMINGS, LEAR_BLOCK_TIMINGS, LEAR_COLUMNS, LEAR_NH_BLOCK_TIMINGS, LEAR_NH_BLOCKS, LEAR_NH_SOURCE,
+                       build_features, lear_columns, lear_nh_columns)
 from .timing import check_point_in_time
 from .transforms import MAD_SCALE, asinh_forward, asinh_inverse, robust_scale  # noqa: F401
 
@@ -44,7 +45,7 @@ LEAR_START = pd.Timestamp("2021-01-01")  # windows are truncated here
 PRICE_LAGS = (1, 2, 3, 7)
 HOURS = list(range(24))
 
-BLOCK_TIMINGS = LEAR_BLOCK_TIMINGS  # block name -> timing rule (registered column by column in features.FEATURE_TIMINGS)
+BLOCK_TIMINGS = {**LEAR_BLOCK_TIMINGS, **LEAR_NH_BLOCK_TIMINGS}  # block name -> timing rule (registered column by column in features.FEATURE_TIMINGS)
 PRICE_BLOCKS = ("price_d1", "price_d2", "price_d3", "price_d7")
 VECTOR_BLOCKS = PRICE_BLOCKS + ("load_d0", "load_d1", "load_d7", "temp_d0", "wind_d0", "rad_d0", "ch_d1", "de_lu_d1")
 
@@ -59,9 +60,13 @@ def day_hour_table(values: pd.Series, days: pd.DatetimeIndex, hours: np.ndarray)
     return table
 
 
-def lear_design(hourly: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+def lear_design(hourly: pd.DataFrame, nh: pd.DataFrame | None = None, variant: str = "base") -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """(X, Y, blocks): X one row per delivery day with every regressor, Y the 24 prices of the day, blocks the column names of
-    each block. Built only from columns whose timing rules are in BLOCK_TIMINGS."""
+    each block. Built only from columns whose timing rules are in BLOCK_TIMINGS.
+
+    variant "n1", "n2" or "n3" (branch nuclear-hydro) appends the blocks of features.LEAR_NH_BLOCKS from the `nh` frame: the 24-hour
+    vector of nuclear availability for D (clock hours, as the other vectors) and scalars for the change and the hydro values,
+    each with its own scaling. The base design is unchanged."""
     table = build_features(hourly, "honest_v2")
     info, X = table.info, table.X
     days = pd.DatetimeIndex(info["delivery_day"])
@@ -111,8 +116,20 @@ def lear_design(hourly: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]
     dummies.update({c: cal[c].astype(float) for c in ("bridge_day", "pre_holiday", "post_holiday")})
     parts.append(pd.DataFrame(dummies, index=all_days))
     blocks["calendar"] = list(dummies)
+    extra = LEAR_NH_BLOCKS[variant]
+    if extra:
+        if nh is None:
+            raise ValueError(f"LEAR variant {variant} needs the nuclear-hydro inputs")
+        frame = nh.reindex(X.index)
+        for name in extra:
+            if name == "nuc_avail_d0":
+                add(name, daily(frame["nuc_avail_mw"]))
+            else:
+                value = frame[LEAR_NH_SOURCE[name]].groupby(days).first().reindex(all_days)
+                parts.append(pd.DataFrame({name: value.to_numpy()}, index=all_days))
+                blocks[name] = lear_nh_columns(name)
     design = pd.concat(parts, axis=1)
-    assert list(design.columns) == LEAR_COLUMNS
+    assert list(design.columns) == lear_columns(variant)
     return design, price, blocks
 
 
@@ -203,14 +220,43 @@ def window_days(day: pd.Timestamp, length: int | None, start: pd.Timestamp = LEA
     return first, last
 
 
-def _fit_predict_window(design, price, blocks, anchor, w, start, group):
+def _fit_predict_window(design, price, blocks, anchor, w, start, group, coef_blocks=None):
     first, last = window_days(anchor, w, start)
     train = (design.index >= first) & (design.index <= last)
-    return predict_window(fit_window(design[train], price[train], blocks), design.loc[group], blocks)
+    fitted = fit_window(design[train], price[train], blocks)
+    pred = predict_window(fitted, design.loc[group], blocks)
+    if coef_blocks is None:
+        return pred
+    return pred, coefficient_rows(fitted, design.columns, blocks, coef_blocks, anchor, w)
+
+
+def coefficient_rows(fitted, columns, blocks: dict, coef_blocks, day, window) -> list:
+    """Per hourly model: the coefficient on the own-hour nuclear availability, the sum over that 24-hour block, and the coefficient
+    of each scalar block (on the scaled asinh inputs; the transforms are increasing, so the signs carry over)."""
+    if fitted is None:
+        return []
+    position = {c: i for i, c in enumerate(columns)}
+    rows = []
+    for h, model in zip(HOURS, fitted["models"]):
+        coef = model.coef_
+        row = {"day": day, "window": window, "hour": h}
+        for name in coef_blocks:
+            if name not in blocks:
+                continue
+            if name == "nuc_avail_d0":
+                idx = [position[c] for c in blocks[name]]
+                row["nuc_own_hour"] = float(coef[idx[h]])
+                row["nuc_block_sum"] = float(coef[idx].sum())
+                row["nuc_block_nonzero"] = int((coef[idx] != 0).sum())
+            else:
+                row[name] = float(coef[position[blocks[name][0]]])
+        rows.append(row)
+    return rows
 
 
 def lear_forecast_days(design: pd.DataFrame, price: pd.DataFrame, blocks: dict, days, windows=LEAR_WINDOWS, recalibrate: str = "daily",
-                       start: pd.Timestamp = LEAR_START, log=print, n_jobs: int = 1) -> pd.DataFrame:
+                       start: pd.Timestamp = LEAR_START, log=print, n_jobs: int = 1, coef_sink: list | None = None,
+                       coef_blocks=None) -> pd.DataFrame:
     """Daily table (index day, MultiIndex columns (window, hour) plus ('mean', hour)) of LEAR forecasts for `days`.
 
     recalibrate="daily": every day refits on its own windows (ending D-1). "monthly": one fit per month on windows ending on
@@ -221,7 +267,12 @@ def lear_forecast_days(design: pd.DataFrame, price: pd.DataFrame, blocks: dict, 
     groups = [[d] for d in days] if recalibrate == "daily" else [list(g) for _, g in pd.Series(days, index=days).groupby(days.to_period("M"))]
     for group in groups:
         anchor = pd.Timestamp(group[0]) if recalibrate == "daily" else pd.Timestamp(group[0]).to_period("M").to_timestamp()
-        if n_jobs == 1:
+        if coef_sink is not None:
+            pairs = [_fit_predict_window(design, price, blocks, anchor, w, start, group, coef_blocks) for w in windows]
+            preds = [p for p, _ in pairs]
+            for _, rows in pairs:
+                coef_sink.extend(rows)
+        elif n_jobs == 1:
             preds = [_fit_predict_window(design, price, blocks, anchor, w, start, group) for w in windows]
         else:
             from joblib import Parallel, delayed
@@ -238,17 +289,20 @@ def lear_forecast_days(design: pd.DataFrame, price: pd.DataFrame, blocks: dict, 
 
 
 def lear_walk_forward(hourly: pd.DataFrame, test_start: str, test_end: str, windows=LEAR_WINDOWS, recalibrate: str = "daily",
-                      start: pd.Timestamp = LEAR_START, log=print, n_jobs: int = 1) -> pd.DataFrame:
+                      start: pd.Timestamp = LEAR_START, log=print, n_jobs: int = 1, nh: pd.DataFrame | None = None,
+                      variant: str = "base", coef_sink: list | None = None) -> pd.DataFrame:
     """LEAR forecasts on the hourly rows of the test window [test_start, test_end), with the honest_v2 info columns, the actual
-    price and the strict flag, so they align row for row with the gradient boosting walk-forward."""
+    price and the strict flag, so they align row for row with the gradient boosting walk-forward. `variant` and `nh` add the
+    nuclear-hydro blocks (lear_design); `coef_sink`, a list, collects their coefficients per window and hourly model."""
     hourly = hourly.sort_index()
-    design, price, blocks = lear_design(hourly)
+    design, price, blocks = lear_design(hourly, nh, variant)
     table = build_features(hourly, "honest_v2")
     info = table.info
     rows = (info["delivery_day"] >= pd.Timestamp(test_start)) & (info["delivery_day"] < pd.Timestamp(test_end))
     assert_gate(table.X.index[rows], blocks)
     days = pd.DatetimeIndex(sorted(info.loc[rows, "delivery_day"].unique()))
-    daily = lear_forecast_days(design, price, blocks, days, windows, recalibrate, start, log, n_jobs)
+    daily = lear_forecast_days(design, price, blocks, days, windows, recalibrate, start, log, n_jobs, coef_sink=coef_sink,
+                               coef_blocks=LEAR_NH_BLOCKS[variant] if coef_sink is not None else None)
     out = info[rows].copy()
     out["actual"] = table.y[rows]
     keys = list(zip(out["delivery_day"], out["hour"]))

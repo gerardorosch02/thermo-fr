@@ -205,6 +205,126 @@ def cmd_sprint_report(args) -> None:
     print(json.dumps({k: report[k] for k in ("baseline_mae", "to_shadow", "finding")}, indent=2))
 
 
+def cmd_nh_inputs(args) -> None:
+    """Nuclear availability and hydro values as known at 10:05 Paris on D-1 for every delivery day of the inputs table (no price
+    is read), cached for the nh stages."""
+    import glob
+
+    from .data.edf_remit import load_edf_remit
+    from .data.hydro import load_a72, load_bfe_ogd17
+    from .forecast import nuclear_hydro as nhm
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    index = pd.read_csv(Path(args.data), usecols=["timestamp_utc"])["timestamp_utc"]
+    index = pd.DatetimeIndex(pd.to_datetime(index, utc=True))
+    days = pd.date_range(index.min().tz_convert(nhm.LOCAL_TZ).normalize().tz_localize(None),
+                         index.max().tz_convert(nhm.LOCAL_TZ).normalize().tz_localize(None), freq="D")
+    history = load_edf_remit(args.edf_history)
+    rolling = load_edf_remit(args.edf_rolling) if args.edf_rolling else None
+    register, merge_facts = nhm.merge_exports(history, rolling)
+    reg = nhm.NuclearRegister(register)
+    nuclear_hourly, nuclear_daily = nhm.nuclear_daily_table(reg, days, log=print)
+    a72 = load_a72(sorted(glob.glob(str(Path(args.hydro_dir) / "entsoe_A72_*.xml"))))
+    bfe = load_bfe_ogd17(sorted(glob.glob(str(Path(args.hydro_dir) / "bfe_ogd17__*.csv")))[-1])
+    hydro_daily = nhm.hydro_daily_table(a72, bfe, days)
+    frame = nhm.hourly_inputs(index, nuclear_hourly, nuclear_daily, hydro_daily)
+    frame.to_csv(out / "nh_hourly.csv", index_label="timestamp_utc")
+    nuclear_daily.to_csv(out / "nuclear_daily.csv", index_label="delivery_day")
+    hydro_daily.to_csv(out / "hydro_daily.csv", index_label="delivery_day")
+    facts = {"merge": merge_facts, "register_checks": nhm.register_checks(register), "nuclear_counts": reg.counts.summary(),
+             "chronicle_rows_excluded": reg.chronicles_excluded, "chronicle_notices_excluded": reg.chronicle_notices_excluded,
+             "units": reg.units, "days": [str(days.min().date()), str(days.max().date())],
+             "a72_age_weeks_counts": hydro_daily["a72_age_weeks"].value_counts(dropna=False).sort_index().to_dict(),
+             "hydro_missing_days": {c: int(hydro_daily[c].isna().sum()) for c in nhm.HYDRO_FEATURES}}
+    (out / "nh_inputs_facts.json").write_text(json.dumps(facts, indent=2, default=str))
+    print(json.dumps(facts, indent=1, default=str)[:4000])
+
+
+def cmd_nh_stage(args) -> None:
+    """Resumable stages of the nuclear-hydro run: gbm (S2's honest_v2 and the N1 to N3 GBM members) or LEAR for one variant."""
+    import time
+
+    from .forecast.inputs import load_inputs
+    from .forecast.lear import lear_walk_forward
+    from .forecast.nh_sprint import VARIANTS, gbm_stage, load_nh
+    from .forecast.sprint import check_window
+
+    check_window(args.test_end)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    hourly = load_inputs(Path(args.data))
+    nh = load_nh(args.nh)["hourly"]
+    if args.stage == "gbm":
+        wanted = args.only.split(",") if args.only else list(VARIANTS)
+        todo = [v for v in VARIANTS if v in wanted and not (out / f"gbm_{v}.csv").exists()]
+        for v in todo:
+            started = time.time()
+            preds, shares = gbm_stage(hourly, nh, args.test_start, args.test_end, sets=[v])
+            pd.DataFrame(shares).to_csv(out / f"gain_shares_{v}.csv", index=False)
+            preds[v].to_csv(out / f"gbm_{v}.csv", index_label="timestamp_utc")
+            print(f"gbm {v} written in {time.time() - started:.0f} s", flush=True)
+        return
+    variant = args.variant
+    months = pd.period_range(args.months.split(":")[0], args.months.split(":")[1], freq="M") if args.months else \
+        pd.period_range(args.test_start, pd.Timestamp(args.test_end) - pd.Timedelta(days=1), freq="M")
+    for month in months:
+        path = out / f"lear_{variant}_{month}.csv"
+        if path.exists():
+            continue
+        started = time.time()
+        sink = [] if VARIANTS[variant][1] != "base" else None
+        first = max(month.start_time, pd.Timestamp(args.test_start))
+        last = min((month + 1).start_time, pd.Timestamp(args.test_end))
+        frame = lear_walk_forward(hourly, first.strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d"),
+                                  nh=nh, variant=VARIANTS[variant][1], coef_sink=sink)
+        if sink is not None:
+            pd.DataFrame(sink).to_csv(out / f"coef_{variant}_{month}.csv", index=False)
+        tmp = path.with_suffix(".tmp")
+        frame.to_csv(tmp, index_label="timestamp_utc")
+        tmp.replace(path)
+        print(f"lear {variant} {month} written in {time.time() - started:.0f} s", flush=True)
+
+
+def cmd_nh_report(args) -> None:
+    from .forecast.inputs import load_inputs
+    from .forecast.nh_sprint import VARIANTS, assemble, load_nh, selection_report, write_json
+    from .forecast.sprint import check_window
+
+    check_window(args.test_end)
+    out = Path(args.out)
+    hourly = load_inputs(Path(args.data))
+    nh = load_nh(args.nh)
+
+    def read(path):
+        frame = pd.read_csv(path, index_col=0, parse_dates=["delivery_day"])
+        frame.index = pd.to_datetime(frame.index, utc=True)
+        return frame
+
+    months = pd.period_range(args.test_start, pd.Timestamp(args.test_end) - pd.Timedelta(days=1), freq="M")
+    lear, coefs, gbm = {}, {}, {}
+    for v in VARIANTS:
+        names = [out / f"lear_{v}_{m}.csv" for m in months]
+        if not all(p.exists() for p in names) and v == "S2" and args.base_lear_dir:
+            names = [Path(args.base_lear_dir) / f"lear_{m}.csv" for m in months]
+        missing = [str(p) for p in names if not p.exists()]
+        if missing:
+            raise SystemExit(f"LEAR files missing for {v}: {len(missing)}, first {missing[0]}")
+        lear[v] = pd.concat([read(p) for p in names])
+        gbm[v] = read(out / f"gbm_{v}.csv")
+        cpaths = [out / f"coef_{v}_{m}.csv" for m in months]
+        coefs[v] = pd.concat([pd.read_csv(p) for p in cpaths if p.exists()]) if any(p.exists() for p in cpaths) else None
+    shares = pd.concat([pd.read_csv(out / f"gain_shares_{v}.csv") for v in VARIANTS if (out / f"gain_shares_{v}.csv").exists()])
+    frame = assemble(gbm, lear)
+    frame.to_csv(out / "nh_predictions.csv", index_label="timestamp_utc")
+    report = selection_report(frame, hourly, nh["nuclear_daily"], shares, coefs)
+    report["s2_lear_source"] = "rerun on this branch" if all((out / f"lear_S2_{m}.csv").exists() for m in months) else "earlier sprint run"
+    write_json(out / "nh_report.json", report)
+    print(json.dumps({k: report[k] for k in ("reference_mae", "reference_reproduces", "to_shadow", "finding")}, indent=2))
+    for name, c in report["candidates"].items():
+        print(f"{name}: gain {c['gain']:+.4f}, conditions {c['conditions']}")
+
+
 def cmd_forecast(args) -> None:
     from .forecast.day import forecast_day, refresh_window
     from .forecast.inputs import load_inputs
@@ -906,6 +1026,35 @@ def main(argv=None) -> None:
     srp.add_argument("--test-start", default="2024-01-01")
     srp.add_argument("--test-end", default="2026-07-01")
     srp.set_defaults(func=cmd_sprint_report)
+
+    nhi = sub.add_parser("nh-inputs", help="nuclear-hydro: availability and hydro as known at 10:05 Paris on D-1 for every delivery day")
+    nhi.add_argument("--data", default="data/forecast/inputs.csv")
+    nhi.add_argument("--edf-history", required=True)
+    nhi.add_argument("--edf-rolling", default=None)
+    nhi.add_argument("--hydro-dir", default="data/hydro")
+    nhi.add_argument("--out", required=True)
+    nhi.set_defaults(func=cmd_nh_inputs)
+
+    nhs = sub.add_parser("nh-stage", help="nuclear-hydro, resumable: gbm (S2, N1 to N3 members) or LEAR for one variant month by month")
+    nhs.add_argument("stage", choices=["gbm", "lear"])
+    nhs.add_argument("--variant", default="S2", choices=["S2", "N1", "N2", "N3"])
+    nhs.add_argument("--data", default="data/forecast/inputs.csv")
+    nhs.add_argument("--nh", required=True, help="directory written by nh-inputs")
+    nhs.add_argument("--out", required=True)
+    nhs.add_argument("--test-start", default="2024-01-01")
+    nhs.add_argument("--test-end", default="2026-07-01")
+    nhs.add_argument("--months", default=None)
+    nhs.add_argument("--only", default=None, help="gbm stage: variants to run, e.g. S2 or N1,N2,N3 (default all)")
+    nhs.set_defaults(func=cmd_nh_stage)
+
+    nhr = sub.add_parser("nh-report", help="nuclear-hydro: assemble, combine, apply the pre-registered rule against S2")
+    nhr.add_argument("--data", default="data/forecast/inputs.csv")
+    nhr.add_argument("--nh", required=True)
+    nhr.add_argument("--out", required=True)
+    nhr.add_argument("--test-start", default="2024-01-01")
+    nhr.add_argument("--test-end", default="2026-07-01")
+    nhr.add_argument("--base-lear-dir", default=None, help="S2's LEAR files from the sprint run, used only if the rerun is absent")
+    nhr.set_defaults(func=cmd_nh_report)
 
     fc = sub.add_parser("forecast", help="Hourly price forecast for one delivery day, as of 12:00 the day before")
     fc.add_argument("--date", required=True, help="delivery day, YYYY-MM-DD (Paris)")

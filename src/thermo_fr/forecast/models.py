@@ -84,14 +84,17 @@ class _LazyLinear:
 
 
 def fit_predict(name: str, X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame, params: dict | None = None,
-                sample_weight=None) -> np.ndarray:
-    """Fit one model on the training rows (dropping rows without a target) and predict the test rows."""
+                sample_weight=None, model_sink: list | None = None) -> np.ndarray:
+    """Fit one model on the training rows (dropping rows without a target) and predict the test rows. `model_sink`, a list,
+    receives the fitted model (branch nuclear-hydro: split-gain shares)."""
     keep = y_train.notna()
     model = make_model(name, params)
     if sample_weight is None:
         model.fit(X_train[keep], y_train[keep])
     else:
         model.fit(X_train[keep], y_train[keep], sample_weight=np.asarray(sample_weight, dtype=float)[keep.to_numpy()])
+    if model_sink is not None:
+        model_sink.append(model)
     return np.asarray(model.predict(X_test), dtype=float)
 
 

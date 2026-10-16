@@ -80,6 +80,10 @@ NEIGHBOUR_LAGS = [f"price_{z.lower()}_lag1" for z in NEIGHBOUR_ZONES]
 NEIGHBOUR_SPREADS = [f"spread_{z.lower()}_lag1" for z in NEIGHBOUR_ZONES]
 NEIGHBOURS = NEIGHBOUR_LAGS + NEIGHBOUR_SPREADS
 RESIDUAL_V2 = ["residual_v2_mw"]
+# branch nuclear-hydro (nuclear_hydro_prereg.md): nuclear availability as known at issue, and hydro reservoir levels
+NUCLEAR_AVAIL = ["nuc_avail_mw", "nuc_avail_chg_mw", "residual_avail_mw"]
+HYDRO = ["fr_hydro_fill_mwh", "fr_hydro_chg4w_mwh", "ch_hydro_anom_pct"]
+NH_INPUTS = ["nuc_avail_mw", "nuc_avail_chg_mw"] + HYDRO  # columns of the `nh` frame passed to build_features
 FEATURES = {
     "honest": HONEST,
     "honest_wind": HONEST_WIND,
@@ -91,7 +95,11 @@ FEATURES = {
     "honest_neighbours": HONEST + NEIGHBOURS,
     "honest_fund": HONEST + NUCLEAR + NEIGHBOURS,
     "honest_v2": HONEST + NUCLEAR + NEIGHBOURS + RESIDUAL_V2,
+    "honest_v2_n1": HONEST + NUCLEAR + NEIGHBOURS + RESIDUAL_V2 + NUCLEAR_AVAIL,
+    "honest_v2_n2": HONEST + NUCLEAR + NEIGHBOURS + RESIDUAL_V2 + HYDRO,
+    "honest_v2_n3": HONEST + NUCLEAR + NEIGHBOURS + RESIDUAL_V2 + NUCLEAR_AVAIL + HYDRO,
 }
+NH_SETS = ("honest_v2_n1", "honest_v2_n2", "honest_v2_n3")
 FEATURE_SETS = tuple(FEATURES)
 GATED_SETS = tuple(s for s in FEATURES if s != "extended")  # the sets whose every feature passes the 12:00 gate
 
@@ -118,6 +126,12 @@ FEATURE_TIMINGS = {
     "nuclear_d1_early_mw": "nuclear_d1",
     **{c: "neighbour_price_lag1" for c in NEIGHBOUR_LAGS + NEIGHBOUR_SPREADS},
     "residual_v2_mw": "residual_v2",
+    "nuc_avail_mw": "nuclear_avail_asof",
+    "nuc_avail_chg_mw": "nuclear_avail_asof",
+    "residual_avail_mw": "residual_avail",
+    "fr_hydro_fill_mwh": "hydro_a72_asof",
+    "fr_hydro_chg4w_mwh": "hydro_a72_asof",
+    "ch_hydro_anom_pct": "hydro_bfe_asof",
 }
 
 
@@ -136,6 +150,26 @@ LEAR_CALENDAR = [f"dow_{k}" for k in range(7)] + [f"day_type_{k}" for k in range
 LEAR_COLUMNS = ([f"{b}_h{h:02d}" for b in LEAR_VECTOR_BLOCKS for h in range(24)] + ["nuclear_d1_early"] + LEAR_CALENDAR)
 FEATURE_TIMINGS.update({f"{b}_h{h:02d}": LEAR_BLOCK_TIMINGS[b] for b in LEAR_VECTOR_BLOCKS for h in range(24)})
 FEATURE_TIMINGS.update({"nuclear_d1_early": "nuclear_d1", **{c: "calendar" for c in LEAR_CALENDAR}})
+
+# LEAR extra blocks for the nuclear-hydro candidates (branch nuclear-hydro): N1 adds the 24-hour vector of nuclear availability for
+# D and the scalar change; N2 the three hydro scalars; N3 both.
+LEAR_NH_BLOCK_TIMINGS = {"nuc_avail_d0": "nuclear_avail_asof", "nuc_avail_chg": "nuclear_avail_asof",
+                         "fr_hydro_fill": "hydro_a72_asof", "fr_hydro_chg4w": "hydro_a72_asof", "ch_hydro_anom": "hydro_bfe_asof"}
+LEAR_NH_BLOCKS = {"base": (), "n1": ("nuc_avail_d0", "nuc_avail_chg"), "n2": ("fr_hydro_fill", "fr_hydro_chg4w", "ch_hydro_anom"),
+                  "n3": ("nuc_avail_d0", "nuc_avail_chg", "fr_hydro_fill", "fr_hydro_chg4w", "ch_hydro_anom")}
+LEAR_NH_SOURCE = {"nuc_avail_chg": "nuc_avail_chg_mw", "fr_hydro_fill": "fr_hydro_fill_mwh", "fr_hydro_chg4w": "fr_hydro_chg4w_mwh",
+                  "ch_hydro_anom": "ch_hydro_anom_pct"}
+
+
+def lear_nh_columns(block: str) -> list:
+    return [f"{block}_h{h:02d}" for h in range(24)] if block == "nuc_avail_d0" else [block]
+
+
+def lear_columns(variant: str = "base") -> list:
+    return LEAR_COLUMNS + [c for b in LEAR_NH_BLOCKS[variant] for c in lear_nh_columns(b)]
+
+
+FEATURE_TIMINGS.update({c: LEAR_NH_BLOCK_TIMINGS[b] for b in LEAR_NH_BLOCK_TIMINGS for c in lear_nh_columns(b)})
 
 
 def feature_timings(feature_set: str) -> dict[str, str]:
@@ -235,8 +269,12 @@ def neighbour_features(hourly: pd.DataFrame, calendar: pd.DataFrame, price_lag1:
     return out
 
 
-def build_features(hourly: pd.DataFrame, feature_set: str = "honest") -> FeatureTable:
-    """Feature table for one feature set from the inputs table of forecast/inputs.py."""
+def build_features(hourly: pd.DataFrame, feature_set: str = "honest", nh: pd.DataFrame | None = None) -> FeatureTable:
+    """Feature table for one feature set from the inputs table of forecast/inputs.py.
+
+    `nh` (branch nuclear-hydro) holds the as-of nuclear availability and hydro values on the hourly UTC index
+    (forecast/nuclear_hydro.py `hourly_inputs`); the sets honest_v2_n1 to n3 need it.
+    """
     if feature_set not in FEATURES:
         raise ValueError(f"feature_set must be one of {tuple(FEATURES)}")
     hourly = hourly.sort_index()
@@ -267,6 +305,14 @@ def build_features(hourly: pd.DataFrame, feature_set: str = "honest") -> Feature
         X = X.join(neighbour_features(hourly, calendar, X["price_lag1"]))
     if wanted & set(RESIDUAL_V2):
         X["residual_v2_mw"] = X["load_fc_mw"] - X["wind_proxy_mw"] - X["solar_proxy_mw"] - X["nuclear_d1_early_mw"]
+    needed = [c for c in NH_INPUTS if c in wanted] + (["nuc_avail_mw"] if "residual_avail_mw" in wanted else [])
+    if needed:
+        if nh is None or any(c not in nh for c in needed):
+            raise ValueError(f"feature set {feature_set} needs the nuclear-hydro inputs {sorted(set(needed))}")
+        for c in dict.fromkeys(needed):
+            X[c] = nh[c].reindex(hourly.index).to_numpy()
+        if "residual_avail_mw" in wanted:
+            X["residual_avail_mw"] = X["load_fc_mw"] - X["wind_proxy_mw"] - X["solar_proxy_mw"] - X["nuc_avail_mw"]
 
     info = calendar[["delivery_day", "hour", "dow", "holiday", "is_peak"]].copy()
     info["weather_point_in_time"] = point_in_time.to_numpy()

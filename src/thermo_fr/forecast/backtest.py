@@ -95,8 +95,10 @@ def fit_predict_options(name: str, table: FeatureTable, train, test, start: pd.T
     return np.mean(preds, axis=0)
 
 
-def walk_forward(table: FeatureTable, test_start: str, test_end: str, models=MODELS, log=print, options: FitOptions | None = None) -> BacktestResult:
-    """Retrain at the start of every month on all earlier days, forecast that month."""
+def walk_forward(table: FeatureTable, test_start: str, test_end: str, models=MODELS, log=print, options: FitOptions | None = None,
+                 on_fit=None) -> BacktestResult:
+    """Retrain at the start of every month on all earlier days, forecast that month. `on_fit(month_start, name, model)` is called
+    with each default-path fit (branch nuclear-hydro: split-gain shares); it does not change any forecast."""
     options = options or FitOptions()
     days = table.info["delivery_day"]
     frames = []
@@ -113,7 +115,12 @@ def walk_forward(table: FeatureTable, test_start: str, test_end: str, models=MOD
         out = out.join(benchmark_predictions(X_test))
         for name in models:
             if options.is_default:
-                out[name] = fit_predict(name, X_train, y_train, X_test)
+                if on_fit is None:
+                    out[name] = fit_predict(name, X_train, y_train, X_test)
+                else:
+                    sink = []
+                    out[name] = fit_predict(name, X_train, y_train, X_test, model_sink=sink)
+                    on_fit(start, name, sink[0])
             else:
                 out[name] = fit_predict_options(name, table, train, test, start, options)
         out["strict"] = table.info.loc[test, "weather_point_in_time"].to_numpy()

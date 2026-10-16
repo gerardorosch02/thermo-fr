@@ -67,6 +67,11 @@ query time). Sources:
   time, so that feature is known at the pre-market issue time itself and
   never later.
 
+- Nuclear availability and hydro reservoir levels (branch nuclear-hydro, see
+  forecast/nuclear_hydro.py): rebuilt from versioned sources as known at the
+  pre-market issue time, so the rules are the issue time itself; the builder
+  asserts on the data that every version or week used was published by then.
+
 Two deadlines are checked. The gate (12:00 Paris on D-1) is the hard
 constraint every honest feature must meet. The pre-market issue time,
 PREMARKET_ISSUE (10:05 Paris on D-1, the start of the earliest scheduled
@@ -242,6 +247,29 @@ def residual_v2_issue(index) -> pd.DatetimeIndex:
     return latest
 
 
+def nuclear_avail_asof_issue(index) -> pd.DatetimeIndex:
+    """Nuclear availability for D rebuilt from the EDF REMIT versions published by 10:05 Paris on D-1 (branch nuclear-hydro): known
+    at the pre-market issue time itself. Whether every version used was published by then is asserted by the builder on the
+    data (forecast/nuclear_hydro.py), not by this rule."""
+    return premarket_issue_for(index)
+
+
+def hydro_asof_issue(index) -> pd.DatetimeIndex:
+    """Hydro reservoir values (ENTSO-E A72 FR, BFE ogd17) as known at 10:05 Paris on D-1: the latest week whose known-from time
+    (A72: 23:59 Paris on the third French working day after the week; BFE: the row date plus 25 days) is at or before then.
+    The builder asserts the known-from time of every value used."""
+    return premarket_issue_for(index)
+
+
+def residual_avail_issue(index) -> pd.DatetimeIndex:
+    """Load forecast minus the generation proxies minus nuclear availability as known at issue: the latest of the three."""
+    candidates = [load_forecast_issue(index), generation_proxy_issue(index), nuclear_avail_asof_issue(index)]
+    latest = candidates[0]
+    for other in candidates[1:]:
+        latest = pd.DatetimeIndex(latest.where(latest >= other, other))
+    return latest
+
+
 @dataclass(frozen=True)
 class InputTiming:
     name: str
@@ -304,6 +332,22 @@ TIMINGS = {
     "residual_v2": InputTiming(
         "residual_v2", residual_v2_issue,
         "Load forecast minus wind and solar proxies minus the latest known nuclear generation: known with the load forecast, 10:00 Paris on D-1.",
+    ),
+    "nuclear_avail_asof": InputTiming(
+        "nuclear_avail_asof", nuclear_avail_asof_issue,
+        "EDF REMIT nuclear availability for D from the notice versions published by 10:05 Paris on D-1 (and for D-1 by 12:00 on D-2).",
+    ),
+    "hydro_a72_asof": InputTiming(
+        "hydro_a72_asof", hydro_asof_issue,
+        "ENTSO-E A72 FR reservoir filling: latest week known at 10:05 Paris on D-1 (due 23:59 on the third French working day after it).",
+    ),
+    "hydro_bfe_asof": InputTiming(
+        "hydro_bfe_asof", hydro_asof_issue,
+        "BFE ogd17 Swiss lake storage: latest row known at 10:05 Paris on D-1 (row date plus 25 days).",
+    ),
+    "residual_avail": InputTiming(
+        "residual_avail", residual_avail_issue,
+        "Load forecast minus wind and solar proxies minus nuclear availability as known at issue: 10:05 Paris on D-1.",
     ),
     "fuel_index_lag1": InputTiming(
         "fuel_index_lag1", fuel_index_lag1_issue,
