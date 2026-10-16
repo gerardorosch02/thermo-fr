@@ -11,6 +11,13 @@ ENTSO-E wind and solar forecasts); that is recorded once per backtest. Rows
 whose weather came from the historical-forecast proxy (before the as-issued
 archive begins) are still forecast and reported, but flagged as not strict
 and kept out of the strict metrics, for both feature sets.
+
+Branch ttf-gas adds three things, none of which changes a run without them:
+`train_start` (training rows limited to delivery days on or after it, the
+same for every set of a run), a hard gate for HARD_GATED_SETS (the run stops
+with LookaheadError if a feature fails the 12:00 gate or the 10:05 pre-market
+deadline, or a gas value was known after the issue time), and, for the gas
+sets, the control's forecast on the rows whose gas features are missing.
 """
 
 from dataclasses import dataclass, field
@@ -18,7 +25,9 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .features import FeatureTable, build_features, feature_timings
+from .features import (GAS_CONTROL, GAS_SETS, HARD_GATED_SETS, TRAIN_START_SETS, FeatureTable, build_features,
+                       feature_timings)
+from .gas import GAS_TRAIN_START, assert_known_before_issue
 from .models import BENCHMARKS, MODELS, benchmark_predictions, fit_predict
 from .timing import LookaheadError, check_point_in_time
 
@@ -40,23 +49,33 @@ def month_starts(test_start: str, test_end: str) -> list[pd.Timestamp]:
     return list(pd.date_range(pd.Timestamp(test_start).normalize(), pd.Timestamp(test_end), freq="MS", inclusive="left"))
 
 
-def walk_forward(table: FeatureTable, test_start: str, test_end: str, models=MODELS, log=print) -> BacktestResult:
-    """Retrain at the start of every month on all earlier days, forecast that month."""
+def walk_forward(table: FeatureTable, test_start: str, test_end: str, models=MODELS, log=print,
+                 train_start: str | None = None) -> BacktestResult:
+    """Retrain at the start of every month on all earlier days (from `train_start` if given), forecast that month."""
     days = table.info["delivery_day"]
     frames = []
     months = month_starts(test_start, test_end)
+    first_train = pd.Timestamp(train_start) if train_start is not None else None
     for start in months:
         end = start + pd.DateOffset(months=1)
         train = days < start
+        if first_train is not None:
+            train = train & (days >= first_train)
         test = (days >= start) & (days < end)
         if not test.any():
             continue
+        if table.feature_set in HARD_GATED_SETS:
+            assert_point_in_time(table, table.X.index[test])
         X_train, y_train, X_test = table.X[train], table.y[train], table.X[test]
         out = table.info[test].copy()
         out["actual"] = table.y[test]
         out = out.join(benchmark_predictions(X_test))
         for name in models:
-            out[name] = fit_predict(name, X_train, y_train, X_test)
+            if table.target_offset is None:
+                out[name] = fit_predict(name, X_train, y_train, X_test)
+            else:  # relative target: learn the price minus the offset feature, forecast the output plus it
+                offset = table.target_offset
+                out[name] = fit_predict(name, X_train, y_train - offset[train], X_test) + offset[test].to_numpy()
         out["strict"] = table.info.loc[test, "weather_point_in_time"].to_numpy()
         out["train_rows"] = int(y_train.notna().sum())
         frames.append(out)
@@ -74,6 +93,25 @@ def passes_gate(table: FeatureTable, index) -> bool:
         return True
     except LookaheadError:
         return False
+
+
+def assert_point_in_time(table: FeatureTable, index) -> None:
+    """Stop the run (LookaheadError) unless every feature passes the 12:00 gate and the 10:05 pre-market deadline for every row,
+    and every gas value used was known by the issue time."""
+    check_point_in_time(index, feature_timings(table.feature_set), deadline="gate")
+    check_point_in_time(index, feature_timings(table.feature_set), deadline="premarket")
+    assert_known_before_issue(table.info.loc[index])
+
+
+def use_control_where_gas_missing(predictions: pd.DataFrame, control: pd.DataFrame, models=MODELS) -> pd.DataFrame:
+    """Rows whose gas features are missing are scored with the control's forecast, as the live fallback would issue it."""
+    out = predictions.copy()
+    missing = out["gas_features_missing"].astype(bool)
+    for name in models:
+        if name in out:
+            out.loc[missing, name] = control.loc[out.index[missing], name].to_numpy()
+    out["gas_fallback"] = missing
+    return out
 
 
 def errors(frame: pd.DataFrame, column: str) -> dict:
@@ -211,13 +249,28 @@ def summarise_worst(worst: pd.DataFrame, predictions: pd.DataFrame, model: str =
     }
 
 
-def run_backtest(hourly: pd.DataFrame, test_start: str, test_end: str, feature_sets=DEFAULT_SETS, log=print) -> dict:
-    """The requested feature sets through the walk-forward, with metrics and worst days for each."""
+def run_backtest(hourly: pd.DataFrame, test_start: str, test_end: str, feature_sets=DEFAULT_SETS, log=print, gas=None,
+                 train_start: str | None = None) -> dict:
+    """The requested feature sets through the walk-forward, with metrics and worst days for each.
+
+    `train_start` applies to every set of the run. The ttf-gas sets and their control require it to be GAS_TRAIN_START; a
+    gas set also runs the control (added to the results if not asked for) and is scored with the control's forecast on rows
+    whose gas features are missing.
+    """
+    feature_sets = tuple(feature_sets)
+    if set(feature_sets) & set(TRAIN_START_SETS) and train_start != GAS_TRAIN_START:
+        raise ValueError(f"{sorted(set(feature_sets) & set(TRAIN_START_SETS))} must be trained from {GAS_TRAIN_START}; pass train_start")
+    if set(feature_sets) & set(GAS_SETS) and GAS_CONTROL not in feature_sets:
+        feature_sets = (GAS_CONTROL,) + feature_sets
+    elif set(feature_sets) & set(GAS_SETS):
+        feature_sets = (GAS_CONTROL,) + tuple(s for s in feature_sets if s != GAS_CONTROL)
     results = {}
     for feature_set in feature_sets:
         log(f"Feature set {feature_set}: building features and running the walk-forward ...")
-        table = build_features(hourly, feature_set)
-        bt = walk_forward(table, test_start, test_end, log=log)
+        table = build_features(hourly, feature_set, gas=gas)
+        bt = walk_forward(table, test_start, test_end, log=log, train_start=train_start)
+        if feature_set in GAS_SETS:
+            bt.predictions = use_control_where_gas_missing(bt.predictions, results[GAS_CONTROL]["backtest"].predictions)
         worst = worst_days(bt.predictions, table, hourly)
         results[feature_set] = {
             "table": table,

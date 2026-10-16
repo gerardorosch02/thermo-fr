@@ -20,6 +20,14 @@ SET_LABELS = {
     "honest_solar": "honest_wind plus the solar proxy",
     "honest_calendar": "honest_wind plus the calendar structure and the same-type lag",
     "extended": "extended (may use late information)",
+    "honest_nuclear": "honest plus lagged nuclear generation",
+    "honest_neighbours": "honest plus the neighbours' D-1 prices and spreads",
+    "honest_fund": "honest plus nuclear and neighbours",
+    "honest_v2": "honest_v2 (honest plus nuclear, neighbours and the v2 residual load)",
+    "honest_v2_t23": "honest_v2 trained from 2023-01-01 (the ttf-gas control)",
+    "honest_v2_gas": "honest_v2 plus the TTF front-month changes and the age of the latest close (ttf-gas A)",
+    "honest_v2_gas_srmc": "ttf-gas A plus the gas-plant marginal cost and the D-1 clean spark spread (ttf-gas B)",
+    "honest_v2_gas_rel": "ttf-gas A with the target price minus the D-1 daily mean (ttf-gas C)",
 }
 
 

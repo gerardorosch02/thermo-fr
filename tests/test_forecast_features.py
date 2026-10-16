@@ -151,7 +151,8 @@ def test_honest_features_pass_the_gate_and_extended_do_not(inputs):
     check_point_in_time(table.X.index, feature_timings("honest"))
     with pytest.raises(LookaheadError):
         check_point_in_time(table.X.index, feature_timings("extended"))
-    for name in ("honest_nuclear", "honest_neighbours", "honest_fund", "honest_v2"):
+    for name in ("honest_nuclear", "honest_neighbours", "honest_fund", "honest_v2",
+                 "honest_v2_t23", "honest_v2_gas", "honest_v2_gas_srmc", "honest_v2_gas_rel"):
         check_point_in_time(table.X.index, feature_timings(name))
         check_point_in_time(table.X.index, feature_timings(name), deadline="premarket")
         assert name in GATED_SETS

@@ -111,7 +111,13 @@ def cmd_forecast_backtest(args) -> None:
     sources = json.loads((data.parent / "sources.json").read_text()) if (data.parent / "sources.json").exists() else None
     comparison_path = data.parent / "price_comparison.json"
     comparison = json.loads(comparison_path.read_text()) if comparison_path.exists() else None
-    results = run_backtest(hourly, args.test_start, args.test_end, feature_sets=tuple(args.feature_sets))
+    gas = None
+    if args.gas:
+        from .forecast.gas import load_gas_dir
+
+        gas = load_gas_dir(Path(args.gas), efficiency=args.gas_efficiency, emission_factor=args.gas_emission_factor)
+    results = run_backtest(hourly, args.test_start, args.test_end, feature_sets=tuple(args.feature_sets), gas=gas,
+                           train_start=args.train_start)
     path = write_report(results, out=Path(args.out), sample_week=args.sample_week, sources=sources, comparison=comparison)
     print(path.read_text(encoding="utf-8"))
 
@@ -744,6 +750,13 @@ def main(argv=None) -> None:
     fbt.add_argument("--sample-week", default=None, help="Monday (YYYY-MM-DD) of the week to chart")
     fbt.add_argument("--feature-sets", nargs="+", default=list(DEFAULT_SETS), choices=FEATURE_SETS,
                      help="honest_wind is the honest set before the solar proxy and the calendar structure; honest_base has neither proxy")
+    fbt.add_argument("--train-start", default=None,
+                     help="first delivery day of the training rows, the same for every set (ttf-gas sets and honest_v2_t23 require 2023-01-01)")
+    fbt.add_argument("--gas", default=None,
+                     help="git-ignored directory with settlements.csv, ice_closures.csv and optionally uk_holidays.csv and eua.csv "
+                          "(forecast/gas.py); needed by the honest_v2_gas* sets, never written into the inputs table")
+    fbt.add_argument("--gas-efficiency", type=float, default=0.50, help="gas plant efficiency for srmc_eur_mwh (pre-registered 0.50)")
+    fbt.add_argument("--gas-emission-factor", type=float, default=0.184, help="tCO2 per MWh of gas for srmc_eur_mwh (pre-registered 0.184)")
     fbt.set_defaults(func=cmd_forecast_backtest)
 
     fc = sub.add_parser("forecast", help="Hourly price forecast for one delivery day, as of 12:00 the day before")

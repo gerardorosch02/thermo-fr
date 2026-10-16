@@ -40,6 +40,15 @@ same inputs:
   latest known nuclear generation (planned nuclear availability as of the
   issue time could not be reconstructed from ENTSO-E, see timing.py). All
   of these pass the pre-market deadline as well as the gate.
+- "honest_v2_gas", "honest_v2_gas_srmc", "honest_v2_gas_rel" and the
+  control "honest_v2_t23" (branch ttf-gas): honest_v2 plus the ICE Endex
+  TTF front-month changes since the closes behind the D-1 and D-7 auctions
+  and the age of the latest close (forecast/gas.py), the same plus the
+  gas-plant marginal cost and the D-1 clean spark spread, the first with the
+  target recast as the price minus the D-1 daily mean, and honest_v2 itself
+  under its own name. All four are trained from GAS_TRAIN_START. The gas
+  data is passed to build_features as an argument and never enters the
+  inputs table.
 
 Weather columns take the as-issued forecast where the archive has it and the
 historical-forecast proxy before that (2021 to early 2024). The `info` table
@@ -59,6 +68,7 @@ import pandas as pd
 from ..config import LOCAL_TZ
 from ..data.entsoe_rest import NEIGHBOUR_ZONES
 from .daytypes import day_table, same_type_day
+from .gas import assert_known_before_issue
 from .timing import NUCLEAR_D1_CUTOFF_HOUR, delivery_days
 
 PEAK_HOURS = range(8, 20)  # EPEX peak block, 08:00 to 20:00 local
@@ -80,6 +90,9 @@ NEIGHBOUR_LAGS = [f"price_{z.lower()}_lag1" for z in NEIGHBOUR_ZONES]
 NEIGHBOUR_SPREADS = [f"spread_{z.lower()}_lag1" for z in NEIGHBOUR_ZONES]
 NEIGHBOURS = NEIGHBOUR_LAGS + NEIGHBOUR_SPREADS
 RESIDUAL_V2 = ["residual_v2_mw"]
+HONEST_V2 = HONEST + NUCLEAR + NEIGHBOURS + RESIDUAL_V2
+GAS = ["gas_chg_lag1_eur", "gas_chg_lag7_eur", "gas_age_days"]
+GAS_SRMC = ["srmc_eur_mwh", "spark_lag1_eur"]
 FEATURES = {
     "honest": HONEST,
     "honest_wind": HONEST_WIND,
@@ -90,10 +103,19 @@ FEATURES = {
     "honest_nuclear": HONEST + NUCLEAR,
     "honest_neighbours": HONEST + NEIGHBOURS,
     "honest_fund": HONEST + NUCLEAR + NEIGHBOURS,
-    "honest_v2": HONEST + NUCLEAR + NEIGHBOURS + RESIDUAL_V2,
+    "honest_v2": HONEST_V2,
+    "honest_v2_t23": HONEST_V2,
+    "honest_v2_gas": HONEST_V2 + GAS,
+    "honest_v2_gas_srmc": HONEST_V2 + GAS + GAS_SRMC,
+    "honest_v2_gas_rel": HONEST_V2 + GAS,
 }
 FEATURE_SETS = tuple(FEATURES)
 GATED_SETS = tuple(s for s in FEATURES if s != "extended")  # the sets whose every feature passes the 12:00 gate
+GAS_SETS = ("honest_v2_gas", "honest_v2_gas_srmc", "honest_v2_gas_rel")  # need the gas data (forecast/gas.py)
+GAS_CONTROL = "honest_v2_t23"  # the matched control: honest_v2 inputs, trained from GAS_TRAIN_START like the candidates
+TRAIN_START_SETS = GAS_SETS + (GAS_CONTROL,)  # sets that must be trained from GAS_TRAIN_START
+HARD_GATED_SETS = TRAIN_START_SETS  # the backtest stops (not just records) if one of these fails either deadline
+RELATIVE_TARGET = {"honest_v2_gas_rel": "price_lag1_mean"}  # target = price minus this feature; forecast = output plus it
 
 FEATURE_TIMINGS = {
     **{c: "calendar" for c in CALENDAR + CALENDAR_STRUCTURE},
@@ -118,6 +140,7 @@ FEATURE_TIMINGS = {
     "nuclear_d1_early_mw": "nuclear_d1",
     **{c: "neighbour_price_lag1" for c in NEIGHBOUR_LAGS + NEIGHBOUR_SPREADS},
     "residual_v2_mw": "residual_v2",
+    **{c: "gas_asof" for c in GAS + GAS_SRMC},
 }
 
 
@@ -129,8 +152,9 @@ def feature_timings(feature_set: str) -> dict[str, str]:
 class FeatureTable:
     X: pd.DataFrame  # features, indexed by valid hour UTC
     y: pd.Series  # price, same index (NaN where unknown)
-    info: pd.DataFrame  # delivery_day, hour, dow, holiday, is_peak, weather_point_in_time, wind_mw, solar_mw
+    info: pd.DataFrame  # delivery_day, hour, dow, holiday, is_peak, weather_point_in_time, wind_mw, solar_mw (+ gas info)
     feature_set: str
+    target_offset: pd.Series | None = None  # relative-target sets: the model learns y - offset and forecasts output + offset
 
 
 def calendar_frame(index: pd.DatetimeIndex) -> pd.DataFrame:
@@ -218,10 +242,26 @@ def neighbour_features(hourly: pd.DataFrame, calendar: pd.DataFrame, price_lag1:
     return out
 
 
-def build_features(hourly: pd.DataFrame, feature_set: str = "honest") -> FeatureTable:
-    """Feature table for one feature set from the inputs table of forecast/inputs.py."""
+def gas_frame(gas, calendar: pd.DataFrame, price_lag1: pd.Series) -> pd.DataFrame:
+    """The gas features and info of forecast/gas.py on the hourly rows, by Paris delivery day; spark_lag1_eur is the D-1
+    price of the same hour minus the gas-plant cost behind the D-1 auction."""
+    days = pd.DatetimeIndex(calendar["delivery_day"])
+    daily = gas.feature_table(days.unique())
+    hourly = daily.reindex(days)
+    hourly.index = calendar.index
+    hourly["spark_lag1_eur"] = price_lag1.to_numpy() - hourly["srmc_ref_eur_mwh"].to_numpy()
+    return hourly
+
+
+def build_features(hourly: pd.DataFrame, feature_set: str = "honest", gas=None) -> FeatureTable:
+    """Feature table for one feature set from the inputs table of forecast/inputs.py.
+
+    `gas` (forecast/gas.py GasInputs) is required by the gas sets and ignored by the others.
+    """
     if feature_set not in FEATURES:
         raise ValueError(f"feature_set must be one of {tuple(FEATURES)}")
+    if feature_set in GAS_SETS and gas is None:
+        raise ValueError(f"feature set {feature_set} needs the gas data (forecast/gas.py)")
     hourly = hourly.sort_index()
     calendar = calendar_frame(hourly.index)
     X = calendar[CALENDAR + CALENDAR_STRUCTURE].copy()
@@ -257,5 +297,17 @@ def build_features(hourly: pd.DataFrame, feature_set: str = "honest") -> Feature
     actual_wind = [c for c in ("wind_onshore_mw", "wind_offshore_mw") if c in hourly]
     info["wind_mw"] = hourly[actual_wind].sum(axis=1, min_count=1) if actual_wind else np.nan
     info["solar_mw"] = hourly["solar_mw"] if "solar_mw" in hourly else np.nan
+    if feature_set in GAS_SETS:
+        g = gas_frame(gas, calendar, X["price_lag1"])
+        for column in GAS + GAS_SRMC:
+            X[column] = g[column]
+        info_columns = [c for c in g.columns if c not in GAS + GAS_SRMC + ["srmc_ref_eur_mwh"]]  # times, contract and flags; no prices
+        info = info.join(g[info_columns])
+        missing = g["gas_missing"].astype(bool)
+        if set(GAS_SRMC) & set(FEATURES[feature_set]):
+            missing = missing | g["gas_srmc_missing"].astype(bool)
+        info["gas_features_missing"] = missing.to_numpy()
+        assert_known_before_issue(info)
     X = X[FEATURES[feature_set]].astype(float)
-    return FeatureTable(X=X, y=hourly["price_eur_mwh"].rename("price_eur_mwh"), info=info, feature_set=feature_set)
+    offset = X[RELATIVE_TARGET[feature_set]] if feature_set in RELATIVE_TARGET else None
+    return FeatureTable(X=X, y=hourly["price_eur_mwh"].rename("price_eur_mwh"), info=info, feature_set=feature_set, target_offset=offset)
