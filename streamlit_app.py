@@ -186,10 +186,12 @@ METHOD_MD = """
 - Quantiles and a spike probability are computed but not shown until they pass their tests.
 - Why the backtest error is lower than the trading record's, and whether the hit rate is significant: see Track record.
 
-#### Missing drivers (not yet tested)
-- Gas price: the free history did not match the exchange index closely enough under the pre-registered check.
-- Nuclear availability: outage notices snapshotted daily since 10 Oct 2026; ENTSO-E keeps only the latest revision.
-- Fresher weather: the D-1 00Z run instead of runs issued two days ahead; later D-1 runs arrive after the 10:05 issue time.
+#### Missing drivers
+- Nuclear availability (not yet tested): outage notices snapshotted daily since 10 Oct 2026; ENTSO-E keeps only the latest revision.
+- Fresher weather (not yet tested): the D-1 00Z run instead of runs issued two days ahead; later D-1 runs arrive after the
+  10:05 issue time.
+- Gas price (TTF front month): tested and it added nothing on 2024 to 2026, even assuming the previous day's close
+  arrived in time. No free feed delivers that close before the 10:05 issue time.
 - Carbon (EUA price): tested and rejected on the selection window.
 """
 METHOD_SOURCES = "Data sources and attribution"
