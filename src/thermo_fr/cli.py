@@ -122,6 +122,17 @@ def cmd_forecast_backtest(args) -> None:
     print(path.read_text(encoding="utf-8"))
 
 
+def cmd_gas_checks(args) -> None:
+    from .forecast.gas_checks import exit_code, format_report, run_checks
+
+    checks = run_checks(Path(args.gas), eex_paths=[Path(p) for p in args.eex], inputs_path=Path(args.data) if args.data else None,
+                        check_date=args.check_date)
+    print(format_report(checks))
+    code = exit_code(checks)
+    if code:
+        raise SystemExit(code)
+
+
 def cmd_forecast(args) -> None:
     from .forecast.day import forecast_day, refresh_window
     from .forecast.inputs import load_inputs
@@ -758,6 +769,14 @@ def main(argv=None) -> None:
     fbt.add_argument("--gas-efficiency", type=float, default=0.50, help="gas plant efficiency for srmc_eur_mwh (pre-registered 0.50)")
     fbt.add_argument("--gas-emission-factor", type=float, default=0.184, help="tCO2 per MWh of gas for srmc_eur_mwh (pre-registered 0.184)")
     fbt.set_defaults(func=cmd_forecast_backtest)
+
+    gchk = sub.add_parser("gas-checks", help="ttf-gas pre-feature checks on the laptop's gas data: prints a report, exits 1 on a stop "
+                                             "rule and 2 when only a candidate is withdrawn; writes nothing")
+    gchk.add_argument("--gas", required=True, help="git-ignored gas directory (forecast/gas.py read_gas_dir)")
+    gchk.add_argument("--eex", nargs="*", default=[], help="the owner's EEX TTF settlement snapshots (JSON) or a CSV contract,trade_date,value")
+    gchk.add_argument("--data", default=None, help="inputs table, to restrict M2 to strict delivery days")
+    gchk.add_argument("--check-date", default=None, help="agreement pairs use trade dates before this day (default today, Paris)")
+    gchk.set_defaults(func=cmd_gas_checks)
 
     fc = sub.add_parser("forecast", help="Hourly price forecast for one delivery day, as of 12:00 the day before")
     fc.add_argument("--date", required=True, help="delivery day, YYYY-MM-DD (Paris)")
