@@ -67,6 +67,13 @@ query time). Sources:
   time, so that feature is known at the pre-market issue time itself and
   never later.
 
+- Gas and carbon as of the issue time (branch ttf-gas, forecast/gas.py):
+  ICE Endex TTF futures settlements and EUA primary auction results, each
+  value used only if its own known-from time (when it was available
+  through the source) is at or before 10:05 Paris on D-1. The rule
+  therefore declares the pre-market issue time itself; gas.py asserts the
+  known-from time of every value used, row by row.
+
 Two deadlines are checked. The gate (12:00 Paris on D-1) is the hard
 constraint every honest feature must meet. The pre-market issue time,
 PREMARKET_ISSUE (10:05 Paris on D-1, the start of the earliest scheduled
@@ -296,6 +303,10 @@ TIMINGS = {
     "fuel_morning_trades": InputTiming(
         "fuel_morning_trades", fuel_morning_trades_issue,
         "Gas and carbon prices (private collector): gas front month and carbon December future trades on D-1 up to the 10:05 Paris issue time.",
+    ),
+    "gas_asof": InputTiming(
+        "gas_asof", premarket_issue_for,
+        "ICE Endex TTF settlements and EUA auction results as known at 10:05 Paris on D-1, each value's known-from time asserted (forecast/gas.py).",
     ),
 }
 
