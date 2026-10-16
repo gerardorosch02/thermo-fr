@@ -57,6 +57,7 @@ from .probabilistic import live_calibration
 from .shape import live_shape_record
 from .market import evaluate as evaluate_market
 from .market import PublishedVersions, headline_version, load_market, premarket_flag, public_summary
+from .features import refuse_research
 from .store import Store, iso, utc_now
 
 PUBLIC_FEATURE_SET = "honest_v2"  # the default model's set (published/model/honest_v2.txt); honest.txt is the fallback
@@ -234,6 +235,7 @@ def public_model_meta(meta: dict | None, keys) -> dict:
 def export_published(store: Store, out_dir=DEFAULT_DIR, days: int = 90, now=None, last_run: dict | None = None,
                      market_path=MARKET_PATH) -> dict:
     """Write the public files. Returns a summary with row counts."""
+    refuse_research(PUBLIC_FEATURE_SETS + (PUBLIC_FEATURE_SET,), "publish")
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     today = utc_now(now).tz_convert("Europe/Paris").normalize().tz_localize(None)

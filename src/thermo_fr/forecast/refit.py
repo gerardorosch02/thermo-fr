@@ -31,7 +31,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .features import FEATURES, build_features
+from .features import FEATURES, build_features, refuse_research
 from .inputs import fetch_inputs, load_inputs
 from . import solar_proxy, wind_proxy
 from .gen_proxy import latest_weights, save_weights
@@ -96,6 +96,7 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
     trees to keep the file small); the metadata records what was used, and
     `trigger` (dispatch, cron or manual) records what started the refit.
     """
+    refuse_research(feature_set, "refit")
     if trigger not in TRIGGERS:
         raise ValueError(f"trigger must be one of {TRIGGERS}, not {trigger!r}")
     params = {**GBM_PARAMS, **(REFIT_PARAMS if params is None else params)}
@@ -163,6 +164,7 @@ def refit_sets(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_sets=("h
     """One model file per feature set; the proxy weights, and the probabilistic models, are written with the first set only."""
     from .probabilistic import fit_probabilistic
 
+    refuse_research(feature_sets, "refit")
     metas = {}
     for i, feature_set in enumerate(feature_sets):
         metas[feature_set] = refit_model(hourly, out_dir=out_dir, feature_set=feature_set, log=log, save_proxies=(i == 0), trigger=trigger)

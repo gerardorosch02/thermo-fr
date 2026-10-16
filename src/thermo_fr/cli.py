@@ -115,18 +115,44 @@ def cmd_forecast_backtest(args) -> None:
     if args.gas:
         from .forecast.gas import load_gas_dir
 
-        gas = load_gas_dir(Path(args.gas), efficiency=args.gas_efficiency, emission_factor=args.gas_emission_factor)
+        from .forecast.features import RESEARCH_SETS
+
+        ideal = bool(set(args.feature_sets) & set(RESEARCH_SETS))
+        gas = load_gas_dir(Path(args.gas), efficiency=args.gas_efficiency, emission_factor=args.gas_emission_factor, ideal=ideal)
     results = run_backtest(hourly, args.test_start, args.test_end, feature_sets=tuple(args.feature_sets), gas=gas,
                            train_start=args.train_start)
     path = write_report(results, out=Path(args.out), sample_week=args.sample_week, sources=sources, comparison=comparison)
     print(path.read_text(encoding="utf-8"))
 
 
+def cmd_gas_research(args) -> None:
+    import json as _json
+
+    from .forecast.backtest import run_backtest
+    from .forecast.features import RESEARCH_SETS
+    from .forecast.gas import load_gas_dir
+    from .forecast.gas_research import SELECTION_END, summarise, to_markdown
+    from .forecast.inputs import load_inputs
+
+    if pd.Timestamp(args.test_end) > pd.Timestamp(SELECTION_END):
+        raise SystemExit(f"gas-research runs on the selection window only; --test-end must be on or before {SELECTION_END}")
+    hourly = load_inputs(Path(args.data))
+    gas = load_gas_dir(Path(args.gas), ideal=True)
+    results = run_backtest(hourly, args.test_start, args.test_end, feature_sets=RESEARCH_SETS, gas=gas, train_start=args.train_start)
+    summary = summarise(results, hourly, args.train_start)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    for name, r in results.items():
+        r["backtest"].predictions.to_csv(out / f"predictions_{name}.csv", index_label="timestamp_utc")
+    (out / "summary.json").write_text(_json.dumps(summary, indent=2, default=str))
+    print(to_markdown(summary))
+
+
 def cmd_gas_checks(args) -> None:
     from .forecast.gas_checks import exit_code, format_report, run_checks
 
     checks = run_checks(Path(args.gas), eex_paths=[Path(p) for p in args.eex], inputs_path=Path(args.data) if args.data else None,
-                        check_date=args.check_date)
+                        check_date=args.check_date, research=args.research)
     print(format_report(checks))
     code = exit_code(checks)
     if code:
@@ -770,12 +796,24 @@ def main(argv=None) -> None:
     fbt.add_argument("--gas-emission-factor", type=float, default=0.184, help="tCO2 per MWh of gas for srmc_eur_mwh (pre-registered 0.184)")
     fbt.set_defaults(func=cmd_forecast_backtest)
 
+    grs = sub.add_parser("gas-research", help="ttf-gas research measurement (not a forecast model): control and the two research "
+                                             "sets on the selection window, with the pre-registered reading rule")
+    grs.add_argument("--data", default="data/forecast/inputs.csv")
+    grs.add_argument("--gas", required=True, help="git-ignored gas directory with the raw DBnomics pages")
+    grs.add_argument("--out", default="reports/gas_research", help="predictions and summary (git-ignored; no gas prices are written)")
+    grs.add_argument("--test-start", default="2024-01-01")
+    grs.add_argument("--test-end", default="2026-07-01", help="exclusive; never after the selection window")
+    grs.add_argument("--train-start", default="2023-01-01")
+    grs.set_defaults(func=cmd_gas_research)
+
     gchk = sub.add_parser("gas-checks", help="ttf-gas pre-feature checks on the laptop's gas data: prints a report, exits 1 on a stop "
                                              "rule and 2 when only a candidate is withdrawn; writes nothing")
     gchk.add_argument("--gas", required=True, help="git-ignored gas directory (forecast/gas.py read_gas_dir)")
     gchk.add_argument("--eex", nargs="*", default=[], help="the owner's EEX TTF settlement snapshots (JSON) or a CSV contract,trade_date,value")
     gchk.add_argument("--data", default=None, help="inputs table, to restrict M2 to strict delivery days")
     gchk.add_argument("--check-date", default=None, help="agreement pairs use trade dates before this day (default today, Paris)")
+    gchk.add_argument("--research", action="store_true",
+                      help="the ttf-gas research measurement (idealised timing, next-contract substitution; M3 and the agreement check do not apply)")
     gchk.set_defaults(func=cmd_gas_checks)
 
     fc = sub.add_parser("forecast", help="Hourly price forecast for one delivery day, as of 12:00 the day before")

@@ -25,8 +25,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .features import (GAS_CONTROL, GAS_SETS, HARD_GATED_SETS, TRAIN_START_SETS, FeatureTable, build_features,
-                       feature_timings)
+from .features import (GAS_CONTROL, GAS_INPUT_SETS, GAS_SETS, HARD_GATED_SETS, RESEARCH_SETS, TRAIN_START_SETS, FeatureTable,
+                       build_features, feature_timings)
 from .gas import GAS_TRAIN_START, assert_known_before_issue
 from .models import BENCHMARKS, MODELS, benchmark_predictions, fit_predict
 from .timing import LookaheadError, check_point_in_time
@@ -260,16 +260,16 @@ def run_backtest(hourly: pd.DataFrame, test_start: str, test_end: str, feature_s
     feature_sets = tuple(feature_sets)
     if set(feature_sets) & set(TRAIN_START_SETS) and train_start != GAS_TRAIN_START:
         raise ValueError(f"{sorted(set(feature_sets) & set(TRAIN_START_SETS))} must be trained from {GAS_TRAIN_START}; pass train_start")
-    if set(feature_sets) & set(GAS_SETS) and GAS_CONTROL not in feature_sets:
-        feature_sets = (GAS_CONTROL,) + feature_sets
-    elif set(feature_sets) & set(GAS_SETS):
+    if set(feature_sets) & set(GAS_SETS) and set(feature_sets) & set(RESEARCH_SETS):
+        raise ValueError("the research sets and the ttf-gas candidates use different gas timing and cannot share a run")
+    if set(feature_sets) & set(GAS_INPUT_SETS):
         feature_sets = (GAS_CONTROL,) + tuple(s for s in feature_sets if s != GAS_CONTROL)
     results = {}
     for feature_set in feature_sets:
         log(f"Feature set {feature_set}: building features and running the walk-forward ...")
         table = build_features(hourly, feature_set, gas=gas)
         bt = walk_forward(table, test_start, test_end, log=log, train_start=train_start)
-        if feature_set in GAS_SETS:
+        if feature_set in GAS_INPUT_SETS:
             bt.predictions = use_control_where_gas_missing(bt.predictions, results[GAS_CONTROL]["backtest"].predictions)
         worst = worst_days(bt.predictions, table, hourly)
         results[feature_set] = {

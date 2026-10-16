@@ -108,14 +108,22 @@ FEATURES = {
     "honest_v2_gas": HONEST_V2 + GAS,
     "honest_v2_gas_srmc": HONEST_V2 + GAS + GAS_SRMC,
     "honest_v2_gas_rel": HONEST_V2 + GAS,
+    "research_ttf_ideal_chg": HONEST_V2 + GAS,
+    "research_ttf_ideal_rel": HONEST_V2 + GAS,
 }
 FEATURE_SETS = tuple(FEATURES)
-GATED_SETS = tuple(s for s in FEATURES if s != "extended")  # the sets whose every feature passes the 12:00 gate
+RESEARCH_LABEL = ("Research measurement, not a forecast model: what the D-2 TTF settlement would have been worth to the day-ahead "
+                  "forecast if a feed had delivered it before 10:05 Paris on D-1. The DBnomics feed used here does not deliver it in "
+                  "time, so nothing here is or can become the live model; the figures are an upper bound under an idealised timing "
+                  "assumption.")
+RESEARCH_SETS = ("research_ttf_ideal_chg", "research_ttf_ideal_rel")  # ttf-gas addendum v5, section 3; never gated, never live
+GATED_SETS = tuple(s for s in FEATURES if s != "extended" and s not in RESEARCH_SETS)  # sets whose every feature passes the 12:00 gate
 GAS_SETS = ("honest_v2_gas", "honest_v2_gas_srmc", "honest_v2_gas_rel")  # need the gas data (forecast/gas.py)
+GAS_INPUT_SETS = GAS_SETS + RESEARCH_SETS  # every set that needs the gas data
 GAS_CONTROL = "honest_v2_t23"  # the matched control: honest_v2 inputs, trained from GAS_TRAIN_START like the candidates
-TRAIN_START_SETS = GAS_SETS + (GAS_CONTROL,)  # sets that must be trained from GAS_TRAIN_START
+TRAIN_START_SETS = GAS_INPUT_SETS + (GAS_CONTROL,)  # sets that must be trained from GAS_TRAIN_START
 HARD_GATED_SETS = TRAIN_START_SETS  # the backtest stops (not just records) if one of these fails either deadline
-RELATIVE_TARGET = {"honest_v2_gas_rel": "price_lag1_mean"}  # target = price minus this feature; forecast = output plus it
+RELATIVE_TARGET = {"honest_v2_gas_rel": "price_lag1_mean", "research_ttf_ideal_rel": "price_lag1_mean"}  # target = price - this
 
 FEATURE_TIMINGS = {
     **{c: "calendar" for c in CALENDAR + CALENDAR_STRUCTURE},
@@ -145,7 +153,18 @@ FEATURE_TIMINGS = {
 
 
 def feature_timings(feature_set: str) -> dict[str, str]:
-    return {f: FEATURE_TIMINGS[f] for f in FEATURES[feature_set]}
+    timings = {f: FEATURE_TIMINGS[f] for f in FEATURES[feature_set]}
+    if feature_set in RESEARCH_SETS:  # idealised: the D-2 settlement as known from the exchange's settlement time
+        timings.update({f: "gas_settle_ideal" for f in GAS if f in timings})
+    return timings
+
+
+def refuse_research(feature_sets, path: str) -> None:
+    """The refit, publish, morning-run, forecast and dashboard paths refuse the research sets."""
+    sets = (feature_sets,) if isinstance(feature_sets, str) else tuple(feature_sets)
+    research = [s for s in sets if s in RESEARCH_SETS]
+    if research:
+        raise ValueError(f"{path} refuses {research}: {RESEARCH_LABEL}")
 
 
 @dataclass
@@ -260,8 +279,12 @@ def build_features(hourly: pd.DataFrame, feature_set: str = "honest", gas=None) 
     """
     if feature_set not in FEATURES:
         raise ValueError(f"feature_set must be one of {tuple(FEATURES)}")
-    if feature_set in GAS_SETS and gas is None:
+    if feature_set in GAS_INPUT_SETS and gas is None:
         raise ValueError(f"feature set {feature_set} needs the gas data (forecast/gas.py)")
+    if feature_set in RESEARCH_SETS and getattr(gas, "mode", None) != "ideal":
+        raise ValueError(f"{feature_set} needs the idealised gas inputs (load_gas_dir(..., ideal=True)): {RESEARCH_LABEL}")
+    if feature_set in GAS_SETS and getattr(gas, "mode", None) == "ideal":
+        raise ValueError(f"{feature_set} must not use the idealised research timing")
     hourly = hourly.sort_index()
     calendar = calendar_frame(hourly.index)
     X = calendar[CALENDAR + CALENDAR_STRUCTURE].copy()
@@ -297,7 +320,7 @@ def build_features(hourly: pd.DataFrame, feature_set: str = "honest", gas=None) 
     actual_wind = [c for c in ("wind_onshore_mw", "wind_offshore_mw") if c in hourly]
     info["wind_mw"] = hourly[actual_wind].sum(axis=1, min_count=1) if actual_wind else np.nan
     info["solar_mw"] = hourly["solar_mw"] if "solar_mw" in hourly else np.nan
-    if feature_set in GAS_SETS:
+    if feature_set in GAS_INPUT_SETS:
         g = gas_frame(gas, calendar, X["price_lag1"])
         for column in GAS + GAS_SRMC:
             X[column] = g[column]

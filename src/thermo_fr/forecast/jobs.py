@@ -47,7 +47,7 @@ from ..data.weather_forecast import OpenMeteoForecastSource
 from ..data.wind_points import WindPointsSource
 from .brief import driver_table
 from .day import HISTORY_DAYS, forecast_day, merge_inputs
-from .features import FEATURES, build_features
+from .features import FEATURES, build_features, refuse_research
 from .calibration import apply_calibration, load_calibration
 from .probabilistic import live_margin, load_probabilistic, predict_probabilistic, spike_threshold_for_day
 from .gen_proxy import apply_weights, load_weights
@@ -249,6 +249,7 @@ def morning_run(store: Store, delivery_day: str | None = None, kind: str = "sche
     "model" and every set is fitted live, so the run still produces a
     forecast but is marked partial.
     """
+    refuse_research(feature_sets, "morning-run")
     day = delivery_day or next_delivery_day(now)
     run_id = store.start_run("morning-run", kind, day, now=now)
     log.info("morning-run %s for delivery day %s (run %d)", kind, day, run_id)

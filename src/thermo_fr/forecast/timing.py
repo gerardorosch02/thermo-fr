@@ -240,6 +240,14 @@ def residual_v2_issue(index) -> pd.DatetimeIndex:
     return latest
 
 
+def gas_settle_ideal_issue(index) -> pd.DatetimeIndex:
+    """Research rule gas_settle_ideal: the settlements a day uses are of trading days on or before D-2, each known from 17:20
+    Amsterdam (= Paris) local time on its trade date, so at the latest 17:20 Paris on D-2."""
+    days = delivery_days(index)
+    naive = days - pd.Timedelta(days=2) + pd.Timedelta(hours=17, minutes=20)
+    return pd.DatetimeIndex(naive.tz_localize(LOCAL_TZ).tz_convert("UTC"))
+
+
 @dataclass(frozen=True)
 class InputTiming:
     name: str
@@ -303,6 +311,11 @@ TIMINGS = {
     "fuel_morning_trades": InputTiming(
         "fuel_morning_trades", fuel_morning_trades_issue,
         "Gas and carbon prices (private collector): gas front month and carbon December future trades on D-1 up to the 10:05 Paris issue time.",
+    ),
+    "gas_settle_ideal": InputTiming(
+        "gas_settle_ideal", gas_settle_ideal_issue,
+        "Research measurement only (never gated, never live): a TTF settlement of trading day T taken as known from 17:20 Amsterdam "
+        "time on T, the exchange's settlement time; the latest used for delivery day D is that of D-2 at the latest.",
     ),
     "gas_asof": InputTiming(
         "gas_asof", premarket_issue_for,

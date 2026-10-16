@@ -19,7 +19,7 @@ from ..data.entsoe_client import EntsoeSource
 from ..data.solar_points import SolarPointsSource
 from ..data.weather_forecast import OpenMeteoForecastSource
 from ..data.wind_points import WindPointsSource
-from .features import GATED_SETS, build_features, feature_timings
+from .features import GATED_SETS, build_features, feature_timings, refuse_research
 from .gen_proxy import apply_weights, load_weights
 from .inputs import INPUT_COLUMNS
 from .models import contributions_with, fit_predict, predict_with
@@ -81,6 +81,7 @@ def forecast_day(date: str, inputs: pd.DataFrame, fresh: pd.DataFrame | None = N
     and, with a stored model, `features` (the day's feature rows) and
     `contributions` (LightGBM's per-feature contributions, brief.py).
     """
+    refuse_research(feature_set, "forecast")
     day = pd.Timestamp(date).normalize()
     merged = merge_inputs(inputs, fresh)
     table = build_features(merged, feature_set)

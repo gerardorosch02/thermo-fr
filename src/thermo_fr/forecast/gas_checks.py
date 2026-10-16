@@ -36,7 +36,8 @@ import numpy as np
 import pandas as pd
 
 from ..config import LOCAL_TZ
-from .gas import HARD_ISSUES, Calendars, GasDataError, GasInputs, _d64, _ts, contract_key, issue_time, read_gas_dir, settlement_issues
+from .gas import (HARD_ISSUES, Calendars, GasDataError, GasInputs, _d64, _ts, contract_key, issue_time, next_contract, read_gas_dir,
+                  settlement_issues)
 
 M1_SPAN = ("2022-12-01", "2026-10-10")
 M1_HOLDOUT_SPAN = ("2026-06-19", "2026-10-10")
@@ -52,6 +53,7 @@ HOLDOUT_CONTRACTS = ("2026-08", "2026-09", "2026-10", "2026-11")
 CURRENT_CONTRACT = "2026-11"
 AGREEMENT = {"min_dates": 30, "level_mae": 0.25, "level_mean": 0.15, "change_mae": 0.15, "sign_share": 0.95, "sign_move": 0.5,
              "corr0": 0.98}
+RESEARCH_CANDIDATES = {"R1 (research_ttf_ideal_chg) and R2 (research_ttf_ideal_rel)": ("gas_missing",)}
 CANDIDATES = {"A (honest_v2_gas) and C (honest_v2_gas_rel)": ("gas_missing",), "B (honest_v2_gas_srmc)": ("gas_missing", "gas_srmc_missing")}
 
 
@@ -69,11 +71,17 @@ def trading_days(cal: Calendars, start, end) -> pd.DatetimeIndex:
     return pd.DatetimeIndex([d for d in days if cal.is_trading(d)])
 
 
-def front_coverage(clean: pd.DataFrame, cal: Calendars, start, end) -> pd.DataFrame:
-    """Per trading day T: front(T) and whether the fetch has any value for it on T (known_from not considered)."""
+def front_coverage(clean: pd.DataFrame, cal: Calendars, start, end, substitute_next: bool = False) -> pd.DataFrame:
+    """Per trading day T: front(T) and whether the fetch has any value for it on T (known_from not considered). With
+    `substitute_next` (research only), a day where the next contract has a value counts as covered and is flagged."""
     have = set(zip(clean["contract"], clean["trade_date"]))
-    rows = [{"day": d, "front": cal.front(d), "has_value": (cal.front(d), d) in have} for d in trading_days(cal, start, end)]
-    return pd.DataFrame(rows)
+    rows = []
+    for d in trading_days(cal, start, end):
+        front = cal.front(d)
+        own = (front, d) in have
+        sub = (not own) and substitute_next and (next_contract(front), d) in have
+        rows.append({"day": d, "front": front, "has_value": own or sub, "substituted": sub})
+    return pd.DataFrame(rows, columns=["day", "front", "has_value", "substituted"])
 
 
 def _by_year(frame: pd.DataFrame, flag: str, day: str = "day") -> str:
@@ -129,20 +137,23 @@ def expiry_listing(clean: pd.DataFrame, cal: Calendars) -> Check:
     return Check("expiry, last value and gap per contract", ok=True, lines=lines)
 
 
-def check_m1(clean: pd.DataFrame, cal: Calendars) -> list[Check]:
+def check_m1(clean: pd.DataFrame, cal: Calendars, substitute_next: bool = False, spans=None) -> list[Check]:
     out = []
-    for label, span in (("M1", M1_SPAN), ("M1 holdout part", M1_HOLDOUT_SPAN)):
-        cov = front_coverage(clean, cal, *span)
+    for label, span in (spans or (("M1", M1_SPAN), ("M1 holdout part", M1_HOLDOUT_SPAN))):
+        cov = front_coverage(clean, cal, *span, substitute_next=substitute_next)
         cov["missing"] = ~cov["has_value"]
         share = float(cov["missing"].mean()) if len(cov) else 1.0
         lines = [f"{int(cov['missing'].sum())} of {len(cov)} trading days {span[0]} to {span[1]} without a front-month value "
                  f"({100 * share:.2f}%, limit {100 * MISSING_LIMIT:.0f}%)", "by year: " + _by_year(cov, "missing")]
+        if substitute_next:
+            lines.append(f"after the next-contract substitution; substituted days {int(cov['substituted'].sum())} of {len(cov)} "
+                         f"({100 * cov['substituted'].mean():.2f}%), by year: " + _by_year(cov, "substituted"))
         out.append(Check(label, ok=share <= MISSING_LIMIT, stop=True, lines=lines))
     return out
 
 
-def missing_runs(clean: pd.DataFrame, cal: Calendars, span=M1_SPAN, length=RUN_LENGTH) -> list[tuple]:
-    cov = front_coverage(clean, cal, *span)
+def missing_runs(clean: pd.DataFrame, cal: Calendars, span=M1_SPAN, length=RUN_LENGTH, substitute_next: bool = False) -> list[tuple]:
+    cov = front_coverage(clean, cal, *span, substitute_next=substitute_next)
     runs, current = [], []
     for row in cov.itertuples():
         if not row.has_value:
@@ -156,8 +167,8 @@ def missing_runs(clean: pd.DataFrame, cal: Calendars, span=M1_SPAN, length=RUN_L
     return runs
 
 
-def check_runs(clean: pd.DataFrame, cal: Calendars) -> Check:
-    runs = missing_runs(clean, cal)
+def check_runs(clean: pd.DataFrame, cal: Calendars, substitute_next: bool = False) -> Check:
+    runs = missing_runs(clean, cal, substitute_next=substitute_next)
     lines = [f"{len(runs)} runs of {RUN_LENGTH} or more consecutive trading days without a front-month value (limit {MAX_RUNS})"]
     lines += [f"  {a:%Y-%m-%d} to {b:%Y-%m-%d}: {n} days, front {c}" for a, b, n, c in runs]
     return Check("runs of missing front-month days", ok=len(runs) <= MAX_RUNS, stop=True, lines=lines)
@@ -201,13 +212,14 @@ def window_days(span, strict_days=None) -> pd.DatetimeIndex:
     return days if strict_days is None else days[days.isin(pd.DatetimeIndex(strict_days))]
 
 
-def check_m2(gas: GasInputs, strict_days=None) -> list[Check]:
+def check_m2(gas: GasInputs, strict_days=None, research: bool = False) -> list[Check]:
     out = []
     note = "strict delivery days" if strict_days is not None else "all delivery days (no inputs table given, strictness not applied)"
-    for label, span in (("selection", SELECTION), ("holdout", HOLDOUT)):
+    windows = (("selection", SELECTION),) if research else (("selection", SELECTION), ("holdout", HOLDOUT))
+    for label, span in windows:
         days = window_days(span, strict_days)
         table = gas.feature_table(days)
-        for candidate, flags in CANDIDATES.items():
+        for candidate, flags in (RESEARCH_CANDIDATES if research else CANDIDATES).items():
             if table.empty:  # nothing to measure counts as a breach
                 missing, reasons = pd.Series(dtype=bool), {}
             else:
@@ -215,11 +227,14 @@ def check_m2(gas: GasInputs, strict_days=None) -> list[Check]:
                 reasons = table.loc[missing, "gas_missing_reason"].value_counts().to_dict()
             share = float(missing.mean()) if len(missing) else 1.0
             frame = pd.DataFrame({"day": pd.DatetimeIndex(table.index), "missing": missing.to_numpy()})
-            is_a = candidate.startswith("A")
+            is_a = candidate.startswith("A") or research
             lines = [f"{int(missing.sum())} of {len(missing)} {note} {span[0]} to {span[1]} without gas features "
                      f"({100 * share:.2f}%, limit {100 * MISSING_LIMIT:.0f}%)", f"reasons: {reasons}", "by year: " + _by_year(frame, "missing")]
             breach = share > MISSING_LIMIT
-            withdraws = (("A", "C") if is_a else ("B",)) if breach else ()
+            withdraws = ((("R1", "R2") if research else ("A", "C")) if is_a else ("B",)) if breach else ()
+            if research and len(table):
+                subs = table.loc[~table["gas_missing"].astype(bool), "gas_next_contract"].astype(bool)
+                lines.append(f"next-contract substitution on {int(subs.sum())} of {len(table)} days ({100 * subs.sum() / len(table):.2f}%)")
             out.append(Check(f"M2 {label}, {candidate}", ok=not breach, stop=is_a, withdraws=withdraws, lines=lines))
     return out
 
@@ -319,10 +334,12 @@ def strict_days_from_inputs(path) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(days.unique())
 
 
-def run_checks(gas_dir, eex_paths=(), inputs_path=None, check_date=None) -> list[Check]:
-    """Every pre-feature check on a gas directory; nothing is written."""
+def run_checks(gas_dir, eex_paths=(), inputs_path=None, check_date=None, research: bool = False) -> list[Check]:
+    """Every pre-feature check on a gas directory; nothing is written. `research` (addendum v5, section 3): idealised
+    known_from and the next-contract substitution; M1, M2 (selection only) and the run counts after the substitution; M3 and
+    the agreement check do not apply."""
     try:
-        parts = read_gas_dir(gas_dir)
+        parts = read_gas_dir(gas_dir, ideal=research)
     except GasDataError as error:
         return [Check("loading the gas directory", ok=False, stop=True, lines=[str(error)])]
     cal = parts["calendars"]
@@ -333,11 +350,17 @@ def run_checks(gas_dir, eex_paths=(), inputs_path=None, check_date=None) -> list
     checks += check_settlement_issues(issues)
     checks.append(check_expiry_file(parts["expiries"], cal))
     checks.append(expiry_listing(clean, cal))
-    checks += check_m1(clean, cal)
-    checks.append(check_runs(clean, cal))
+    if parts["raw"] is not None:
+        checks.append(Check("monthly series", ok=True, lines=[f"{parts['raw'].attrs.get('monthly_series')} monthly contract series read; "
+                                                              f"{parts['raw'].attrs.get('skipped_series')} other series (quarters, seasons, years, strips) skipped; "
+                                                              f"first contract {clean['contract'].min()}, last {clean['contract'].max()}"]))
+    checks += check_m1(clean, cal, substitute_next=research)
+    checks.append(check_runs(clean, cal, substitute_next=research))
     checks += check_data_quality(clean, cal)
     check_date = pd.Timestamp(check_date) if check_date else pd.Timestamp.now(tz=LOCAL_TZ).tz_localize(None).normalize()
-    if eex_paths:
+    if research:
+        checks.append(Check("agreement with the EEX settlements", ok=True, lines=["not applicable to the research measurement"]))
+    elif eex_paths:
         ok, lines = agreement(clean, load_eex_tables(eex_paths), check_date)
         checks.append(Check("agreement with the EEX settlements", ok=ok, stop=True, lines=lines))
     else:
@@ -345,10 +368,13 @@ def run_checks(gas_dir, eex_paths=(), inputs_path=None, check_date=None) -> list
     if any(issues[name].shape[0] for name in HARD_ISSUES):
         checks.append(Check("M2 and M3", ok=False, stop=True, lines=["not computed: a hard data check failed"]))
         return checks
-    gas = GasInputs(parts["settlements"], cal, eua=parts["eua"])
+    gas = GasInputs(parts["settlements"], cal, eua=parts["eua"], mode="ideal" if research else "dbnomics", substitute_next=research)
     strict = strict_days_from_inputs(inputs_path) if inputs_path else None
-    checks += check_m2(gas, strict)
-    checks.append(check_m3(gas))
+    checks += check_m2(gas, strict, research=research)
+    if research:
+        checks.append(Check("M3", ok=True, lines=["does not apply: the timing is idealised by construction"]))
+    else:
+        checks.append(check_m3(gas))
     return checks
 
 

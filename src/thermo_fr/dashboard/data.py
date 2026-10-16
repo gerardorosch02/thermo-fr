@@ -18,6 +18,7 @@ from ..forecast.probabilistic import live_calibration
 from ..forecast.shape import live_shape_record
 from ..forecast.market import evaluate as evaluate_market
 from ..forecast.market import load_market
+from ..forecast.features import refuse_research
 from ..forecast.store import Store
 
 MODEL_DIR = Path("published/model")
@@ -53,6 +54,7 @@ def _with_store(path, fn):
 
 def forecast_panel(path, delivery_day: str, feature_set: str, actual_day: str) -> dict:
     """Latest forecast version for a day, its benchmark, the actual of another day by hour, and the band."""
+    refuse_research(feature_set, "dashboard")
 
     def read(store: Store):
         meta, curve, later = store.headline_forecast(delivery_day, feature_set)
@@ -100,6 +102,7 @@ def forecast_panel(path, delivery_day: str, feature_set: str, actual_day: str) -
 
 
 def calibration_panel(path, feature_set: str = "honest_v2", backtest_path=Path("published/probabilistic_backtest.json")) -> dict:
+    refuse_research(feature_set, "dashboard")
     import json
 
     from ..forecast.calibration import load_calibration, public_calibration
@@ -134,6 +137,7 @@ def inputs_panel(path, delivery_day: str, previous_day: str) -> dict:
 
 
 def performance_panel(path, feature_set: str, days: int = 30) -> dict:
+    refuse_research(feature_set, "dashboard")
     def read(store: Store):
         scores = store.headline_scores(feature_set, days=days)
         hourly = []
@@ -209,6 +213,7 @@ def refit_panel(model_dir=MODEL_DIR, feature_set: str = "honest_v2", now=None, r
     (Paris calendar, the refit's own rule) has a refit, "due" when it has none before the `red_from_day`th, "overdue" (red) from that day,
     "missing" without any metadata.
     """
+    refuse_research(feature_set, "dashboard")
     import json
     import subprocess
 
@@ -246,6 +251,7 @@ def refit_panel(model_dir=MODEL_DIR, feature_set: str = "honest_v2", now=None, r
 
 def market_panel(path, feature_set: str = "honest_v2", market_path=MARKET_PATH) -> dict:
     """The forecast against EEX traded prices, day by day, from the local file (collected, pasted or typed; never published)."""
+    refuse_research(feature_set, "dashboard")
     rows = load_market(market_path)
     last_publish = _with_store(path, last_publish_run)
     if rows.empty:
@@ -262,6 +268,7 @@ def market_panel(path, feature_set: str = "honest_v2", market_path=MARKET_PATH) 
 
 def shape_panel(path, feature_set: str = "honest_v2", backtest_path=Path("published/shape_battery_backtest.json")) -> dict:
     """Shape and battery value: the backtest aggregates written by shape-backtest and the live record of the stored versions."""
+    refuse_research(feature_set, "dashboard")
     import json
 
     backtest = json.loads(Path(backtest_path).read_text()) if Path(backtest_path).exists() else {}
@@ -293,6 +300,7 @@ def _paris_clock(ts) -> str:
 
 def revisions_panel(path, delivery_day: str, feature_set: str) -> dict:
     """How the inputs and the forecast daily mean moved between the first and the latest run of the morning."""
+    refuse_research(feature_set, "dashboard")
 
     def read(store: Store):
         runs = store.input_value_runs(delivery_day)

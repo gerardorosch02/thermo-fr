@@ -180,6 +180,18 @@ class Calendars:
         return month.strftime("%Y-%m")
 
 
+def next_contract(contract: str) -> str:
+    return (pd.Period(contract, freq="M") + 1).strftime("%Y-%m")
+
+
+def known_from_ideal(trade_dates) -> pd.Series:
+    """Research timing rule gas_settle_ideal: a settlement of trading day T is known from 17:20 Amsterdam local time on T (the
+    exchange's own final-settlement time), whatever the feed actually delivered."""
+    dates = pd.to_datetime(pd.Series(trade_dates)).dt.tz_localize(None).dt.normalize()
+    local = dates + pd.Timedelta(hours=SETTLEMENT_FINAL[0], minutes=SETTLEMENT_FINAL[1])
+    return local.dt.tz_localize("Europe/Amsterdam").dt.tz_convert("UTC")
+
+
 def issue_time(day) -> pd.Timestamp:
     """tau: 10:05 Paris on D-1, in UTC (the pre-market issue time of timing.py)."""
     local = pd.Timestamp(day).normalize() - pd.Timedelta(days=1) + pd.Timedelta(hours=PREMARKET_ISSUE[0], minutes=PREMARKET_ISSUE[1])
@@ -290,6 +302,8 @@ class GasInputs:
     eua: pd.DataFrame | None = None  # auction_date, price_eur_t, known_from (UTC, mandatory: eua_known_from())
     efficiency: float = EFFICIENCY
     emission_factor: float = EMISSION_FACTOR
+    mode: str = "dbnomics"  # "ideal": the research measurement's idealised timing (known_from_ideal); research sets require it
+    substitute_next: bool = False  # research only: when front(T) has no value on T, the next contract stands in for that day
     _store: dict = field(default_factory=dict, init=False, repr=False)
     _eua: pd.DataFrame | None = field(default=None, init=False, repr=False)
 
@@ -349,7 +363,7 @@ def _empty(day, tau, reason) -> dict:
         "gas_chg_lag1_eur": np.nan, "gas_chg_lag7_eur": np.nan, "gas_age_days": np.nan, "srmc_eur_mwh": np.nan,
         "srmc_ref_eur_mwh": np.nan, "gas_contract": None, "gas_t1": pd.NaT, "gas_r3": pd.NaT, "gas_r9": pd.NaT, "gas_rs": pd.NaT,
         "gas_c3": None,
-        **{c: pd.NaT for c in KNOWN_FROM_COLUMNS}, "gas_roll_in_window": False, "gas_missing": True, "gas_srmc_missing": True,
+        **{c: pd.NaT for c in KNOWN_FROM_COLUMNS}, "gas_roll_in_window": False, "gas_next_contract": False, "gas_missing": True, "gas_srmc_missing": True,
         "gas_missing_reason": reason, "gas_issue_time": tau,
     }
 
@@ -364,10 +378,16 @@ def day_features(day, gas: GasInputs) -> dict:
     t9 = cal.last_trading_on_or_before(D - np.timedelta64(9, "D"))
 
     t1_star = contract = latest = None
+    substituted = False
     for k in range(T1_TOLERANCE + 1):
         candidate = cal.trading_days_back(t1, k)
         front = cal.front(candidate)
         found = gas.value(front, candidate, tau)
+        if found is None and gas.substitute_next:  # research only: the next contract stands in for the whole day
+            nxt = next_contract(front)
+            found = gas.value(nxt, candidate, tau)
+            if found is not None:
+                front, substituted = nxt, True
         if found is not None:
             t1_star, contract, latest = candidate, front, found
             break
@@ -401,6 +421,7 @@ def day_features(day, gas: GasInputs) -> dict:
         "gas_t1": _ts(t1_star), "gas_r3": _ts(r3[0]), "gas_r9": _ts(r9[0]),
         "gas_known_from_t1": latest[1], "gas_known_from_r3": r3[1][1], "gas_known_from_r9": r9[1][1],
         "gas_roll_in_window": cal.front(r3[0]) != contract,
+        "gas_next_contract": substituted,
         "gas_missing": False,
     })
 
@@ -472,18 +493,19 @@ def _docs(obj) -> list:
     return obj.get("docs", [])
 
 
-def load_dbnomics_json(paths, series_map: dict | None = None) -> pd.DataFrame:
+def load_dbnomics_json(paths, series_map: dict | None = None, monthly_only: bool = False) -> pd.DataFrame:
     """The raw DBnomics pages saved by the laptop script (v22 series endpoint, observations=1): one row per observation with
     series_code, series_name, contract ('YYYY-MM'), trade_date and value. 'NA' observations are skipped. The contract comes
     from `series_map` (series_code -> month) where given, else from the series name; an unresolved series or two differing
-    values for one (contract, trade date) raise GasDataError."""
-    rows, unresolved = [], []
+    values for one (contract, trade date) raise GasDataError. With `monthly_only`, series whose name names no single month
+    (quarters, seasons, calendar and gas years, strips) are skipped instead, and their count is in frame.attrs."""
+    rows, unresolved, skipped = [], [], []
     for path in sorted(Path(p) for p in ([paths] if isinstance(paths, (str, Path)) else paths)):
         for doc in _docs(json.loads(Path(path).read_text(encoding="utf-8"))):
             code, name = doc.get("series_code"), doc.get("series_name", "")
             contract = (series_map or {}).get(code) or contract_from_name(name)
             if contract is None:
-                unresolved.append(f"{code} ({name!r})")
+                (skipped if monthly_only else unresolved).append(f"{code} ({name!r})")
                 continue
             for period, value in zip(doc.get("period", []), doc.get("value", [])):
                 if value is None or value == "NA" or (isinstance(value, float) and np.isnan(value)):
@@ -499,7 +521,10 @@ def load_dbnomics_json(paths, series_map: dict | None = None) -> pd.DataFrame:
         first = clash.iloc[0]
         raise GasDataError(f"{len(clash)} rows give different values for one contract and trade date, e.g. {first['contract']} "
                            f"on {first['trade_date']:%Y-%m-%d} (series {sorted(clash['series_code'].unique())})")
-    return frame.sort_values(["contract", "trade_date"]).reset_index(drop=True)
+    frame = frame.sort_values(["contract", "trade_date"]).reset_index(drop=True)
+    frame.attrs["skipped_series"] = len(skipped)
+    frame.attrs["monthly_series"] = int(frame["series_code"].nunique())
+    return frame
 
 
 def known_from_secondary(trade_dates) -> pd.Series:
@@ -528,7 +553,7 @@ def settlements_from_dbnomics(raw: pd.DataFrame, history: pd.DataFrame | None = 
     return hist
 
 
-def read_gas_dir(path) -> dict:
+def read_gas_dir(path, ideal: bool = False) -> dict:
     """The pieces of a gas directory (git-ignored, on the laptop):
 
     - dbnomics/*.json: raw DBnomics pages (or settlements.csv: contract, trade_date, value, known_from)
@@ -538,6 +563,9 @@ def read_gas_dir(path) -> dict:
     - ice_expiries.csv (optional): contract_month, last_trading_day, source (an ICE-published date wins over the rule)
     - uk_holidays.csv (optional): date; otherwise the holidays package, subdivision ENG
     - eua.csv (optional, candidate B): auction_date, price_eur_t, and known_from or fetched_at (else 13:00 Paris on the day)
+
+    The raw pages are read with monthly_only (the dataset also holds quarters, seasons, years and strips). With `ideal` (the
+    research measurement only), every value gets known_from_ideal and known_from.csv is ignored.
     """
     path = Path(path)
     raw = None
@@ -548,11 +576,16 @@ def read_gas_dir(path) -> dict:
         if (path / "series_map.csv").exists():
             m = pd.read_csv(path / "series_map.csv", dtype=str)
             series_map = dict(zip(m["series_code"], m["contract"]))
-        raw = load_dbnomics_json(sorted((path / "dbnomics").glob("*.json")), series_map)
-        history = pd.read_csv(path / "known_from.csv") if (path / "known_from.csv").exists() else None
-        settlements = settlements_from_dbnomics(raw, history)
+        raw = load_dbnomics_json(sorted((path / "dbnomics").glob("*.json")), series_map, monthly_only=True)
+        if ideal:
+            settlements = raw[["contract", "trade_date", "value"]].copy()
+            settlements["known_from"] = known_from_ideal(settlements["trade_date"]).to_numpy()
+        else:
+            history = pd.read_csv(path / "known_from.csv") if (path / "known_from.csv").exists() else None
+            settlements = settlements_from_dbnomics(raw, history)
     trade = pd.to_datetime(settlements["trade_date"])
-    years = range(trade.min().year - 1, trade.max().year + 2)
+    last_contract = max(int(contract_key(c)[:4]) for c in settlements["contract"].unique())
+    years = range(trade.min().year - 1, max(trade.max().year, last_contract) + 2)  # UK holidays through the last expiry
     closures = ice_closure_table(pd.read_csv(path / "ice_closures.csv")["date"], years)
     expiries = pd.read_csv(path / "ice_expiries.csv", dtype=str) if (path / "ice_expiries.csv").exists() else None
     overrides = {}
@@ -571,8 +604,9 @@ def read_gas_dir(path) -> dict:
             "eua": eua, "years": years}
 
 
-def load_gas_dir(path, efficiency: float = EFFICIENCY, emission_factor: float = EMISSION_FACTOR) -> GasInputs:
-    """GasInputs from a gas directory (read_gas_dir); raises GasDataError on any hard data check."""
-    parts = read_gas_dir(path)
+def load_gas_dir(path, efficiency: float = EFFICIENCY, emission_factor: float = EMISSION_FACTOR, ideal: bool = False) -> GasInputs:
+    """GasInputs from a gas directory (read_gas_dir); raises GasDataError on any hard data check. `ideal` builds the research
+    measurement's inputs: idealised known_from and the next-contract substitution."""
+    parts = read_gas_dir(path, ideal=ideal)
     return GasInputs(parts["settlements"], parts["calendars"], eua=parts["eua"], efficiency=efficiency,
-                     emission_factor=emission_factor)
+                     emission_factor=emission_factor, mode="ideal" if ideal else "dbnomics", substitute_next=ideal)

@@ -316,10 +316,11 @@ def test_agreement_failure_and_load_error_stop(tmp_path, capsys, base_frame):
     code, out = run(gas_dir, shifted, capsys)
     assert code == 1 and "[STOP] agreement with the EEX settlements" in out
     page = json.loads((gas_dir / "dbnomics" / "page_0.json").read_text())
-    page["series"]["docs"][0]["series_name"] = "Dutch TTF Gas Futures"
+    doc = page["series"]["docs"][-1]
+    page["series"]["docs"].append(dict(doc, series_code="D.1", value=[v + 1 if v != "NA" else v for v in doc["value"]]))
     (gas_dir / "dbnomics" / "page_0.json").write_text(json.dumps(page))
-    code, out = run(gas_dir, shifted, capsys)
-    assert code == 1 and "[STOP] loading the gas directory" in out
+    code, out = run(gas_dir, shifted, capsys)  # two series give different values for one contract: loading stops
+    assert code == 1 and "[STOP] loading the gas directory" in out and "different values" in out
 
 
 def test_m2_counts_strict_days_per_candidate(base_frame):
@@ -333,3 +334,21 @@ def test_m2_counts_strict_days_per_candidate(base_frame):
     assert [c.name for c in checks][:2] == ["M2 selection, A (honest_v2_gas) and C (honest_v2_gas_rel)", "M2 selection, B (honest_v2_gas_srmc)"]
     assert "0 of 31 strict delivery days" in checks[0].lines[0] and all(c.ok for c in checks[:2])
     assert checks[2].lines[0].startswith("0 of 0") and not checks[2].ok  # no strict holdout day given: counted as a breach
+
+
+def test_research_mode_substitutes_and_skips_m3_and_agreement(tmp_path, capsys, base_frame):
+    cov = gas_checks.front_coverage(base_frame, CAL, "2024-03-01", "2024-03-29")
+    gap = {(r.front, r.day.strftime("%Y-%m-%d")) for r in cov.itertuples()}  # every front-month value of March 2024 missing
+    frame = base_frame[[(c, d.strftime("%Y-%m-%d")) not in gap for c, d in zip(base_frame["contract"], base_frame["trade_date"])]]
+    gas_dir, eex = write_dir(tmp_path, frame)
+    page = json.loads((gas_dir / "dbnomics" / "page_0.json").read_text())
+    page["series"]["docs"].append({"series_code": "D.9", "series_name": "Daily – Summer23", "period": ["2023-01-03"], "value": [30.0]})
+    (gas_dir / "dbnomics" / "page_0.json").write_text(json.dumps(page))
+    code, out = run(gas_dir, eex, capsys, extra=("--research",))
+    assert code == 0, out
+    assert "1 other series (quarters, seasons, years, strips) skipped" in out
+    assert "M3\n    does not apply" in out and "not applicable to the research measurement" in out
+    assert "substituted days 20 of 989" in out and "next-contract substitution on" in out
+    assert "M2 selection, R1 (research_ttf_ideal_chg) and R2 (research_ttf_ideal_rel)" in out and "M2 holdout" not in out
+    code, out = run(gas_dir, eex, capsys)  # the v4 checks on the same gap: a run of 20 missing front-month days, no substitution
+    assert code == 0 and "2024-03-01 to 2024-03-28: 20 days, front 2024-04" in out and "1 runs of 3 or more" in out
