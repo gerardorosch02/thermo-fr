@@ -147,6 +147,15 @@ def load_forecast_issue(index) -> pd.DatetimeIndex:
     return _local_clock(delivery_days(index), -1, LOAD_FORECAST_HOUR)
 
 
+def load_forecast_lag_issue(lag_days: int) -> Callable:
+    """The load forecast for delivery day D - lag was due at 10:00 Paris on D - lag - 1."""
+
+    def rule(index):
+        return _local_clock(delivery_days(index), -lag_days - 1, LOAD_FORECAST_HOUR)
+
+    return rule
+
+
 def wind_solar_forecast_issue(index) -> pd.DatetimeIndex:
     return _local_clock(delivery_days(index), -1, WIND_SOLAR_FORECAST_HOUR)
 
@@ -244,7 +253,14 @@ TIMINGS = {
     "calendar": InputTiming("calendar", calendar_issue, "Hour, weekday, month, public holidays, day types and bridge days are known in advance."),
     "price_lag1": InputTiming("price_lag1", price_lag_issue(1), "Day-ahead price of D-1, published about 13:00 Paris on D-2."),
     "price_lag2": InputTiming("price_lag2", price_lag_issue(2), "Day-ahead price of D-2, published about 13:00 Paris on D-3."),
+    "price_lag3": InputTiming("price_lag3", price_lag_issue(3), "Day-ahead price of D-3, published about 13:00 Paris on D-4."),
     "price_lag7": InputTiming("price_lag7", price_lag_issue(7), "Day-ahead price of D-7, published about 13:00 Paris on D-8."),
+    "load_forecast_lag1": InputTiming(
+        "load_forecast_lag1", load_forecast_lag_issue(1), "ENTSO-E load forecast for D-1, as published by 10:00 Paris on D-2.",
+    ),
+    "load_forecast_lag7": InputTiming(
+        "load_forecast_lag7", load_forecast_lag_issue(7), "ENTSO-E load forecast for D-7, as published by 10:00 Paris on D-8.",
+    ),
     "load_forecast": InputTiming(
         "load_forecast", load_forecast_issue,
         "ENTSO-E day-ahead total load forecast, due two hours before gate closure (10:00 Paris on D-1).",

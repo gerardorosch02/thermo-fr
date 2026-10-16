@@ -111,9 +111,98 @@ def cmd_forecast_backtest(args) -> None:
     sources = json.loads((data.parent / "sources.json").read_text()) if (data.parent / "sources.json").exists() else None
     comparison_path = data.parent / "price_comparison.json"
     comparison = json.loads(comparison_path.read_text()) if comparison_path.exists() else None
-    results = run_backtest(hourly, args.test_start, args.test_end, feature_sets=tuple(args.feature_sets))
+    from .forecast.backtest import FitOptions
+
+    windows = None
+    if args.train_windows:
+        windows = tuple(None if w == "all" else int(w) for w in args.train_windows.split(","))
+    options = FitOptions(target_transform=args.target_transform, recency_half_life=args.recency_half_life, train_windows=windows)
+    results = run_backtest(hourly, args.test_start, args.test_end, feature_sets=tuple(args.feature_sets), options=options)
     path = write_report(results, out=Path(args.out), sample_week=args.sample_week, sources=sources, comparison=comparison)
     print(path.read_text(encoding="utf-8"))
+
+
+def cmd_sprint_backtest(args) -> None:
+    import time
+
+    from .forecast.inputs import load_inputs
+    from .forecast.sprint import run_sprint, selection_report
+
+    hourly = load_inputs(Path(args.data))
+    started = time.time()
+    frame = run_sprint(hourly, args.test_start, args.test_end, n_jobs=args.n_jobs, recalibrate=args.recalibrate)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(out / "sprint_predictions.csv", index_label="timestamp_utc")
+    print(f"sprint forecasts for {frame['delivery_day'].nunique()} delivery days written to {out} in {time.time() - started:.0f} s")
+    if args.no_report:
+        return
+    report = selection_report(frame, hourly)
+    (out / "sprint_report.json").write_text(json.dumps(report, indent=2, default=str))
+    print(json.dumps({k: report[k] for k in ("baseline_mae", "to_shadow", "finding")}, indent=2))
+    for name, c in report["candidates"].items():
+        print(f"{name}: gain {c['gain']:+.4f}, conditions {c['conditions']}")
+
+
+def cmd_sprint_stage(args) -> None:
+    """Resumable stages of the model sprint: every finished piece is written at once and skipped on a rerun."""
+    import time
+
+    from .forecast.inputs import load_inputs
+    from .forecast.lear import lear_walk_forward
+    from .forecast.sprint import check_window, gbm_stage
+
+    check_window(args.test_end)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    hourly = load_inputs(Path(args.data))
+    if args.stage == "gbm":
+        if all((out / f"gbm_{n}.csv").exists() for n in ("honest_v2", "S3", "S4")):
+            print("gbm stage already complete")
+            return
+        started = time.time()
+        for name, frame in gbm_stage(hourly, args.test_start, args.test_end).items():
+            frame.to_csv(out / f"gbm_{name}.csv", index_label="timestamp_utc")
+        print(f"gbm stage written in {time.time() - started:.0f} s")
+        return
+    months = pd.period_range(args.months.split(":")[0], args.months.split(":")[1], freq="M") if args.months else \
+        pd.period_range(args.test_start, pd.Timestamp(args.test_end) - pd.Timedelta(days=1), freq="M")
+    for month in months:
+        path = out / f"lear_{month}.csv"
+        if path.exists():
+            continue
+        started = time.time()
+        frame = lear_walk_forward(hourly, month.start_time.strftime("%Y-%m-%d"), (month + 1).start_time.strftime("%Y-%m-%d"),
+                                  recalibrate=args.recalibrate, n_jobs=args.n_jobs)
+        tmp = path.with_suffix(".tmp")
+        frame.to_csv(tmp, index_label="timestamp_utc")
+        tmp.replace(path)
+        print(f"lear {month} written in {time.time() - started:.0f} s", flush=True)
+
+
+def cmd_sprint_report(args) -> None:
+    from .forecast.inputs import load_inputs
+    from .forecast.sprint import assemble, check_window, selection_report
+
+    check_window(args.test_end)
+    out = Path(args.out)
+    hourly = load_inputs(Path(args.data))
+
+    def read(path):
+        frame = pd.read_csv(path, index_col=0, parse_dates=["delivery_day"])
+        frame.index = pd.to_datetime(frame.index, utc=True)
+        return frame
+
+    months = pd.period_range(args.test_start, pd.Timestamp(args.test_end) - pd.Timedelta(days=1), freq="M")
+    missing = [str(m) for m in months if not (out / f"lear_{m}.csv").exists()]
+    if missing:
+        raise SystemExit(f"LEAR months missing: {', '.join(missing)}")
+    lear = pd.concat([read(out / f"lear_{m}.csv") for m in months])
+    frame = assemble(read(out / "gbm_honest_v2.csv"), read(out / "gbm_S3.csv"), read(out / "gbm_S4.csv"), lear)
+    frame.to_csv(out / "sprint_predictions.csv", index_label="timestamp_utc")
+    report = selection_report(frame, hourly)
+    (out / "sprint_report.json").write_text(json.dumps(report, indent=2, default=str))
+    print(json.dumps({k: report[k] for k in ("baseline_mae", "to_shadow", "finding")}, indent=2))
 
 
 def cmd_forecast(args) -> None:
@@ -744,7 +833,38 @@ def main(argv=None) -> None:
     fbt.add_argument("--sample-week", default=None, help="Monday (YYYY-MM-DD) of the week to chart")
     fbt.add_argument("--feature-sets", nargs="+", default=list(DEFAULT_SETS), choices=FEATURE_SETS,
                      help="honest_wind is the honest set before the solar proxy and the calendar structure; honest_base has neither proxy")
+    fbt.add_argument("--target-transform", default=None, choices=["asinh"], help="model-sprint option: asinh target (median/MAD from training rows)")
+    fbt.add_argument("--recency-half-life", type=float, default=None, help="model-sprint option: sample weights halving every N days of age")
+    fbt.add_argument("--train-windows", default=None, help="model-sprint option: average fits over windows, e.g. all,730,365 (days)")
     fbt.set_defaults(func=cmd_forecast_backtest)
+
+    spr = sub.add_parser("sprint-backtest", help="model sprint: honest_v2, LEAR and candidates S1 to S4 with the pre-registered rule")
+    spr.add_argument("--data", default="data/forecast/inputs.csv")
+    spr.add_argument("--out", default="reports/sprint")
+    spr.add_argument("--test-start", default="2024-01-01")
+    spr.add_argument("--test-end", default="2026-07-01", help="exclusive; refused after the start of the holdout")
+    spr.add_argument("--n-jobs", type=int, default=1, help="parallel LEAR calibration windows")
+    spr.add_argument("--recalibrate", default="daily", choices=["daily", "monthly"], help="LEAR recalibration (pre-registered: daily)")
+    spr.add_argument("--no-report", action="store_true", help="write the forecasts only, compute no error figure (cost estimates, smoke tests)")
+    spr.set_defaults(func=cmd_sprint_backtest)
+
+    sst = sub.add_parser("sprint-stage", help="model sprint, resumable: the gbm stage (honest_v2, S3, S4) or LEAR month by month")
+    sst.add_argument("stage", choices=["gbm", "lear"])
+    sst.add_argument("--data", default="data/forecast/inputs.csv")
+    sst.add_argument("--out", default="reports/sprint")
+    sst.add_argument("--test-start", default="2024-01-01")
+    sst.add_argument("--test-end", default="2026-07-01")
+    sst.add_argument("--months", default=None, help="LEAR months to run, e.g. 2024-01:2025-03 (default: the whole test window)")
+    sst.add_argument("--n-jobs", type=int, default=1)
+    sst.add_argument("--recalibrate", default="daily", choices=["daily", "monthly"])
+    sst.set_defaults(func=cmd_sprint_stage)
+
+    srp = sub.add_parser("sprint-report", help="model sprint: assemble the stages, combine, apply the pre-registered rule")
+    srp.add_argument("--data", default="data/forecast/inputs.csv")
+    srp.add_argument("--out", default="reports/sprint")
+    srp.add_argument("--test-start", default="2024-01-01")
+    srp.add_argument("--test-end", default="2026-07-01")
+    srp.set_defaults(func=cmd_sprint_report)
 
     fc = sub.add_parser("forecast", help="Hourly price forecast for one delivery day, as of 12:00 the day before")
     fc.add_argument("--date", required=True, help="delivery day, YYYY-MM-DD (Paris)")

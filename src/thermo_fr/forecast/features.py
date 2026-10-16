@@ -121,6 +121,23 @@ FEATURE_TIMINGS = {
 }
 
 
+# LEAR (forecast/lear.py, branch model-sprint): each input block's timing rule, and every LEAR column registered above
+LEAR_BLOCK_TIMINGS = {
+    "price_d1": "price_lag1", "price_d2": "price_lag2", "price_d3": "price_lag3", "price_d7": "price_lag7",
+    "load_d0": "load_forecast", "load_d1": "load_forecast_lag1", "load_d7": "load_forecast_lag7",
+    "temp_d0": "weather_issued", "wind_d0": "weather_issued", "rad_d0": "weather_issued",
+    "ch_d1": "neighbour_price_lag1", "de_lu_d1": "neighbour_price_lag1",
+    "nuclear_d1_early": "nuclear_d1",
+    "calendar": "calendar",
+}
+LEAR_VECTOR_BLOCKS = ("price_d1", "price_d2", "price_d3", "price_d7", "load_d0", "load_d1", "load_d7", "temp_d0", "wind_d0", "rad_d0",
+                      "ch_d1", "de_lu_d1")
+LEAR_CALENDAR = [f"dow_{k}" for k in range(7)] + [f"day_type_{k}" for k in range(3)] + ["bridge_day", "pre_holiday", "post_holiday"]
+LEAR_COLUMNS = ([f"{b}_h{h:02d}" for b in LEAR_VECTOR_BLOCKS for h in range(24)] + ["nuclear_d1_early"] + LEAR_CALENDAR)
+FEATURE_TIMINGS.update({f"{b}_h{h:02d}": LEAR_BLOCK_TIMINGS[b] for b in LEAR_VECTOR_BLOCKS for h in range(24)})
+FEATURE_TIMINGS.update({"nuclear_d1_early": "nuclear_d1", **{c: "calendar" for c in LEAR_CALENDAR}})
+
+
 def feature_timings(feature_set: str) -> dict[str, str]:
     return {f: FEATURE_TIMINGS[f] for f in FEATURES[feature_set]}
 

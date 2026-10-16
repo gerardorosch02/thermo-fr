@@ -20,6 +20,10 @@ SET_LABELS = {
     "honest_solar": "honest_wind plus the solar proxy",
     "honest_calendar": "honest_wind plus the calendar structure and the same-type lag",
     "extended": "extended (may use late information)",
+    "honest_nuclear": "honest plus lagged nuclear generation",
+    "honest_neighbours": "honest plus the neighbours' D-1 prices and spreads",
+    "honest_fund": "honest plus nuclear and neighbours",
+    "honest_v2": "honest_v2 (honest plus nuclear, neighbours and the v2 residual load)",
 }
 
 
@@ -196,7 +200,7 @@ def worst_table(rows: list[dict]) -> str:
 
 
 def to_markdown(summary: dict) -> str:
-    sets = [k for k in summary if k in SET_LABELS]
+    sets = [k for k in summary if isinstance(summary[k], dict) and "metrics_strict" in summary[k]]
     strict = {k: summary[k]["metrics_strict"] for k in sets}
     full = {k: summary[k]["metrics_all"] for k in sets}
     any_strict = next(iter(strict.values()))
@@ -234,7 +238,7 @@ def to_markdown(summary: dict) -> str:
     for k in sets:
         m = strict[k]
         parts += [
-            f"## {SET_LABELS[k].capitalize()} feature set, by slice (strict rows)",
+            f"## {SET_LABELS.get(k, k).capitalize()} feature set, by slice (strict rows)",
             "",
             f"Top price hours are those at or above {m['top_price_cut_eur_mwh']} EUR/MWh (95th percentile of the test window). "
             "Peak is 08:00 to 20:00 on weekdays.",

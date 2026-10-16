@@ -21,6 +21,7 @@ import pandas as pd
 from .features import FeatureTable, build_features, feature_timings
 from .models import BENCHMARKS, MODELS, benchmark_predictions, fit_predict
 from .timing import LookaheadError, check_point_in_time
+from .transforms import asinh_forward, asinh_inverse, robust_scale
 
 TOP_SHARE = 0.05
 WINDY_SHARE = 0.10  # the windiest days by actual national wind generation (daily mean)
@@ -40,8 +41,63 @@ def month_starts(test_start: str, test_end: str) -> list[pd.Timestamp]:
     return list(pd.date_range(pd.Timestamp(test_start).normalize(), pd.Timestamp(test_end), freq="MS", inclusive="left"))
 
 
-def walk_forward(table: FeatureTable, test_start: str, test_end: str, models=MODELS, log=print) -> BacktestResult:
+@dataclass(frozen=True)
+class FitOptions:
+    """Model-sprint options for the walk-forward; the defaults reproduce the original path exactly.
+
+    - target_transform "asinh": fit on asinh((y - m) / s), m and s the median and MAD x 1.4826 of each fit's training targets;
+      forecast m + s sinh(output).
+    - recency_half_life (days): sample weights 0.5 ** (age / half_life), age in days from the training row's delivery day to
+      the first day of the forecast month.
+    - train_windows: training windows in days ending the day before the month starts (None = all earlier data); the forecast
+      is the mean of one fit per window.
+    """
+
+    target_transform: str | None = None
+    recency_half_life: float | None = None
+    train_windows: tuple | None = None
+
+    @property
+    def is_default(self) -> bool:
+        return self.target_transform is None and self.recency_half_life is None and self.train_windows is None
+
+    @property
+    def suffix(self) -> str:
+        parts = []
+        if self.train_windows is not None:
+            parts.append("windows_" + "_".join("all" if w is None else str(w) for w in self.train_windows))
+        if self.target_transform:
+            parts.append(self.target_transform)
+        if self.recency_half_life is not None:
+            parts.append(f"recency_{self.recency_half_life:g}")
+        return ("+" + "+".join(parts)) if parts else ""
+
+
+def fit_predict_options(name: str, table: FeatureTable, train, test, start: pd.Timestamp, options: FitOptions) -> np.ndarray:
+    """One model's forecast for the test rows under the sprint options (only training rows enter any parameter)."""
+    days = table.info["delivery_day"]
+    preds = []
+    for window in (options.train_windows or (None,)):
+        mask = train if window is None else train & (days >= start - pd.Timedelta(days=int(window)))
+        X_train, y_train = table.X[mask], table.y[mask]
+        weight = None
+        if options.recency_half_life is not None:
+            age = (start - days[mask]).dt.days.to_numpy()
+            weight = 0.5 ** (age / float(options.recency_half_life))
+        if options.target_transform == "asinh":
+            m, s = robust_scale(y_train.dropna().to_numpy())
+            z = pd.Series(asinh_forward(y_train.to_numpy(), m, s), index=y_train.index)
+            preds.append(asinh_inverse(fit_predict(name, X_train, z, table.X[test], sample_weight=weight), m, s))
+        elif options.target_transform is None:
+            preds.append(fit_predict(name, X_train, y_train, table.X[test], sample_weight=weight))
+        else:
+            raise ValueError(f"unknown target_transform {options.target_transform!r}")
+    return np.mean(preds, axis=0)
+
+
+def walk_forward(table: FeatureTable, test_start: str, test_end: str, models=MODELS, log=print, options: FitOptions | None = None) -> BacktestResult:
     """Retrain at the start of every month on all earlier days, forecast that month."""
+    options = options or FitOptions()
     days = table.info["delivery_day"]
     frames = []
     months = month_starts(test_start, test_end)
@@ -56,7 +112,10 @@ def walk_forward(table: FeatureTable, test_start: str, test_end: str, models=MOD
         out["actual"] = table.y[test]
         out = out.join(benchmark_predictions(X_test))
         for name in models:
-            out[name] = fit_predict(name, X_train, y_train, X_test)
+            if options.is_default:
+                out[name] = fit_predict(name, X_train, y_train, X_test)
+            else:
+                out[name] = fit_predict_options(name, table, train, test, start, options)
         out["strict"] = table.info.loc[test, "weather_point_in_time"].to_numpy()
         out["train_rows"] = int(y_train.notna().sum())
         frames.append(out)
@@ -211,13 +270,17 @@ def summarise_worst(worst: pd.DataFrame, predictions: pd.DataFrame, model: str =
     }
 
 
-def run_backtest(hourly: pd.DataFrame, test_start: str, test_end: str, feature_sets=DEFAULT_SETS, log=print) -> dict:
-    """The requested feature sets through the walk-forward, with metrics and worst days for each."""
+def run_backtest(hourly: pd.DataFrame, test_start: str, test_end: str, feature_sets=DEFAULT_SETS, log=print,
+                 options: FitOptions | None = None) -> dict:
+    """The requested feature sets through the walk-forward, with metrics and worst days for each. With sprint `options` the
+    results are keyed by the set name plus the options' suffix (for example honest_v2+asinh)."""
+    options = options or FitOptions()
     results = {}
     for feature_set in feature_sets:
         log(f"Feature set {feature_set}: building features and running the walk-forward ...")
         table = build_features(hourly, feature_set)
-        bt = walk_forward(table, test_start, test_end, log=log)
+        bt = walk_forward(table, test_start, test_end, log=log, options=options)
+        feature_set = feature_set + options.suffix
         worst = worst_days(bt.predictions, table, hourly)
         results[feature_set] = {
             "table": table,
