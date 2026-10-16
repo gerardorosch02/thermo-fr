@@ -157,9 +157,25 @@ def test_missing_final_day_uses_the_day_before_in_the_same_contract():
     f = gas.day_features("2026-10-31")
     assert f["gas_t1"] == pd.Timestamp("2026-10-28") and f["gas_contract"] == "2026-11" and f["gas_age_days"] == 3
     assert f["gas_r3"] == pd.Timestamp("2026-10-28") and f["gas_chg_lag1_eur"] == 0.0 and not f["gas_missing"]
-    # the next day rolls to Dec26 with all its values present, but the cost behind the D-1 auction needs Nov26 on 29 October
+    # the next day rolls to Dec26 (all its values present); the cost behind the D-1 auction takes Rs one trading day before R3*,
+    # where the front month is still Nov26 and has a value
     g = gas.day_features("2026-11-01")
-    assert not g["gas_missing"] and g["gas_contract"] == "2026-12" and g["gas_srmc_missing"]
+    assert not g["gas_missing"] and g["gas_contract"] == "2026-12" and g["gas_r3"] == pd.Timestamp("2026-10-29")
+    assert not g["gas_srmc_missing"] and g["gas_rs"] == pd.Timestamp("2026-10-28") and g["gas_c3"] == "2026-11"
+    assert g["srmc_ref_eur_mwh"] == pytest.approx((value("2026-11", "2026-10-28") + 0.184 * eua_on_or_before("2026-10-29")) / 0.50)
+
+
+def test_spark_reference_tolerance_and_its_limit():
+    within = GasInputs(settlements(drop={("2026-11", "2026-10-29"), ("2026-11", "2026-10-28")}), CAL, eua=eua())
+    f = within.day_features("2026-11-01")
+    assert f["gas_rs"] == pd.Timestamp("2026-10-27") and f["gas_c3"] == "2026-11" and not f["gas_srmc_missing"]
+    beyond = GasInputs(settlements(drop={("2026-11", d) for d in ("2026-10-29", "2026-10-28", "2026-10-27")}), CAL, eua=eua())
+    g = beyond.day_features("2026-11-01")
+    assert not g["gas_missing"] and g["gas_srmc_missing"] and g["gas_missing_reason"] == "no_rs" and np.isnan(g["srmc_eur_mwh"])
+    bad = settlements(drop={("2026-11", "2026-10-29")}, extra=[
+        {"contract": "2026-11", "trade_date": "2026-10-29", "value": 600.0, "known_from": known("2026-10-29")}])
+    h = GasInputs(bad, CAL, eua=eua()).day_features("2026-11-01")
+    assert not h["gas_missing"] and h["gas_srmc_missing"] and h["gas_missing_reason"] == "out_of_range_rs"
 
 
 def test_missing_latest_close_within_and_beyond_the_tolerance():
@@ -305,7 +321,7 @@ def gas_for_synthetic() -> GasInputs:
     """Hand-built settlements covering the synthetic inputs table (September 2023 to April 2024)."""
     contracts = [p.strftime("%Y-%m") for p in pd.period_range("2023-07", "2024-07", freq="M")]
     frame = settlements(first="2023-06-01", last="2024-05-31", contracts=contracts,
-                        drop={("2024-01", "2023-12-26"), ("2024-01", "2023-12-27"), ("2024-02", "2024-01-23")})
+                        drop={("2024-01", "2023-12-22"), ("2024-01", "2023-12-27"), ("2024-02", "2024-01-23")})
     return GasInputs(frame, CAL, eua=eua("2023-06-01", "2024-05-31"))
 
 
@@ -328,7 +344,7 @@ def test_build_features_needs_gas_for_gas_sets_and_ignores_it_otherwise(synth):
     row = b.X.index[2000]
     assert b.X.loc[row, "spark_lag1_eur"] == pytest.approx(b.X.loc[row, "price_lag1"] - gas.day_features(b.info.loc[row, "delivery_day"])["srmc_ref_eur_mwh"])
     assert "srmc_ref_eur_mwh" not in b.info and {"gas_known_from_t1", "gas_roll_in_window", "gas_contract", "gas_features_missing"} <= set(b.info)
-    # days whose gas features are missing (29 December 2023: T1 = 27 Dec and the trading day before, 26 Dec, both absent for Jan24)
+    # days whose gas features are missing (29 December 2023: T1 = 27 Dec and the trading day before, 22 Dec (25 and 26 Dec closed), both absent for Jan24)
     missing = b.info.loc[b.info["delivery_day"] == pd.Timestamp("2023-12-29"), "gas_features_missing"]
     assert missing.all() and b.X.loc[missing.index, GAS].isna().all().all()
     assert build_features(inputs, "honest_v2_gas_rel", gas=gas).target_offset.equals(b.X["price_lag1_mean"])
