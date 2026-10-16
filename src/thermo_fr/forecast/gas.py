@@ -233,7 +233,8 @@ def settlement_issues(settlements: pd.DataFrame, calendars: Calendars) -> tuple[
     - non_trading_not_repeat (hard): a value on a weekend or a sourced closure that differs from the contract's previous
       settlement (its latest earlier trade date, as first published), or has none;
     - non_trading_repeats (dropped): such values equal to the previous settlement;
-    - default_closure_values (soft, dropped and listed): any value on an unsourced default closure day.
+    - default_closure_values (soft, dropped and listed): any value on an unsourced default closure day, with a `repeat` column
+      (True when it equals the previous settlement, which is consistent with the day being closed).
     """
     frame = normalise_settlements(settlements)
     expiries = {c: _ts(calendars.expiry(c)) for c in frame["contract"].unique()}
@@ -246,7 +247,7 @@ def settlement_issues(settlements: pd.DataFrame, calendars: Calendars) -> tuple[
     hard_closed = ~trading & ~default
     first_known = frame.sort_values("known_from").drop_duplicates(["contract", "trade_date"], keep="first")
     repeat = np.zeros(len(frame), dtype=bool)
-    for i in np.flatnonzero(hard_closed):
+    for i in np.flatnonzero(~trading):  # weekends, sourced and default closures: is the value a repeat?
         row = frame.iloc[i]
         earlier = first_known[(first_known["contract"] == row["contract"]) & (first_known["trade_date"] < row["trade_date"])]
         previous = earlier.sort_values("trade_date").iloc[-1]["value"] if len(earlier) else None
@@ -256,7 +257,7 @@ def settlement_issues(settlements: pd.DataFrame, calendars: Calendars) -> tuple[
         "known_too_early": frame[early],
         "non_trading_not_repeat": frame[hard_closed & ~repeat],
         "non_trading_repeats": frame[hard_closed & repeat],
-        "default_closure_values": frame[default],
+        "default_closure_values": frame[default].assign(repeat=repeat[default]),
     }
     clean = frame[trading & ~after.to_numpy() & ~early.to_numpy()].reset_index(drop=True)
     return clean, issues

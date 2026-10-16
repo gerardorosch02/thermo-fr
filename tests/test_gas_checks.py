@@ -122,6 +122,7 @@ def test_values_on_default_closures_are_dropped_and_listed_not_a_stop():
                            "known_from": pd.Timestamp("2025-04-19T07:00Z")}])
     clean, issues = settlement_issues(pd.concat([frame, extra]), CAL)
     assert len(issues["default_closure_values"]) == 1 and not len(issues["non_trading_not_repeat"])
+    assert not issues["default_closure_values"]["repeat"].iloc[0]  # 99.0 differs from the previous settlement
     assert pd.Timestamp("2025-04-18") not in set(clean["trade_date"])
     GasInputs(pd.concat([frame, extra]), CAL)  # no GasDataError
     # the same differing value on a sourced closure stops the branch
@@ -352,3 +353,32 @@ def test_research_mode_substitutes_and_skips_m3_and_agreement(tmp_path, capsys, 
     assert "M2 selection, R1 (research_ttf_ideal_chg) and R2 (research_ttf_ideal_rel)" in out and "M2 holdout" not in out
     code, out = run(gas_dir, eex, capsys)  # the v4 checks on the same gap: a run of 20 missing front-month days, no substitution
     assert code == 0 and "2024-03-01 to 2024-03-28: 20 days, front 2024-04" in out and "1 runs of 3 or more" in out
+
+
+def test_default_closure_values_count_against_the_calendar_only_when_they_differ():
+    frame = synthetic_settlements(first="2023-03-01", last="2025-05-30")
+    frame["known_from"] = known_from_secondary(frame["trade_date"]).to_numpy()
+    defaults = [d for d in TABLE.loc[~TABLE["sourced"], "date"] if pd.Timestamp("2023-03-01") <= d <= pd.Timestamp("2025-05-30")]
+    previous = frame.sort_values("trade_date").groupby("contract").apply(
+        lambda part: part.set_index("trade_date")["value"], include_groups=False)
+
+    def closure_rows(differ: bool) -> pd.DataFrame:
+        rows = []
+        for day in defaults:
+            live = [c for c in sorted(frame["contract"].unique()) if CAL.expiry(c) >= np.datetime64(day.date())
+                    and (previous[c].index < day).any()][:2]
+            for contract in live:
+                before = previous[contract][previous[contract].index < day]
+                rows.append({"contract": contract, "trade_date": day, "value": before.iloc[-1] + (1.0 if differ else 0.0),
+                             "known_from": pd.Timestamp(day, tz="UTC") + pd.Timedelta(days=1, hours=6)})
+        return pd.DataFrame(rows)
+
+    for differ, evidence in ((False, False), (True, True)):
+        extra = closure_rows(differ)
+        assert len(extra) > gas_checks.DEFAULT_CLOSURE_EVIDENCE
+        _, issues = settlement_issues(pd.concat([frame, extra], ignore_index=True), CAL)
+        assert len(issues["default_closure_values"]) == len(extra)
+        assert bool(issues["default_closure_values"]["repeat"].all()) is (not differ)
+        text = "\n".join(next(c for c in gas_checks.check_settlement_issues(issues) if c.name.startswith("soft")).lines)
+        assert ("evidence against the default calendar" in text and "no evidence" not in text) is evidence
+        assert (f"{len(extra)} repeat the previous settlement" in text) is (not differ)

@@ -104,10 +104,15 @@ def check_settlement_issues(issues: dict) -> list[Check]:
     out.append(Check("repeats on non-trading days, dropped", ok=True,
                      lines=[f"{len(rep)} dropped"] + [f"  {r.contract} {r.trade_date:%Y-%m-%d}" for r in rep.itertuples()]))
     dflt = issues["default_closure_values"]
-    lines = [f"{len(dflt)} values on unsourced default closures, dropped and listed"]
-    lines += [f"  {r.contract} {r.trade_date:%Y-%m-%d}" for r in dflt.itertuples()]
-    if len(dflt) > DEFAULT_CLOSURE_EVIDENCE:
-        lines.append(f"  more than {DEFAULT_CLOSURE_EVIDENCE}: evidence against the default calendar (changes nothing)")
+    repeats = int(dflt["repeat"].sum()) if "repeat" in dflt else 0
+    differing = len(dflt) - repeats
+    lines = [f"{len(dflt)} values on unsourced default closures, dropped and listed; {repeats} repeat the previous settlement "
+             f"(consistent with a closed day), {differing} differ from it"]
+    lines += [f"  {r.contract} {r.trade_date:%Y-%m-%d}{'' if r.repeat else ' (differs)'}" for r in dflt.itertuples()]
+    if differing > DEFAULT_CLOSURE_EVIDENCE:  # only a differing value suggests real trading on a day the default calls closed
+        lines.append(f"  more than {DEFAULT_CLOSURE_EVIDENCE} differing values: evidence against the default calendar (changes nothing)")
+    elif len(dflt):
+        lines.append("  no evidence against the default calendar: the values are repeats or too few differ")
     out.append(Check("soft: values on default closures", ok=True, lines=lines))
     return out
 
