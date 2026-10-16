@@ -188,8 +188,8 @@ METHOD_MD = """
 
 #### Missing drivers
 - Nuclear availability (not yet tested): outage notices snapshotted daily since 10 Oct 2026; ENTSO-E keeps only the latest revision.
-- Fresher weather (not yet tested): the D-1 00Z run instead of runs issued two days ahead; later D-1 runs arrive after the
-  10:05 issue time.
+- Fresher weather: a pre-check found that weather surprises explain about 4% of the daily error variance on 2024 to 2026,
+  so a fresher run was not pursued for the daily level.
 - Gas price (TTF front month): tested and it added nothing on 2024 to 2026, even assuming the previous day's close
   arrived in time. No free feed delivers that close before the 10:05 issue time.
 - Carbon (EUA price): tested and rejected on the selection window.
