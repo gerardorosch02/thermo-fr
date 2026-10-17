@@ -297,8 +297,9 @@ def cmd_align_inputs(args) -> None:
     from .forecast.align import run_alignment
 
     report = run_alignment(Path(args.data), Path(args.out), Path(args.report_dir))
-    keys = ("relabelled_solar_day_count", "relabelled_solar_days", "clear_sky_check_before", "clear_sky_check_after",
-            "proxy_mae_selection_before", "proxy_mae_selection_after", "label_audit")
+    keys = ("relabelled_solar_day_count", "relabelled_solar_days", "missing_hours_on_flagged_days", "clear_sky_check_before",
+            "clear_sky_check_after", "radiation_proxy_check_before", "radiation_proxy_check_after", "proxy_mae_selection_before",
+            "proxy_mae_selection_after", "wind_proxy_mae_selection_before", "wind_proxy_mae_selection_after", "nuclear_lag_changes")
     print(json.dumps({k: report[k] for k in keys}, indent=2, default=str))
 
 

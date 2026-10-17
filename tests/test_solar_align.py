@@ -178,7 +178,7 @@ def test_align_inputs_recalibrates_the_proxy_on_the_corrected_basis(labels):
     table["solar_mw"] = published
     table["solar_proxy_mw"] = np.nan
     out, report, weights = align.align_inputs(table, log=lambda *_: None)
-    assert report["relabelled_solar_day_count"] > 40 and weights is not None
+    assert report["relabelled_solar_day_count"] > 40 and weights["solar"] is not None
     assert out["solar_proxy_mw"].notna().any()
     np.testing.assert_allclose(out["radiation_fc_wm2"].iloc[:-1].to_numpy(), radiation.iloc[1:].to_numpy())
 
@@ -236,3 +236,105 @@ def test_hour_labels_setting_rejects_unknown_values(labels):
     labels("utc_end")
     with pytest.raises(ValueError):
         hour_labels.current()
+
+
+# --- amendment 1: wind and nuclear relabelled on the solar-flagged days -----------------------------------------------------
+
+def test_relabel_actuals_block_end_rule_and_counts():
+    idx = pd.date_range("2024-01-01", "2024-01-06", freq="1h", tz="UTC", inclusive="left")
+    raw = pd.DataFrame({c: np.arange(len(idx), dtype=float) + 1 for c in ("solar_mw", "wind_onshore_mw", "nuclear_mw")}, index=idx)
+    days = pd.DatetimeIndex(["2024-01-02", "2024-01-03"], tz="UTC")
+    out, missing = solar_labels.relabel_actuals(raw, days)
+    block = (idx >= "2024-01-02") & (idx < "2024-01-04")
+    inner = block & (idx < "2024-01-03 23:00")
+    np.testing.assert_array_equal(out.loc[inner, "nuclear_mw"], raw["nuclear_mw"].shift(-1)[inner])  # each label takes h+1
+    last = pd.Timestamp("2024-01-03 23:00", tz="UTC")
+    assert np.isnan(out.loc[last, "nuclear_mw"]) and np.isnan(out.loc[last, "wind_onshore_mw"]) and out.loc[last, "solar_mw"] == 0.0
+    pd.testing.assert_frame_equal(out[~block], raw[~block])  # other days untouched
+    assert missing == {"solar_mw": 0, "wind_onshore_mw": 1, "nuclear_mw": 1}
+
+
+def true_period_end(index, days):
+    """End of the period a raw label holds: on flagged (late) days the value labelled L is the output of [L-1h, L)."""
+    late = pd.DatetimeIndex(index).tz_convert("UTC").normalize().isin(days)
+    return pd.DatetimeIndex(np.where(late, index, index + pd.Timedelta(hours=1)))
+
+
+@pytest.fixture(scope="module")
+def synthetic_table():
+    from test_forecast_features import synthetic_inputs
+
+    return synthetic_inputs("2023-09-01", "2024-03-01", issued_from="2023-09-01")
+
+
+@pytest.mark.parametrize("day", ["2023-11-15", "2023-12-02", "2023-11-05"])
+def test_nuclear_lags_on_the_relabelled_basis_use_nothing_after_8_paris_on_d1(synthetic_table, day):
+    """Raw nuclear (late labels on the flagged days). Every raw value whose true period ends after 08:00 Paris on D-1 is
+    replaced by noise: after the relabel, D's nuclear lag features do not move. The hour ending at 08:00 does (control)."""
+    days = pd.date_range("2023-10-20", "2023-11-30", tz="UTC")  # a flagged block; 2023-12-02 lies after it, 11-05 inside
+    raw = synthetic_table.copy()
+    D = pd.Timestamp(day)
+    tau = (D - pd.Timedelta(days=1) + pd.Timedelta(hours=8)).tz_localize("Europe/Paris").tz_convert("UTC")
+    hours = day_hours(day)
+
+    def lags(table):
+        out, _ = solar_labels.relabel_actuals(table, days)
+        X = features.build_features(out, "honest_v2").X
+        return X.loc[hours, list(align.NUCLEAR_LAGS) + ["residual_v2_mw"]]
+
+    base = lags(raw)
+    assert base[list(align.NUCLEAR_LAGS)].notna().all().all()
+    ends = true_period_end(raw.index, days)
+    noisy = raw.copy()
+    after = ends > tau
+    noisy.loc[after, "nuclear_mw"] = 1e6 + np.arange(after.sum())
+    pd.testing.assert_frame_equal(lags(noisy), base)
+    control = raw.copy()
+    control.loc[ends == tau, "nuclear_mw"] += 7000.0  # the period 07:00 to 08:00 Paris on D-1
+    assert not np.allclose(lags(control)["nuclear_d1_early_mw"], base["nuclear_d1_early_mw"])
+
+
+def test_wind_proxy_on_the_relabelled_basis_uses_nothing_after_its_calibration_cutoff(synthetic_table):
+    """Raw wind actuals (late labels on the flagged days, a block ending on the last calibration day of January's fit).
+    Every raw value whose true period ends after that day is replaced by noise: January's proxy does not move."""
+    from thermo_fr.data.wind_points import POINT_COLUMNS as WIND_POINTS
+    from thermo_fr.forecast import wind_proxy
+
+    raw = synthetic_table.copy()
+    days = pd.date_range("2023-12-01", "2023-12-30", tz="UTC")
+    month = pd.Timestamp("2024-01-01")
+    cutoff = (month - pd.Timedelta(days=1)).tz_localize("Europe/Paris").tz_convert("UTC")  # the end of the last train day, 12-30
+
+    def january(table):
+        out, _ = solar_labels.relabel_actuals(table, days)
+        proxy, fits = wind_proxy.rolling_proxy(out[[c for c in WIND_POINTS if c in out]], wind_proxy.actual_wind(out), min_days=30)
+        rows = (proxy.index >= month.tz_localize("Europe/Paris")) & (proxy.index < pd.Timestamp("2024-02-01").tz_localize("Europe/Paris"))
+        return proxy[rows]
+
+    base = january(raw)
+    assert base.notna().all()
+    ends = true_period_end(raw.index, days)
+    noisy = raw.copy()
+    after = ends > cutoff
+    for column in ("wind_onshore_mw", "wind_offshore_mw"):
+        noisy.loc[after, column] = 5e4 + np.arange(after.sum())
+    pd.testing.assert_series_equal(january(noisy), base)
+    moved = raw.copy()
+    moved.loc[ends == cutoff, "wind_onshore_mw"] += 30000.0  # the last period of the training window does enter
+    assert not np.allclose(january(moved).to_numpy(), base.to_numpy())
+
+
+def test_replay_window_recomputes_both_proxies_with_the_corrected_weights(synthetic_table):
+    from thermo_fr.data.solar_points import POINT_COLUMNS as SOLAR_POINTS_COLUMNS
+    from thermo_fr.data.wind_points import POINT_COLUMNS as WIND_POINTS
+    from thermo_fr.forecast import solar_proxy, wind_proxy
+
+    window = synthetic_table.iloc[-24 * 12:].copy()
+    window["solar_proxy_mw"] = -1.0
+    window["wind_proxy_mw"] = -1.0  # stored on the old basis: must not survive
+    solar_w = solar_proxy.calibrate(synthetic_table[SOLAR_POINTS_COLUMNS], synthetic_table["solar_mw"])
+    wind_w = wind_proxy.calibrate(synthetic_table[[c for c in WIND_POINTS if c in synthetic_table]], wind_proxy.actual_wind(synthetic_table))
+    out = align.align_window(window, solar_w, wind_w)
+    aligned = hour_labels.align_table(window)
+    pd.testing.assert_series_equal(out["solar_proxy_mw"], solar_proxy.apply_weights(aligned[SOLAR_POINTS_COLUMNS], solar_w))
+    assert (out["wind_proxy_mw"] >= 0).all() and (out["solar_proxy_mw"].dropna() >= 0).all()

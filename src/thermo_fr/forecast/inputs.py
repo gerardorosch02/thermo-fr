@@ -106,6 +106,17 @@ def fetch_inputs(start: str, end: str, cache_dir=Path("data/cache"), csv_dir=Pat
     log("Fetching ENTSO-E day-ahead prices of the neighbouring zones ...")
     neighbours = entsoe.neighbour_prices(start, end)
 
+    relabelled = None
+    if hour_labels.aligned():  # the corrected basis (fix_prereg.md, amendment 2 and amendment 1): one flagged-day set from solar
+        days = solar_labels.flagged_days(solar_labels.entsoe_solar_offsets(solar_actual))
+        actuals = pd.concat([solar_actual, wind_actual, nuclear_actual], axis=1)
+        actuals, missing = solar_labels.relabel_actuals(actuals, days)
+        solar_actual = actuals["solar_mw"]
+        wind_actual = actuals[[c for c in wind_actual.columns]]
+        nuclear_actual = actuals[[c for c in nuclear_actual.columns]] if isinstance(nuclear_actual, pd.DataFrame) else actuals["nuclear_mw"]
+        relabelled = {"days": solar_labels.day_ranges(days), "missing_hours_on_flagged_days": missing}
+        log(f"ENTSO-E actual solar, wind and nuclear relabelled by one hour on {len(days)} days (fix_prereg.md amendments 1 and 2)")
+
     weather = OpenMeteoForecastSource(cache_dir=cache_dir / "open-meteo")
     log("Fetching Open-Meteo forecasts as issued (previous runs) and the historical-forecast proxy ...")
     weather_frame = weather.fetch(start, end)
@@ -117,11 +128,6 @@ def fetch_inputs(start: str, end: str, cache_dir=Path("data/cache"), csv_dir=Pat
     solar_points_source = SolarPointsSource(cache_dir=cache_dir / "open-meteo")
     log("Fetching Open-Meteo radiation forecasts as issued at the solar-region points ...")
     solar_points = solar_points_source.fetch_points(start, end)
-    relabelled_solar = None
-    if hour_labels.aligned():  # the corrected basis: ENTSO-E actual solar relabelled on the days amendment 2 flags
-        solar_actual, days, offsets = solar_labels.relabel_entsoe_solar(solar_actual)
-        relabelled_solar = {"days": solar_labels.day_ranges(days), "median_offset_h": round(offsets.attrs["median_offset_h"], 3)}
-        log(f"ENTSO-E actual solar relabelled by one hour on {len(days)} days (amendment 2)")
     log("Calibrating the solar proxy month by month on actual generation ...")
     sproxy, solar_fits = solar_proxy.rolling_proxy(solar_points, solar_actual, log=log)
 
@@ -149,7 +155,7 @@ def fetch_inputs(start: str, end: str, cache_dir=Path("data/cache"), csv_dir=Pat
         "solar_points": {"source": solar_points_source.name, "attribution": solar_points_source.attribution, "details": solar_points_source.details},
         "solar_proxy": {"monthly_fits": solar_fits},
         "hour_labels": hour_labels.current(),
-        "relabelled_actual_solar": relabelled_solar,
+        "relabelled_actuals": relabelled,
         "coverage": {c: coverage(hourly[c]) for c in hourly.columns},
     }
     return hourly, sources, comparison

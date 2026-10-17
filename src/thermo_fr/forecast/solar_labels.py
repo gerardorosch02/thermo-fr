@@ -13,8 +13,9 @@ ENTSO-E relabelling rule (final_plan.md, amendment 2). For each UTC day, the off
 output minus the clear-sky centroid, both on start-of-hour labels. The offsets are averaged over a centred 7-day window
 (at least 4 days with data). The reference is the median offset over the whole history. Days whose smoothed offset exceeds
 that median by more than 0.5 h are relabelled by one hour: the value published for T+1 is taken as the output of T. They
-are not excluded. The rule is a repair of a historical publication fault, run once over the history: its centred window
-and whole-history median are not causal. Live refits use the trailing 365 days, which no longer reach the flagged period.
+are not excluded. Amendment 1 of fix_prereg.md applies the same flagged days to wind onshore, wind offshore and nuclear
+(relabel_actuals), which come from the same ENTSO-E A75 documents and show the same one-hour lag. The rule is a repair
+of a historical publication fault, run once over the history: its centred window and whole-history median are not causal. Live refits use the trailing 365 days, which no longer reach the flagged period.
 
 Clear-sky labelling check. On clear days (the 10% of days with the highest ratio of point radiation to clear-sky
 radiation), the mean centroid of the radiation points minus the mean centroid of actual solar. It passes when the
@@ -107,23 +108,56 @@ def flagged_days(offsets: pd.DataFrame, threshold: float = RELABEL_THRESHOLD_H) 
     return pd.DatetimeIndex(offsets.index[(offsets["excess_h"] > threshold).to_numpy()])
 
 
-def relabel_days(series: pd.Series, days: pd.DatetimeIndex) -> pd.Series:
-    """On the given UTC days, take the value published for T+1 as the value of T (one hour earlier)."""
+def _utc_days(days) -> pd.DatetimeIndex:
+    days = pd.DatetimeIndex(days)
+    return days.tz_localize("UTC") if days.tz is None else days.tz_convert("UTC")
+
+
+def relabel_days(series: pd.Series, days, block_end_value: float = np.nan) -> pd.Series:
+    """On the given UTC days (published one hour late), the value labelled h takes the value originally labelled h+1, so
+    each label holds its own period. The last hour of each block of consecutive flagged days has no value of its own period
+    inside the block (the next label is an unflagged hour, which holds its own period) and is set to `block_end_value`:
+    missing, or 0 for solar, where it is night. The block's original first value (a duplicate of the hour before the
+    block) drops out."""
     out = series.astype(float).copy()
+    days = _utc_days(days)
     if len(days) == 0:
         return out
     index = pd.DatetimeIndex(out.index)
-    rows = index.tz_convert("UTC").normalize().isin(pd.DatetimeIndex(days).tz_localize("UTC") if pd.DatetimeIndex(days).tz is None else days)
-    later = series.reindex(index[rows] + pd.Timedelta(hours=1)).to_numpy(dtype=float)
+    day_of = index.tz_convert("UTC").normalize()
+    rows = day_of.isin(days)
+    later_index = index[rows] + pd.Timedelta(hours=1)
+    later = series.reindex(later_index).to_numpy(dtype=float)
+    later_flagged = later_index.tz_convert("UTC").normalize().isin(days)
+    later[~later_flagged] = block_end_value  # the next label lies outside the block
     out[rows] = later
     return out
+
+
+ENTSOE_ACTUAL_COLUMNS = {"solar_mw": 0.0, "wind_onshore_mw": np.nan, "wind_offshore_mw": np.nan, "nuclear_mw": np.nan}
+
+
+def relabel_actuals(table: pd.DataFrame, days, columns=None) -> tuple[pd.DataFrame, dict]:
+    """Amendment 1 of fix_prereg.md: every ENTSO-E actual generation series from the A75 documents (solar, wind onshore,
+    wind offshore, nuclear) relabelled on one flagged-day set, the one the solar rule flags. Returns the table and, per
+    column, the hours on flagged days that are missing after the relabel."""
+    out = table.copy()
+    days = _utc_days(days)
+    on_days = pd.DatetimeIndex(out.index).tz_convert("UTC").normalize().isin(days)
+    missing = {}
+    for column, end_value in (columns or ENTSOE_ACTUAL_COLUMNS).items():
+        if column not in out:
+            continue
+        out[column] = relabel_days(out[column], days, end_value)
+        missing[column] = int(out.loc[on_days, column].isna().sum())
+    return out, missing
 
 
 def relabel_entsoe_solar(actual: pd.Series, clear: pd.Series | None = None) -> tuple[pd.Series, pd.DatetimeIndex, pd.DataFrame]:
     """Amendment 2: the relabelled actual solar series, the flagged days and the daily offsets."""
     offsets = entsoe_solar_offsets(actual, clear)
     days = flagged_days(offsets)
-    return relabel_days(actual, days), days, offsets
+    return relabel_days(actual, days, ENTSOE_ACTUAL_COLUMNS["solar_mw"]), days, offsets
 
 
 def day_ranges(days: pd.DatetimeIndex) -> list[tuple[str, str, int]]:
