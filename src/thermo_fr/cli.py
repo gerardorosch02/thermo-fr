@@ -291,6 +291,17 @@ def cmd_shadow_init(args) -> None:
         store.close()
 
 
+def cmd_align_inputs(args) -> None:
+    import json
+
+    from .forecast.align import run_alignment
+
+    report = run_alignment(Path(args.data), Path(args.out), Path(args.report_dir))
+    keys = ("relabelled_solar_day_count", "relabelled_solar_days", "clear_sky_check_before", "clear_sky_check_after",
+            "proxy_mae_selection_before", "proxy_mae_selection_after", "label_audit")
+    print(json.dumps({k: report[k] for k in keys}, indent=2, default=str))
+
+
 def cmd_settle(args) -> None:
     from .forecast.jobs import settle, setup_logging
     from .forecast.store import Store
@@ -966,6 +977,13 @@ def main(argv=None) -> None:
     shi.add_argument("--shadow-dir", default="data/shadow")
     shi.add_argument("--logs-dir", default="logs")
     shi.set_defaults(func=cmd_shadow_init)
+
+    aln = sub.add_parser("align-inputs", help="solar alignment fix: convert an inputs table stored as logged to start-of-hour "
+                         "radiation labels, relabel ENTSO-E actual solar (amendment 2), recalibrate the solar proxy, report")
+    aln.add_argument("--data", default="data/forecast/inputs.csv", help="a table on the old labels (as logged)")
+    aln.add_argument("--out", default="data/forecast/inputs_aligned.csv")
+    aln.add_argument("--report-dir", default="data/solar_align")
+    aln.set_defaults(func=cmd_align_inputs)
 
     stl = sub.add_parser("settle", help="Fetch actual prices and score the stored forecasts")
     stl.add_argument("--kind", default="scheduled", choices=("scheduled", "manual", "test"))

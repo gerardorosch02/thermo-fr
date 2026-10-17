@@ -171,6 +171,21 @@ def weather_proxy_issue(index) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(index).tz_convert("UTC") - pd.Timedelta(hours=1)
 
 
+def radiation_issued_issue(index, lead_days: int = WEATHER_LEAD_DAYS) -> pd.DatetimeIndex:
+    """Open-Meteo radiation (a preceding-hour mean) as issued: the weather rule at its valid time, which is the label as
+    logged and one hour after the label on start-of-hour labels (data/hour_labels.py). Identical to weather_issued_issue
+    as logged."""
+    from ..data.hour_labels import valid_offset
+
+    return weather_issued_issue(pd.DatetimeIndex(index).tz_convert("UTC") + valid_offset(), lead_days)
+
+
+def radiation_proxy_issue(index) -> pd.DatetimeIndex:
+    from ..data.hour_labels import valid_offset
+
+    return weather_proxy_issue(pd.DatetimeIndex(index).tz_convert("UTC") + valid_offset())
+
+
 PROXY_LAG_DAYS = 2  # the generation proxies are calibrated on actual generation to two days before the month
 GENERATION_PUBLICATION_LAG_HOURS = 1
 
@@ -185,6 +200,13 @@ def proxy_calibration_issue(index) -> pd.DatetimeIndex:
 def generation_proxy_issue(index) -> pd.DatetimeIndex:
     """The later of the weather run (lead day 2) and the calibration data; shared by the wind and solar proxies."""
     weather = weather_issued_issue(index)
+    calibration = proxy_calibration_issue(index)
+    return pd.DatetimeIndex(weather.where(weather >= calibration, calibration))
+
+
+def solar_proxy_issue(index) -> pd.DatetimeIndex:
+    """As generation_proxy_issue, with the radiation run at its valid time (equal to it as logged)."""
+    weather = radiation_issued_issue(index)
     calibration = proxy_calibration_issue(index)
     return pd.DatetimeIndex(weather.where(weather >= calibration, calibration))
 
@@ -235,7 +257,7 @@ def fuel_morning_trades_issue(index) -> pd.DatetimeIndex:
 
 def residual_v2_issue(index) -> pd.DatetimeIndex:
     """The latest of the load forecast, the generation proxies and the D-1 nuclear hours."""
-    candidates = [load_forecast_issue(index), generation_proxy_issue(index), nuclear_d1_issue(index)]
+    candidates = [load_forecast_issue(index), generation_proxy_issue(index), solar_proxy_issue(index), nuclear_d1_issue(index)]
     latest = candidates[0]
     for other in candidates[1:]:
         latest = pd.DatetimeIndex(latest.where(latest >= other, other))
@@ -277,12 +299,21 @@ TIMINGS = {
         "weather_proxy", weather_proxy_issue,
         "Open-Meteo historical-forecast archive: latest run before each hour, not point in time.",
     ),
+    "radiation_issued": InputTiming(
+        "radiation_issued", radiation_issued_issue,
+        "Open-Meteo radiation as issued (lead day 2), a mean over the preceding hour: the run of its valid time, which is one "
+        "hour after the label on start-of-hour labels (data/hour_labels.py) and the label itself as logged.",
+    ),
+    "radiation_proxy": InputTiming(
+        "radiation_proxy", radiation_proxy_issue,
+        "Open-Meteo historical-forecast radiation at its valid time: not point in time.",
+    ),
     "wind_proxy": InputTiming(
         "wind_proxy", generation_proxy_issue,
         "Wind generation proxy: lead-day-2 hub-height wind forecasts, weights fitted on actual generation to two days before the month.",
     ),
     "solar_proxy": InputTiming(
-        "solar_proxy", generation_proxy_issue,
+        "solar_proxy", solar_proxy_issue,
         "Solar generation proxy: lead-day-2 radiation forecasts, weights fitted on actual generation to two days before the month.",
     ),
     "price_lag_same_type": InputTiming(

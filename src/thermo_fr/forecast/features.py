@@ -98,7 +98,8 @@ GATED_SETS = tuple(s for s in FEATURES if s != "extended")  # the sets whose eve
 FEATURE_TIMINGS = {
     **{c: "calendar" for c in CALENDAR + CALENDAR_STRUCTURE},
     "load_fc_mw": "load_forecast",
-    **{c: "weather_issued" for c in WEATHER},
+    **{c: "weather_issued" for c in WEATHER if c != "radiation_wm2"},
+    "radiation_wm2": "radiation_issued",  # a preceding-hour mean: its rule follows data/hour_labels.HOUR_LABELS
     "wind_proxy_mw": "wind_proxy",
     "solar_proxy_mw": "solar_proxy",
     "price_lag1": "price_lag1",
@@ -125,7 +126,7 @@ FEATURE_TIMINGS = {
 LEAR_BLOCK_TIMINGS = {
     "price_d1": "price_lag1", "price_d2": "price_lag2", "price_d3": "price_lag3", "price_d7": "price_lag7",
     "load_d0": "load_forecast", "load_d1": "load_forecast_lag1", "load_d7": "load_forecast_lag7",
-    "temp_d0": "weather_issued", "wind_d0": "weather_issued", "rad_d0": "weather_issued",
+    "temp_d0": "weather_issued", "wind_d0": "weather_issued", "rad_d0": "radiation_issued",
     "ch_d1": "neighbour_price_lag1", "de_lu_d1": "neighbour_price_lag1",
     "nuclear_d1_early": "nuclear_d1",
     "calendar": "calendar",

@@ -42,7 +42,8 @@ from ..data.solar_points import POINT_COLUMNS as SOLAR_POINT_COLUMNS
 from ..data.solar_points import SolarPointsSource
 from ..data.weather_forecast import OpenMeteoForecastSource
 from ..data.wind_points import POINT_COLUMNS, WindPointsSource
-from . import solar_proxy, wind_proxy
+from ..data import hour_labels
+from . import solar_labels, solar_proxy, wind_proxy
 
 NEIGHBOUR_PRICE_COLUMNS = [neighbour_price_column(z) for z in NEIGHBOUR_ZONES]
 INPUT_COLUMNS = [
@@ -116,6 +117,11 @@ def fetch_inputs(start: str, end: str, cache_dir=Path("data/cache"), csv_dir=Pat
     solar_points_source = SolarPointsSource(cache_dir=cache_dir / "open-meteo")
     log("Fetching Open-Meteo radiation forecasts as issued at the solar-region points ...")
     solar_points = solar_points_source.fetch_points(start, end)
+    relabelled_solar = None
+    if hour_labels.aligned():  # the corrected basis: ENTSO-E actual solar relabelled on the days amendment 2 flags
+        solar_actual, days, offsets = solar_labels.relabel_entsoe_solar(solar_actual)
+        relabelled_solar = {"days": solar_labels.day_ranges(days), "median_offset_h": round(offsets.attrs["median_offset_h"], 3)}
+        log(f"ENTSO-E actual solar relabelled by one hour on {len(days)} days (amendment 2)")
     log("Calibrating the solar proxy month by month on actual generation ...")
     sproxy, solar_fits = solar_proxy.rolling_proxy(solar_points, solar_actual, log=log)
 
@@ -142,6 +148,8 @@ def fetch_inputs(start: str, end: str, cache_dir=Path("data/cache"), csv_dir=Pat
         "wind_proxy": {"monthly_fits": fits},
         "solar_points": {"source": solar_points_source.name, "attribution": solar_points_source.attribution, "details": solar_points_source.details},
         "solar_proxy": {"monthly_fits": solar_fits},
+        "hour_labels": hour_labels.current(),
+        "relabelled_actual_solar": relabelled_solar,
         "coverage": {c: coverage(hourly[c]) for c in hourly.columns},
     }
     return hourly, sources, comparison

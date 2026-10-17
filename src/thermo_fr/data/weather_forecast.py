@@ -32,6 +32,13 @@ minute, 5,000 per hour and 10,000 per day, so requests are spaced out and
 cached under data/cache/open-meteo/, one JSON file per city, year, endpoint
 and model. Units: temperature in degrees C, wind in km/h (converted to m/s),
 radiation in W/m2. Licence CC BY 4.0, attribution to Open-Meteo required.
+
+Hour labels: temperature and wind speed are instant values; shortwave
+radiation is the mean over the hour ending at its label. With the setting
+data/hour_labels.HOUR_LABELS = "start_of_hour" every preceding-hour variable
+is moved to the start of its hour here, as it is parsed, so the history path
+and the morning-run path receive the same labels; "as_logged" (the default)
+keeps the labels as received.
 """
 
 import json
@@ -40,6 +47,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..config import CITIES, City
+from . import hour_labels
 from .http import FileCache, HttpClient
 from .sources import clip
 from .weather import weighted_temperature
@@ -118,7 +126,20 @@ class OpenMeteoForecastSource:
             content = download() if year_end > today else self.cache.fetch(key, download)
             frames.append(self._parse(content, kind))
             cursor = year_end
-        return pd.concat(frames).sort_index()
+        frame = pd.concat(frames).sort_index()
+        if hour_labels.aligned():
+            for stem in self._preceding_hour_stems(kind):
+                frame[stem] = hour_labels.to_start_of_hour(frame[stem], end=e.strftime("%Y-%m-%d"))
+        return frame
+
+    def _preceding_hour_stems(self, kind: str) -> list[str]:
+        """Columns of this source holding Open-Meteo preceding-hour means (radiation), as opposed to instant values."""
+        out = []
+        for variable, stem in self._variables(kind).items():
+            base = variable.split("_previous_day")[0]
+            if base in hour_labels.PRECEDING_HOUR_VARIABLES:
+                out.append(stem)
+        return out
 
     def _parse(self, content: bytes, kind: str) -> pd.DataFrame:
         payload = json.loads(content)

@@ -117,6 +117,10 @@ src/thermo_fr/
   forecast/gen_proxy.py  shared method of the generation proxies: NNLS weights per point, monthly point-in-time refits
   forecast/wind_proxy.py pre-gate wind generation proxy: turbine power curve on 100 m wind forecasts
   forecast/solar_proxy.py pre-gate solar generation proxy: irradiance ratio on radiation forecasts
+  data/hour_labels.py    the one setting HOUR_LABELS: Open-Meteo preceding-hour means (radiation) as logged, or on start-of-hour labels (solar alignment fix; as logged until the corrected models are released)
+  forecast/solar_labels.py  clear-sky timing: the ENTSO-E actual solar relabelling rule (amendment 2) and the clear-sky labelling check
+  forecast/label_audit.py   monthly hour-lag audit of the ENTSO-E actual generation series against independent references
+  forecast/align.py      converts an inputs table stored as logged to the corrected basis and recalibrates the solar proxy (thermo-fr align-inputs)
   forecast/models.py     benchmarks, LightGBM, ridge
   forecast/backtest.py   monthly walk-forward, metrics by slice, worst days
   forecast/report.py     reports/forecast/ tables and charts

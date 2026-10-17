@@ -61,7 +61,8 @@ from .schedule import PREMARKET_WINDOW
 from .shape import block_bootstrap_mean
 from .store import Store, iso, utc_now
 from .timing import (NUCLEAR_PUBLICATION_LAG_HOURS, generation_proxy_issue, load_forecast_issue, premarket_issue_for,
-                     price_lag_issue, weather_issued_issue, weather_proxy_issue)
+                     price_lag_issue, radiation_issued_issue, radiation_proxy_issue, solar_proxy_issue, weather_issued_issue,
+                     weather_proxy_issue)
 
 log = logging.getLogger("thermo_fr.shadow")
 
@@ -156,14 +157,20 @@ def publication_times(index: pd.DatetimeIndex, column: str) -> pd.DatetimeIndex 
         return price_lag_issue(0)(index)  # 13:00 Paris on the day before the price's own delivery day
     if column == "load_fc_mw":
         return load_forecast_issue(index)
-    if column in ("temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2"):
+    if column in ("temp_fc_c", "wind100_fc_ms"):
         return weather_issued_issue(index)
-    if column in ("temp_proxy_c", "wind100_proxy_ms", "radiation_proxy_wm2"):
+    if column == "radiation_fc_wm2":  # a preceding-hour mean: as logged the same rule as above
+        return radiation_issued_issue(index)
+    if column in ("temp_proxy_c", "wind100_proxy_ms"):
         return weather_proxy_issue(index)
+    if column == "radiation_proxy_wm2":
+        return radiation_proxy_issue(index)
     if column == "nuclear_mw":
         return pd.DatetimeIndex(index) + pd.Timedelta(hours=1 + NUCLEAR_PUBLICATION_LAG_HOURS)
-    if column in ("wind_proxy_mw", "solar_proxy_mw"):
+    if column == "wind_proxy_mw":
         return generation_proxy_issue(index)
+    if column == "solar_proxy_mw":
+        return solar_proxy_issue(index)
     return None
 
 
