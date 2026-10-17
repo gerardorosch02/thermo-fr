@@ -265,14 +265,16 @@ def morning_run(store: Store, delivery_day: str | None = None, kind: str = "sche
         stored_for = stored_model_feature_set(model_file) if model_file is not None else None
         fresh = fetch_fresh(day, Path(cache_dir), store, run_id, entsoe=entsoe, weather=weather, now=now, wind_points=wind_points,
                             wind_weights=wind_weights, solar_points=solar_points, solar_weights=solar_weights)
+        window_path = None
         if shadow_window_dir is not None:
             try:
                 from .shadow import save_window
 
-                path = save_window(fresh, day, run_id, utc_now(now), Path(shadow_window_dir))
-                log.info("shadow: inputs window saved to %s", path)
+                window_path = save_window(fresh, day, run_id, utc_now(now), Path(shadow_window_dir))
+                log.info("shadow: inputs window saved to %s", window_path)
             except Exception as exc:  # noqa: BLE001  the shadow must never disturb the production run
                 log.error("shadow: inputs window not saved: %s", exc)
+        used_files = {}  # feature set -> (model name, the model file predicted with, None for a live fit); read by the shadow only
         history = load_inputs(inputs_path) if Path(inputs_path).exists() else pd.DataFrame(columns=INPUT_COLUMNS)
         merged = merge_inputs(history, fresh)
         hours = day_hours(day)
@@ -310,12 +312,20 @@ def morning_run(store: Store, delivery_day: str | None = None, kind: str = "sche
                 if stored is not None and suffix == "":
                     probabilistic_curve(store, run_id, day, forecast_id, predict_set, Path(stored).parent, merged, now=now)
                 summary["forecasts"][feature_set] = forecast_id
+                used_files[feature_set] = (model_name, stored)
                 log.info("%s forecast for %s stored as version %d (issued %s)", feature_set, day, forecast_id, issued_at)
             except Exception as exc:  # noqa: BLE001
                 message = f"{exc.__class__.__name__}: {exc}"
                 log.error("%s forecast for %s not produced: %s", feature_set, day, message)
                 store.record_status(run_id, day, f"forecast_{feature_set}", "error", message=message, now=now)
                 summary["errors"].append(f"forecast_{feature_set}: {message}")
+        if window_path is not None:
+            try:
+                from .shadow import save_run_models
+
+                save_run_models(window_path, used_files)
+            except Exception as exc:  # noqa: BLE001  the shadow must never disturb the production run
+                log.error("shadow: model files of the run not recorded: %s", exc)
         summary["error_band"] = refresh_error_band(store, reports_dir, now=now)
     except Exception as exc:  # noqa: BLE001
         message = f"{exc.__class__.__name__}: {exc}"

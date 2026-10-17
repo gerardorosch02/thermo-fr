@@ -20,9 +20,22 @@ How it runs on the laptop:
   walk-forward forecasts for 2026-09-01 to 2026-10-13 (honest_v2 refitted monthly, LEAR daily), as weight state only: they
   are never printed, compared or shown.
 
-A shadow day is a delivery day from 2026-10-14 whose S2 version and its paired honest_v2 version were both issued before
-11:15 Paris on D-1; a version issued at or after 11:15 is kept but does not count. Days on which the morning run produced no
-pre-market honest_v2 version are not shadow days and are counted separately.
+Model-file rule (shadow_decision.md, 2026-10-17). S2's honest_v2 member and the comparator are both the published honest_v2
+file of the day. At its first run for a delivery day the shadow reads published/model/honest_v2.txt and honest_v2.json from the
+origin/main ref that the publish worktree (.publish-worktree, refreshed by the 14:30 market publish) already fetches, with
+read-only git commands only (rev-parse, show, log: never fetch, pull, checkout, commit or push), stores them under
+data/shadow/models/<sha256>.txt and records per day the sha256, the ref commit and its time, the commit that last changed the
+file, fitted_at_utc, train_from and train_to, LEAR's settings and recalibration date, and whether the file changed against the
+previous day. The second run of the day reuses that file. Before the worktree exists the same ref is read through the
+repository (a linked worktree shares its refs); when the ref cannot be read the last stored file is used and the day records
+it. The comparator names its file through the sha256 that morning-run --save-shadow-window records next to its window; a day
+whose comparator was predicted with another file is lost, not counted.
+
+A shadow day is a delivery day from 2026-10-20 (no reissued days: the store does not keep the lagged inputs LEAR needs) whose
+S2 version and its paired honest_v2 version were both issued before 11:15 Paris on D-1, on the same model file; a version
+issued at or after 11:15 is kept but does not count. Every expected delivery day (Tuesday to Saturday) that is not counted is
+a lost day, reported with its reason in every settle line and in the statistics at day 40. The LEAR weight is stored but never
+logged or printed before day 40, since it would reveal the weight-state comparison.
 
 Everything is written to the local SQLite store (tables shadow_*) and data/shadow/; nothing goes to published/, nothing is
 committed, pushed or dispatched.
@@ -30,8 +43,10 @@ committed, pushed or dispatched.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -50,10 +65,15 @@ from .timing import (NUCLEAR_PUBLICATION_LAG_HOURS, generation_proxy_issue, load
 
 log = logging.getLogger("thermo_fr.shadow")
 
-SHADOW_START = "2026-10-14"
+SHADOW_START = "2026-10-20"  # first counted delivery day (issued Monday 19 October); the pre-registration's 10-14 assumed reissued days
 SHADOW_DAYS = 40
 STATE_START, STATE_END = "2026-09-01", "2026-10-13"
 FRESH_DIR = Path("data/shadow/fresh")
+MODELS_DIR = Path("data/shadow/models")
+WORKTREE_DIR = ".publish-worktree"  # gitsync.WORKTREE_DIR
+MODEL_REF = "origin/main"
+MODEL_PATH, META_PATH = "published/model/honest_v2.txt", "published/model/honest_v2.json"
+READ_ONLY_GIT = ("rev-parse", "show", "log")
 HALF_LIFE, MIN_DAYS = 14.0, 14
 FALLBACK_LIMIT = 0.10
 ADOPT_UPPER = 1.0
@@ -73,6 +93,12 @@ CREATE TABLE IF NOT EXISTS shadow_errors (
 CREATE TABLE IF NOT EXISTS shadow_scores (
     version_id INTEGER PRIMARY KEY, delivery_day TEXT NOT NULL, model TEXT NOT NULL, hours INTEGER NOT NULL, mae REAL NOT NULL,
     settled_at_utc TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS shadow_day_models (
+    delivery_day TEXT PRIMARY KEY, sha256 TEXT NOT NULL, source TEXT NOT NULL, ref_commit TEXT, ref_commit_time_utc TEXT,
+    ref_age_hours REAL, model_commit TEXT, model_commit_time_utc TEXT, fitted_at_utc TEXT, train_from TEXT, train_to TEXT,
+    lear_windows TEXT NOT NULL, lear_recalibrated_through TEXT NOT NULL, changed INTEGER NOT NULL, read_at_utc TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS shadow_lost_events (
+    delivery_day TEXT NOT NULL, shadow_run_id INTEGER, reason TEXT NOT NULL, recorded_at_utc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS shadow_result (
     computed_at_utc TEXT NOT NULL, first_day TEXT NOT NULL, last_day TEXT NOT NULL, result TEXT NOT NULL);
 """
@@ -155,6 +181,120 @@ def as_known(table: pd.DataFrame, tau) -> pd.DataFrame:
     return out
 
 
+# --- the model file of the day ---------------------------------------------------------------------------------------------
+
+def sha256_bytes(data: bytes) -> str:
+    """sha256 of a model file's content with line endings normalised to LF, so the committed blob and a Windows checkout made
+    with core.autocrlf (before published/model/*.txt was marked -text) name the same model, as load_model reads them alike."""
+    return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
+
+
+def sha256_file(path) -> str:
+    return sha256_bytes(Path(path).read_bytes())
+
+
+def save_run_models(window_path, used: dict) -> Path:
+    """Next to a saved window: the model file each feature set of that morning run was predicted with, by sha256 (written by
+    morning-run --save-shadow-window; `used` maps feature set -> (model name, file or None for a live fit))."""
+    record = {}
+    for feature_set, (model_name, path) in used.items():
+        record[feature_set] = {"model": model_name, "file": None if path is None else Path(path).name,
+                               "sha256": None if path is None else sha256_file(path)}
+    out = Path(window_path).with_suffix(".models.json")
+    out.write_text(json.dumps(record, indent=1), encoding="utf-8")
+    return out
+
+
+def comparator_model(fresh_dir, run_id: int) -> dict | None:
+    """The honest_v2 model file morning run `run_id` predicted with, as recorded next to its window; None when not recorded."""
+    for rid, path in saved_windows(fresh_dir):
+        if rid == int(run_id):
+            sidecar = path.with_suffix(".models.json")
+            if sidecar.exists():
+                return json.loads(sidecar.read_text(encoding="utf-8")).get(COMPARATOR_SET)
+    return None
+
+
+def read_only_git(cwd, *args, runner=None) -> bytes:
+    """One read-only git command (rev-parse, show or log) in `cwd`; anything else is refused before it runs."""
+    if not args or args[0] not in READ_ONLY_GIT:
+        raise ValueError(f"the shadow runs read-only git commands only, not: git {' '.join(args)}")
+    from .gitsync import _environment
+
+    runner = runner or subprocess.run  # looked up at call time
+    result = runner(["git", *args], cwd=str(cwd), capture_output=True, env=_environment())
+    if result.returncode != 0:
+        err = result.stderr.decode(errors="replace") if isinstance(result.stderr, bytes) else str(result.stderr)
+        raise RuntimeError(f"git {' '.join(args)}: {err.strip()}")
+    return result.stdout if isinstance(result.stdout, bytes) else str(result.stdout).encode()
+
+
+def read_published_model(repo=Path("."), runner=None) -> dict:
+    """honest_v2.txt and .json as committed on the fetched origin/main ref, read through the publish worktree (or, before it
+    exists, through the repository, whose refs it shares). Never fetches: the ref is whatever the last fetch left."""
+    repo = Path(repo)
+    worktree = repo / WORKTREE_DIR
+    cwd, source = (worktree, "publish worktree") if (worktree / ".git").exists() else (repo, "repository ref (publish worktree not created yet)")
+    commit = read_only_git(cwd, "rev-parse", "--verify", f"{MODEL_REF}^{{commit}}", runner=runner).decode().strip()
+    commit_time = read_only_git(cwd, "show", "-s", "--format=%cI", commit, runner=runner).decode().strip()
+    last = read_only_git(cwd, "log", "-1", "--format=%H %cI", commit, "--", MODEL_PATH, runner=runner).decode().split()
+    text = read_only_git(cwd, "show", f"{commit}:{MODEL_PATH}", runner=runner)
+    meta = read_only_git(cwd, "show", f"{commit}:{META_PATH}", runner=runner)
+    return {"text": text, "meta": meta, "commit": commit, "commit_time": commit_time, "source": source,
+            "model_commit": last[0] if last else None, "model_commit_time": last[1] if len(last) > 1 else None}
+
+
+def _utc(value) -> str | None:
+    return None if not value else iso(pd.Timestamp(value).tz_convert("UTC"))
+
+
+def day_model(store: Store, day: str, repo=Path("."), models_dir=MODELS_DIR, windows=LEAR_WINDOWS, runner=None, now=None) -> dict | None:
+    """The honest_v2 file of delivery day D: fixed at the day's first shadow run and reused by the second. None when no file is
+    available at all (the day is then lost)."""
+    row = store.conn.execute("SELECT * FROM shadow_day_models WHERE delivery_day = ?", (day,)).fetchone()
+    columns = [c[1] for c in store.conn.execute("PRAGMA table_info(shadow_day_models)")]
+    if row is not None:
+        return dict(zip(columns, row))
+    previous = store.conn.execute("SELECT * FROM shadow_day_models WHERE delivery_day < ? ORDER BY delivery_day DESC LIMIT 1", (day,)).fetchone()
+    previous = dict(zip(columns, previous)) if previous is not None else None
+    read_at = utc_now(now)
+    try:
+        got = read_published_model(repo, runner=runner)
+        sha = sha256_bytes(got["text"])
+        models_dir = Path(models_dir)
+        models_dir.mkdir(parents=True, exist_ok=True)
+        if not (models_dir / f"{sha}.txt").exists():
+            (models_dir / f"{sha}.txt").write_bytes(got["text"])
+            (models_dir / f"{sha}.json").write_bytes(got["meta"])
+        meta = json.loads(got["meta"].decode("utf-8"))
+        ref_time = pd.Timestamp(got["commit_time"]).tz_convert("UTC")
+        record = {"sha256": sha, "source": got["source"], "ref_commit": got["commit"], "ref_commit_time_utc": iso(ref_time),
+                  "ref_age_hours": round((pd.Timestamp(read_at) - ref_time).total_seconds() / 3600, 2),
+                  "model_commit": got["model_commit"], "model_commit_time_utc": _utc(got["model_commit_time"]),
+                  "fitted_at_utc": meta.get("fitted_at_utc"), "train_from": meta.get("train_from"), "train_to": meta.get("train_to")}
+    except Exception as exc:  # noqa: BLE001  no ref, no git, no file: the last stored file, recorded as such
+        if previous is None:
+            log.error("shadow-run %s: no published honest_v2 file readable and none stored: %s", day, exc)
+            return None
+        record = {k: previous[k] for k in ("sha256", "ref_commit", "ref_commit_time_utc", "model_commit", "model_commit_time_utc",
+                                           "fitted_at_utc", "train_from", "train_to")}
+        ref_time = pd.Timestamp(previous["ref_commit_time_utc"]) if previous["ref_commit_time_utc"] else None
+        record["ref_age_hours"] = round((pd.Timestamp(read_at) - ref_time).total_seconds() / 3600, 2) if ref_time is not None else None
+        record["source"] = f"last stored file (ref unreadable: {str(exc)[:160]})"
+    record.update(delivery_day=day, lear_windows=json.dumps(list(windows)),
+                  lear_recalibrated_through=(pd.Timestamp(day) - pd.Timedelta(days=1)).strftime("%Y-%m-%d"),
+                  changed=int(previous is not None and previous["sha256"] != record["sha256"]), read_at_utc=iso(read_at))
+    store.conn.execute(f"INSERT INTO shadow_day_models ({', '.join(record)}) VALUES ({', '.join('?' * len(record))})", tuple(record.values()))
+    store.conn.commit()
+    return record
+
+
+def _lost(store: Store, day: str, run_id, reason: str, now=None) -> None:
+    store.conn.execute("INSERT INTO shadow_lost_events (delivery_day, shadow_run_id, reason, recorded_at_utc) VALUES (?, ?, ?, ?)",
+                       (day, run_id, reason, iso(utc_now(now))))
+    store.conn.commit()
+
+
 # --- issuing ----------------------------------------------------------------------------------------------------------------
 
 def premarket_honest_versions(store: Store, day: str) -> pd.DataFrame:
@@ -194,7 +334,8 @@ def weight_errors(store: Store) -> pd.DataFrame:
     rows = pd.read_sql_query("SELECT delivery_day, source, mae_honest_v2, mae_lear FROM shadow_errors", store.conn)
     if rows.empty:
         return pd.DataFrame(columns=[COMPARATOR_SET, "lear"], index=pd.DatetimeIndex([]), dtype=float)
-    rows = rows.sort_values("source").drop_duplicates("delivery_day", keep="last")  # 'live' after 'state' for any shared day
+    rows = rows.assign(rank=rows["source"].map({"state": 0, "live": 1}).fillna(-1))
+    rows = rows.sort_values(["delivery_day", "rank"]).drop_duplicates("delivery_day", keep="last")  # a live row wins over a state row
     frame = rows.set_index(pd.to_datetime(rows["delivery_day"]))[["mae_honest_v2", "mae_lear"]]
     frame.columns = [COMPARATOR_SET, "lear"]
     return frame.sort_index()
@@ -216,7 +357,8 @@ def _store_version(store: Store, day: str, model: str, issued_at, shadow_run_id,
 
 
 def shadow_run(store: Store, delivery_day: str | None = None, kind: str = "scheduled", inputs_path=Path("data/forecast/inputs.csv"),
-               fresh_dir=FRESH_DIR, windows=LEAR_WINDOWS, now=None, clock=None) -> dict:
+               fresh_dir=FRESH_DIR, windows=LEAR_WINDOWS, now=None, clock=None, repo=Path("."), models_dir=MODELS_DIR,
+               git_runner=None) -> dict:
     """Issue S2, S1 and LEAR for D next to the latest pre-market honest_v2 version that has none yet. Never raises for a
     missing input: the fallback is stored and counted. `clock` returns the wall-clock issue time (tests replace it)."""
     from .jobs import next_delivery_day
@@ -230,12 +372,30 @@ def shadow_run(store: Store, delivery_day: str | None = None, kind: str = "sched
     candidates = candidates[~candidates["forecast_id"].isin(done)] if len(candidates) else candidates
     if candidates.empty:
         message = "no pre-market honest_v2 version without a shadow version yet" if done else "no pre-market honest_v2 version for this day"
+        if not done:
+            _lost(store, day, run_id, "no pre-market honest_v2 version (morning run late, failed or missing)", now=now)
         store.finish_run(run_id, "skipped", message, now=now)
         summary["status"] = "skipped"
         summary["message"] = message
         log.info("shadow-run %s: %s", day, message)
         return summary
     honest = candidates.iloc[-1]
+    day_file = day_model(store, day, repo=repo, models_dir=models_dir, windows=windows, runner=git_runner, now=now)
+    comparator = comparator_model(fresh_dir, int(honest["run_id"]))
+    reason = None
+    if day_file is None:
+        reason = "no published honest_v2 file readable from the origin/main ref and none stored"
+    elif comparator is None or not comparator.get("sha256"):
+        reason = "the comparator's model file was not recorded by its morning run"
+    elif comparator["sha256"] != day_file["sha256"]:
+        reason = (f"model files differ: comparator {comparator.get('model')} {comparator['sha256'][:12]}, "
+                  f"published file of the day {day_file['sha256'][:12]}")
+    if reason is not None:
+        _lost(store, day, run_id, reason, now=now)
+        store.finish_run(run_id, "lost", reason, now=now)
+        summary.update(status="lost", message=reason)
+        log.warning("shadow-run %s: lost: %s", day, reason)
+        return summary
     honest_curve = store.forecast_curve(int(honest["forecast_id"]))["forecast"]
     fallback, message, lear = False, "", None
     try:
@@ -263,9 +423,12 @@ def shadow_run(store: Store, delivery_day: str | None = None, kind: str = "sched
                                     fallback, before, w_lear if model == "S2" else None, message)
     status = "fallback" if fallback else "ok"
     note = (message + "; " if message else "") + ("" if before else "issued at or after 11:15 Paris on D-1: does not count")
+    if not before:
+        _lost(store, day, run_id, "issued at or after 11:15 Paris on D-1", now=now)
     store.finish_run(run_id, status, note, now=now)
-    summary.update(status=status, versions=ids, before_window=before, w_lear=w_lear, message=note)
-    log.info("shadow-run %s: %s, versions %s, LEAR weight %.3f, before the window: %s", day, status, ids, w_lear, before)
+    summary.update(status=status, versions=ids, before_window=before, message=note, model_sha256=day_file["sha256"])
+    # the LEAR weight is stored with the S2 version but never logged or printed before day 40
+    log.info("shadow-run %s: %s, versions %s, model file %s, before the window: %s", day, status, ids, day_file["sha256"][:12], before)
     return summary
 
 
@@ -276,6 +439,29 @@ def counted_versions(store: Store) -> pd.DataFrame:
     versions = pd.read_sql_query("SELECT * FROM shadow_versions WHERE model = 'S2' AND before_window = 1 AND delivery_day >= ? ORDER BY issued_at_utc",
                                  store.conn, params=(SHADOW_START,))
     return versions.groupby("delivery_day").tail(1).sort_values("delivery_day").reset_index(drop=True)
+
+
+def expected_days(first: str, last: str) -> list[str]:
+    """Delivery days the shadow should cover: Tuesday to Saturday (issued on weekday mornings), from `first` to `last`."""
+    if pd.Timestamp(last) < pd.Timestamp(first):
+        return []
+    days = pd.date_range(first, last)
+    return [d.strftime("%Y-%m-%d") for d in days if d.dayofweek in TUESDAY_TO_SATURDAY]
+
+
+def lost_days(store: Store, last: str, counted: set[str]) -> pd.DataFrame:
+    """Expected delivery days from SHADOW_START to `last` that are not counted, each with the latest recorded reason."""
+    events = pd.read_sql_query("SELECT delivery_day, reason FROM shadow_lost_events ORDER BY recorded_at_utc, rowid", store.conn)
+    latest = events.groupby("delivery_day")["reason"].last().to_dict() if len(events) else {}
+    rows = [{"delivery_day": d, "reason": latest.get(d, "no shadow run recorded")} for d in expected_days(SHADOW_START, last) if d not in counted]
+    return pd.DataFrame(rows, columns=["delivery_day", "reason"])
+
+
+def _lost_summary(lost: pd.DataFrame) -> str:
+    if lost.empty:
+        return "0 lost"
+    reasons = lost["reason"].str.split(":").str[0].value_counts()
+    return f"{len(lost)} lost (" + "; ".join(f"{n} {r}" for r, n in reasons.items()) + ")"
 
 
 def _mae(curve: pd.Series, actual: pd.Series) -> tuple[float, int] | None:
@@ -324,10 +510,15 @@ def shadow_settle(store: Store, kind: str = "scheduled", now=None, log_fn=print)
                                (v.delivery_day, honest[0], lear[0], settled))
     store.conn.commit()
     days = settled_shadow_days(store)
-    summary = {"run_id": run_id, "scored": scored, "settled_shadow_days": len(days), "fallback_days": int(days["fallback"].sum()) if len(days) else 0}
+    settled_through = store.conn.execute("SELECT MAX(delivery_day) FROM actuals").fetchone()[0] if _has_table(store, "actuals") else None
+    last = max([d for d in (settled_through, days["delivery_day"].max() if len(days) else None) if d] or [SHADOW_START])
+    lost = lost_days(store, last, set(days["delivery_day"]))
+    summary = {"run_id": run_id, "scored": scored, "settled_shadow_days": len(days), "fallback_days": int(days["fallback"].sum()) if len(days) else 0,
+               "lost_days": int(len(lost))}
     existing = store.conn.execute("SELECT result FROM shadow_result").fetchone()
     if existing is None and len(days) >= SHADOW_DAYS:
-        result = shadow_statistics(days.head(SHADOW_DAYS))
+        first40 = days.head(SHADOW_DAYS)
+        result = shadow_statistics(first40, lost_days(store, first40["delivery_day"].iloc[-1], set(first40["delivery_day"])))
         store.conn.execute("INSERT INTO shadow_result (computed_at_utc, first_day, last_day, result) VALUES (?, ?, ?, ?)",
                            (settled, result["first_day"], result["last_day"], json.dumps(result)))
         store.conn.commit()
@@ -337,9 +528,14 @@ def shadow_settle(store: Store, kind: str = "scheduled", now=None, log_fn=print)
         summary["result"] = json.loads(existing[0])
         log_fn("shadow result already computed (day 40 reached); nothing recomputed")
     else:
-        log_fn(f"shadow: {len(days)} of {SHADOW_DAYS} settled shadow days ({summary['fallback_days']} fallback); statistics at day {SHADOW_DAYS} only")
-    store.finish_run(run_id, "ok", f"{len(days)} of {SHADOW_DAYS} shadow days settled", now=now)
+        log_fn(f"shadow: {len(days)} of {SHADOW_DAYS} settled shadow days ({summary['fallback_days']} fallback; {_lost_summary(lost)} "
+               f"of the expected days to {last}); statistics at day {SHADOW_DAYS} only")
+    store.finish_run(run_id, "ok", f"{len(days)} of {SHADOW_DAYS} shadow days settled; {_lost_summary(lost)}", now=now)
     return summary
+
+
+def _has_table(store: Store, name: str) -> bool:
+    return store.conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)).fetchone() is not None
 
 
 def settled_shadow_days(store: Store) -> pd.DataFrame:
@@ -355,13 +551,20 @@ def settled_shadow_days(store: Store) -> pd.DataFrame:
                                    (v.shadow_run_id, v.delivery_day)).fetchone()
         s1 = _mae(version_curve(store, s1_id[0]), actual) if s1_id else None
         if s2 and honest:
+            sha = store.conn.execute("SELECT sha256 FROM shadow_day_models WHERE delivery_day = ?", (v.delivery_day,)).fetchone()
             rows.append({"delivery_day": v.delivery_day, "mae_s2": s2[0], "mae_honest_v2": honest[0], "mae_s1": s1[0] if s1 else np.nan,
-                         "fallback": int(v.fallback)})
-    return pd.DataFrame(rows, columns=["delivery_day", "mae_s2", "mae_honest_v2", "mae_s1", "fallback"])
+                         "fallback": int(v.fallback), "sha256": sha[0] if sha else None})
+    return pd.DataFrame(rows, columns=["delivery_day", "mae_s2", "mae_honest_v2", "mae_s1", "fallback", "sha256"])
 
 
-def shadow_statistics(days: pd.DataFrame) -> dict:
-    """The pre-registered adoption rule on exactly the first 40 settled shadow days."""
+def shadow_statistics(days: pd.DataFrame, lost: pd.DataFrame | None = None) -> dict:
+    """The pre-registered adoption rule on exactly the first 40 settled shadow days, with the lost days up to the last of them
+    and the counted days on each model file (counts only: no statistic per file, which would be a second look)."""
+    lost = lost if lost is not None else pd.DataFrame(columns=["delivery_day", "reason"])
+    files = []
+    if "sha256" in days:
+        for sha, group in days.groupby(days["sha256"].fillna("unknown"), sort=False):
+            files.append({"sha256": sha, "first_day": str(group["delivery_day"].iloc[0]), "counted_days": int(len(group))})
     diff = (days["mae_s2"] - days["mae_honest_v2"]).to_numpy()
     low, high = block_bootstrap_mean(diff, block=7, resamples=5000, seed=0, level=0.90)
     s1 = (days["mae_s1"] - days["mae_honest_v2"]).to_numpy()
@@ -371,7 +574,9 @@ def shadow_statistics(days: pd.DataFrame) -> dict:
             "mean_difference_s2_minus_honest_v2": round(float(diff.mean()), 3), "ci90": [round(low, 3), round(high, 3)],
             "fallback_rate": round(fallback_rate, 3), "s1_minus_honest_v2_diagnostic": round(float(np.nanmean(s1)), 3),
             "mae_s2": round(float(days["mae_s2"].mean()), 3), "mae_honest_v2": round(float(days["mae_honest_v2"].mean()), 3),
-            "adopted": adopt,
+            "adopted": adopt, "lost_days": int(len(lost)),
+            "lost": [{"delivery_day": r.delivery_day, "reason": r.reason} for r in lost.itertuples()],
+            "counted_days_by_model_file": files,
             "rule": "adopted if the mean daily MAE difference is at most zero, the upper end of its 90% moving-block interval at most "
                     "+1.0 EUR/MWh, and fallbacks at most 10%; stopped by any look-ahead or train/serve fault"}
 

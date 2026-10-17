@@ -46,7 +46,10 @@ machine is asleep or hibernating rather than shut down:
                           data/shadow/fresh/) and stores S2, S1 and LEAR in the local store
                           (tables shadow_*). A version issued at or after 11:15 Paris does not
                           count; a missing input stores honest_v2 as a counted fallback.
-                          Nothing is published, committed, pushed or dispatched.
+                          The model file of the day is read from the fetched origin/main ref
+                          with read-only git (rev-parse, show, log); a day whose comparator
+                          used another file is lost. Nothing is fetched, published,
+                          committed, pushed or dispatched.
   thermo-fr shadow-settle  every day at 14:10 local time, after the settle: scores the shadow
                           versions, updates the shadow weights, and computes the pre-registered
                           statistics once, when 40 shadow days are settled. Laptop only.
