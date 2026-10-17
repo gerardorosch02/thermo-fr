@@ -39,7 +39,7 @@ thermo-fr dashboard                               # http://localhost:8501
 Windows Task Scheduler entries (the jobs run as the current user and read `ENTSOE_API_KEY` from the user environment, so set it with `setx ENTSOE_API_KEY ...` once):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Install   # morning-run weekdays 07:00, 08:00, 09:15, 09:45, 10:30, 11:30; settle daily 14:00; market publish daily 14:30 (pushes published/market.json only); market fetch weekdays 11:20 and 11:35; market snapshot weekdays 10:20; outage snapshot weekdays 09:00 and weekends 10:00; fuel snapshot daily 22:15 (private collector, only if local\fuel_fetch.py exists) (local time, London intended; 09:15 and 09:45 London are pre-market runs at 10:15 and 10:45 Paris, 11:20 and 11:35 London are 12:20 and 12:35 Paris)
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Install   # morning-run weekdays 07:00, 08:00, 09:15, 09:45, 10:30, 11:30; settle daily 14:00; market publish daily 14:30 (pushes published/market.json only); market fetch weekdays 11:20 and 11:35; market snapshot weekdays 10:20; outage snapshot weekdays 09:00 and weekends 10:00; fuel snapshot daily 22:15 (private collector, only if local\fuel_fetch.py exists); shadow-run weekdays 09:30 and 10:00 and shadow-settle daily 14:10 (laptop-only S2 shadow, see below) (local time, London intended; 09:15 and 09:45 London are pre-market runs at 10:15 and 10:45 Paris, 11:20 and 11:35 London are 12:20 and 12:35 Paris)
 powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Show
 powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Remove
 ```
@@ -49,6 +49,39 @@ All five tasks have "run task as soon as possible after a scheduled start is mis
 The dashboard opens on the morning brief (branch desk-brief, 2026-10-13): one screen for the next delivery day written for a trader. Model forecast as base, peak (08:00 to 20:00) and off-peak from the pre-market forecast with its issue time; the hours whose calibrated probability of a negative price is 5% or more; a "what changed" table of tomorrow's fundamentals against the previous delivery day (the French D-1 base first, since the spreads are measured against it, then load forecast, temperature, wind and solar proxies, the latest nuclear output and residual load), each with value and change, with the D-1 base prices of DE, BE, ES, IT-North and CH (change in brackets) and their French spreads as a two-row block under it; a waterfall from yesterday's base model forecast to today's split into feature groups (recent French prices, labelled "model following the market" because the price lags carry the last traded level forward; neighbour prices; wind; solar; load and temperature; nuclear; calendar) using LightGBM's own per-feature contributions (`pred_contrib=True`, stored with every version as its drivers), with a one-line summary built from the two largest groups that says plainly when the French lags are the largest; the live record against EEX (the window count always, the hit rate, P&L and model against market error once 20 windows exist); and, on the local dashboard only, the gap between the model forecast and the latest EEX base trade before the window (from the 10:20 London snapshot, with the trade time), labelled with the model's live hit rate, or, when only the window close exists, that close labelled as coming after the forecast was issued and not framed as a gap to trade. The second page, Forecast and record, shows tomorrow's pre-market forecast (the last version issued before the EEX market window opens at 11:15 Paris on the day before; versions issued later are listed underneath as "issued after the market window, not tradeable") with today's actual prices and a shaded band built from the backtest's error distribution at each hour (historical error, not a probability forecast); tomorrow's forecast load, wind, solar, residual load and temperature with the change against today's inputs; the last 30 settled days against the auction result with rolling MAE (the model's own error; the EEX traded price is the only benchmark); a "Versus the market" panel with the daily table and cumulative P&L of the forecast against the recorded EEX traded prices; the data status for tomorrow (arrival time of each input, anything missing or late), the market data collection log with any day the collector skipped or was refused, and the timing-probe summary across all logged days. A sidebar toggle switches between the honest and extended feature sets, with a note that the extended set may use information published after the gate until the timing log shows otherwise. Database reads are cached; the "Refresh now" button runs `morning-run` once.
 
 ![Dashboard](img/dashboard.png)
+
+## Live shadow of S2 (laptop only)
+
+The model sprint (pre-registration `sprint_prereg.md`, result and the shadow's set-up and deviations in [experiments.md](experiments.md)) sent S2, honest_v2 combined with LEAR under online inverse-MAE weights, to a 40-day live shadow next to the published honest_v2. The shadow runs on the laptop only and writes only to the local store (tables `shadow_versions`, `shadow_values`, `shadow_errors`, `shadow_scores`, `shadow_day_models`, `shadow_lost_events`, `shadow_result`) and to `data/shadow/` (git-ignored). Nothing is written to `published/`, committed, pushed or dispatched to GitHub Actions, and the public site is unchanged.
+
+```bash
+thermo-fr shadow-init                 # once, before the first live day: the weight state from the 2026-09-01 to 10-13 walk-forward (never shown)
+thermo-fr morning-run --save-shadow-window   # the scheduled morning runs: also save the fetched window and the model file's sha256 under data/shadow/fresh/
+thermo-fr shadow-run                  # S2, S1 and LEAR next to the latest pre-market honest_v2 version for tomorrow
+thermo-fr shadow-settle               # score the shadow versions, report counted, fallback and lost days; the statistics at day 40 only
+```
+
+`morning-run --save-shadow-window` is the only change to the production path: after fetching, it saves the run's fetched inputs window (D-10 to D+1) as a CSV under `data/shadow/fresh/`, and after predicting, the sha256 of the model file each forecast was made with next to it; the forecast it stores is unchanged. The store keeps only the delivery day's 24 hours of inputs, not the lags and history LEAR needs, so no shadow day can be reissued: the shadow starts live, and the first counted delivery day is Tuesday 20 October 2026 (issued Monday 19 October).
+
+`shadow-run` takes the latest honest_v2 version for tomorrow whose morning run started between 10:05 and 11:00 Paris and has no shadow version yet, builds LEAR's history from `data/forecast/inputs.csv` plus the saved windows (later windows win), blanks every value published after 10:05 Paris on D-1 by the timing rules, fits LEAR, and stores S2, S1 (equal average, diagnostic) and LEAR with the run's wall-clock issue time. The LEAR weight is stored but never logged or printed before day 40. A version issued at or after 11:15 Paris is kept but does not count. When LEAR cannot be issued, S2 and S1 are stored as copies of honest_v2 marked as a fallback, which counts against the 10% limit.
+
+The model file follows the published monthly refit. At the first shadow run for a delivery day, the shadow reads `published/model/honest_v2.txt` and `honest_v2.json` from the origin/main ref that the 14:30 market publish fetches into `.publish-worktree` (before that worktree exists, the same ref through the repository), with read-only git commands only (`rev-parse`, `show`, `log`; never fetch, pull, checkout, commit or push), and stores them as `data/shadow/models/<sha256>.txt`. The day records the sha256, the ref commit and its time and age, the commit that last changed the file, `fitted_at_utc`, `train_from` and `train_to`, LEAR's windows and recalibration date, and whether the file changed against the previous day; the second run of the day reuses the file. When the ref cannot be read, the last stored file is used and the day says so. The comparator is the morning run's own honest_v2 version, predicted with the model file of the laptop's checkout: a day whose comparator names a different sha256 is lost, not counted. So after each monthly refit (the next on Monday 2 November) the laptop's checkout must be updated with `git pull` on main before the next morning's 09:15 London run; until then every day is lost as a file mismatch.
+
+`shadow-settle` prints, every afternoon, "n of 40 settled shadow days (f fallback; l lost (reasons) of the expected days to ...)", where the expected days are the Tuesday-to-Saturday delivery days from 20 October and a lost day is one that is not counted (no pre-market morning run, a file mismatch, a version after 11:15, no shadow run). At day 40 it computes once the mean daily MAE difference (S2 minus honest_v2), its 90% moving-block bootstrap interval, the fallback rate, the adoption verdict, the lost days with their reasons and the counted days on each model file (counts only), and stores them in `shadow_result`. All four commands log to `logs/<command>_<date>.log`.
+
+One-time steps on the laptop (Windows PowerShell, in the repository folder), after the model-sprint branch has been pushed and merged into main on GitHub:
+
+```powershell
+git checkout main
+git pull
+python -m pip install -e ".[dev,forecast,dashboard]"
+python -m thermo_fr shadow-init
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Install   # re-registers every task: morning-run now saves the shadow window; adds shadow-run weekdays 09:30 and 10:00 and shadow-settle daily 14:10 (local time, London intended: 10:30 and 11:00 Paris, before the 11:15 window)
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Show
+git diff --stat origin/main -- published/model/honest_v2.txt   # prints nothing: the checkout's model file is the published one
+```
+
+`shadow-init` reads `data/forecast/inputs.csv` and the actual prices in the store and took about 25 minutes in the build container (not measured on the laptop); run it once, before the first live morning, Monday 19 October 2026. `-Show` should list "thermo-fr shadow-run" and "thermo-fr shadow-settle" as Ready. To stop the shadow, remove its two tasks (`Unregister-ScheduledTask -TaskName "thermo-fr shadow-run" -Confirm:$false`, the same for "thermo-fr shadow-settle"); the saved windows and model files are small and can stay.
 
 ## Public dashboard and automated updates
 
@@ -97,6 +130,11 @@ src/thermo_fr/
   forecast/brief.py      the morning brief: model forecast, feature groups, the waterfall from LightGBM's contributions, the fundamentals table
   forecast/market.py     EEX traded prices (local file: collected, pasted or typed), the paste parser, the collector contract and log, the forecast scored against them, the pre-market headline rule
   forecast/schedule.py   which step a scheduled GitHub Actions run performs, from the Paris clock (pre-market window 10:05 to 11:00)
+  forecast/lear.py       LEAR: per-hour lasso on asinh-scaled prices, four calibration windows, daily recalibration (model sprint)
+  forecast/combine.py    forecast combination: equal average, inverse-MAE weights from settled days, BOA (model sprint)
+  forecast/sprint.py     the model sprint's walk-forward runner and selection report
+  forecast/transforms.py price scaling for LEAR (asinh on median and MAD) and its inverse
+  forecast/shadow.py     laptop-only live shadow of S2 next to the pre-market honest_v2 version (local store only, never published)
   dashboard/data.py      read-only queries for the dashboard
   dashboard/brief.py     the brief's read layer (store, local market file; the early-trade line lives here only)
   dashboard/app.py       the Streamlit app

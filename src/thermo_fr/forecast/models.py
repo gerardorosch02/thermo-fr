@@ -71,20 +71,27 @@ class _LazyLinear:
         self._build = build
         self.pipeline = None
 
-    def fit(self, X, y):
+    def fit(self, X, y, sample_weight=None):
         self.pipeline = self._build(list(X.columns))
-        self.pipeline.fit(X, y)
+        if sample_weight is None:
+            self.pipeline.fit(X, y)
+        else:
+            self.pipeline.fit(X, y, ridge__sample_weight=sample_weight)
         return self
 
     def predict(self, X):
         return self.pipeline.predict(X)
 
 
-def fit_predict(name: str, X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame, params: dict | None = None) -> np.ndarray:
+def fit_predict(name: str, X_train: pd.DataFrame, y_train: pd.Series, X_test: pd.DataFrame, params: dict | None = None,
+                sample_weight=None) -> np.ndarray:
     """Fit one model on the training rows (dropping rows without a target) and predict the test rows."""
     keep = y_train.notna()
     model = make_model(name, params)
-    model.fit(X_train[keep], y_train[keep])
+    if sample_weight is None:
+        model.fit(X_train[keep], y_train[keep])
+    else:
+        model.fit(X_train[keep], y_train[keep], sample_weight=np.asarray(sample_weight, dtype=float)[keep.to_numpy()])
     return np.asarray(model.predict(X_test), dtype=float)
 
 

@@ -37,6 +37,22 @@ machine is asleep or hibernating rather than shut down:
                           exits without committing. Task Scheduler's PowerShell cmdlets have
                           no monthly trigger, so the task is registered with a placeholder and
                           its trigger is replaced through the Task Scheduler COM API.
+  thermo-fr shadow-run    weekdays at 09:30 and 10:00 local time (10:30 and 11:00 Paris):
+                          laptop-only live shadow of the model-sprint candidate S2. It
+                          takes the latest honest_v2 version from a pre-market morning run
+                          (started 10:05 to 11:00 Paris) that has no shadow version yet,
+                          fits LEAR on the history as known at 10:05 Paris (inputs.csv plus
+                          the morning windows saved by morning-run --save-shadow-window under
+                          data/shadow/fresh/) and stores S2, S1 and LEAR in the local store
+                          (tables shadow_*). A version issued at or after 11:15 Paris does not
+                          count; a missing input stores honest_v2 as a counted fallback.
+                          The model file of the day is read from the fetched origin/main ref
+                          with read-only git (rev-parse, show, log); a day whose comparator
+                          used another file is lost. Nothing is fetched, published,
+                          committed, pushed or dispatched.
+  thermo-fr shadow-settle  every day at 14:10 local time, after the settle: scores the shadow
+                          versions, updates the shadow weights, and computes the pre-registered
+                          statistics once, when 40 shadow days are settled. Laptop only.
   thermo-fr settle        every day at 14:00 local time
   thermo-fr market publish  every day at 14:30 local time, after the settle: writes
                           published/market.json from the local store and the traded
@@ -105,6 +121,8 @@ $marketPublishName = "thermo-fr market publish"
 $dispatchName = "thermo-fr dispatch forecast"
 $refitDispatchName = "thermo-fr dispatch refit"
 $settleDispatchName = "thermo-fr dispatch settle"
+$shadowName = "thermo-fr shadow-run"
+$shadowSettleName = "thermo-fr shadow-settle"
 
 function Remove-IfPresent($name) {
     $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
@@ -125,6 +143,8 @@ if ($Remove) {
     Remove-IfPresent $dispatchName
     Remove-IfPresent $refitDispatchName
     Remove-IfPresent $settleDispatchName
+    Remove-IfPresent $shadowName
+    Remove-IfPresent $shadowSettleName
 }
 
 if ($Install) {
@@ -138,6 +158,8 @@ if ($Install) {
     Remove-IfPresent $dispatchName
     Remove-IfPresent $refitDispatchName
     Remove-IfPresent $settleDispatchName
+    Remove-IfPresent $shadowName
+    Remove-IfPresent $shadowSettleName
     $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
         -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $weekdays = @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
@@ -146,7 +168,7 @@ if ($Install) {
     foreach ($time in @("07:00", "08:00", "09:15", "09:45", "10:30", "11:30")) {
         $morningTriggers += New-ScheduledTaskTrigger -Weekly -DaysOfWeek $weekdays -At $time
     }
-    $morningAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr morning-run --kind scheduled" -WorkingDirectory $repo
+    $morningAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr morning-run --kind scheduled --save-shadow-window" -WorkingDirectory $repo
     Register-ScheduledTask -TaskName $morningName -Action $morningAction -Trigger $morningTriggers -Settings $settings `
         -Description "thermo-fr: fetch tomorrow's day-ahead inputs, log their timing and store the price forecasts" | Out-Null
     Write-Host "Installed task '$morningName' (weekdays 07:00, 08:00, 09:15, 09:45, 10:30, 11:30 local time)"
@@ -184,6 +206,21 @@ if ($Install) {
     $monthly.Enabled = $true
     $folder.RegisterTaskDefinition($refitDispatchName, $definition, 4, $null, $null, 3) | Out-Null   # 4 = TASK_UPDATE, 3 = interactive token
     Write-Host "Installed task '$refitDispatchName' (the 1st, 2nd and 3rd of each month at 07:00 local time; dispatches on the first weekday only)"
+
+    $shadowTriggers = @()
+    foreach ($time in @("09:30", "10:00")) {
+        $shadowTriggers += New-ScheduledTaskTrigger -Weekly -DaysOfWeek $weekdays -At $time
+    }
+    $shadowAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr shadow-run --kind scheduled" -WorkingDirectory $repo
+    Register-ScheduledTask -TaskName $shadowName -Action $shadowAction -Trigger $shadowTriggers -Settings $settings `
+        -Description "thermo-fr: laptop-only S2 shadow next to the pre-market honest_v2 version (local store only, never published)" | Out-Null
+    Write-Host "Installed task '$shadowName' (weekdays 09:30 and 10:00 local time, 10:30 and 11:00 Paris)"
+
+    $shadowSettleTrigger = New-ScheduledTaskTrigger -Daily -At "14:10"
+    $shadowSettleAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr shadow-settle --kind scheduled" -WorkingDirectory $repo
+    Register-ScheduledTask -TaskName $shadowSettleName -Action $shadowSettleAction -Trigger $shadowSettleTrigger -Settings $settings `
+        -Description "thermo-fr: score the S2 shadow versions; the pre-registered statistics at day 40 only (local store only)" | Out-Null
+    Write-Host "Installed task '$shadowSettleName' (daily 14:10 local time, after the settle)"
 
     $settleTrigger = New-ScheduledTaskTrigger -Daily -At "14:00"
     $settleAction = New-ScheduledTaskAction -Execute $Python -Argument "-m thermo_fr settle --kind scheduled" -WorkingDirectory $repo
@@ -237,7 +274,7 @@ if ($Install) {
 }
 
 if ($Show -or $Install) {
-    foreach ($name in @($morningName, $dispatchName, $settleDispatchName, $refitDispatchName, $settleName, $marketName, $snapshotName, $outageName, $fuelName, $marketPublishName)) {
+    foreach ($name in @($morningName, $dispatchName, $settleDispatchName, $refitDispatchName, $settleName, $marketName, $snapshotName, $outageName, $fuelName, $marketPublishName, $shadowName, $shadowSettleName)) {
         $task = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if ($null -eq $task) { Write-Host "Task '$name' is not installed"; continue }
         $info = Get-ScheduledTaskInfo -TaskName $name
