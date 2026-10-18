@@ -200,8 +200,8 @@ METHOD_MD = """
 #### Missing drivers
 - Nuclear availability: tested on 17 Oct 2026 with EDF's outage notices as known at the issue time, and it added nothing material
   on top of the two-model ensemble.
-- Fresher weather: a pre-check found that weather surprises explain about 4% of the daily error variance on 2024 to 2026,
-  so a fresher run was not pursued for the daily level.
+- Fresher weather: weather surprises explain about 4% of the variance of the daily error and about 3% of its hour-to-hour
+  shape on 2024 to 2026, so fresher or better weather forecasts were not pursued.
 - Gas price (TTF front month): tested and it added nothing on 2024 to 2026, even assuming the previous day's close
   arrived in time. No free feed delivers that close before the 10:05 issue time.
 - Carbon (EUA price): tested and rejected on the selection window.
