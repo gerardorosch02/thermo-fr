@@ -177,6 +177,17 @@ METHOD_MD = """
   1 Jul to 10 Oct 2026.
 - The EEX history is too short to select on, so selection uses the model's own backtest error.
 
+#### Input timing
+- In October 2026 a review found that the solar radiation inputs were one hour out of step with the generation and price data.
+  Open-Meteo reports radiation as the average of the preceding hour, labelled at the end of that hour, while ENTSO-E labels
+  each hour at its start. ENTSO-E actual generation was also an hour late on about 215 days in late 2023 and early 2024.
+- Neither problem used information from the future. Each input carried slightly older information than its label suggested.
+- A corrected version made the solar estimate much closer to actual output, but the price error hardly moved: the models had
+  largely learned around the offset. For the public model the change did not pass the test set before the run, so the public
+  model still uses the original labels.
+- The corrected inputs passed the same test inside the two-model ensemble now under live test. They will be adopted only if
+  they also hold up on the ensemble's 40 live days, replayed from the inputs saved each morning, and in a short live check.
+
 #### Limitations
 - Loses to the traded market: by 11:15 the market has repriced for the next day and the model makes less than half of that move.
 - Tried in October 2026: inputs describing the expected change from the previous day, and a target relative to yesterday's
@@ -187,7 +198,8 @@ METHOD_MD = """
 - Why the backtest error is lower than the trading record's, and whether the hit rate is significant: see Track record.
 
 #### Missing drivers
-- Nuclear availability (not yet tested): outage notices snapshotted daily since 10 Oct 2026; ENTSO-E keeps only the latest revision.
+- Nuclear availability: tested on 17 Oct 2026 with EDF's outage notices as known at the issue time, and it added nothing material
+  on top of the two-model ensemble.
 - Fresher weather: a pre-check found that weather surprises explain about 4% of the daily error variance on 2024 to 2026,
   so a fresher run was not pursued for the daily level.
 - Gas price (TTF front month): tested and it added nothing on 2024 to 2026, even assuming the previous day's close
