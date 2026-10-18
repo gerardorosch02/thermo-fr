@@ -204,6 +204,19 @@ def generation_proxy_issue(index) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(weather.where(weather >= calibration, calibration))
 
 
+def wind_proxy_issue_for_curve(index) -> pd.DatetimeIndex:
+    """The wind proxy: as generation_proxy_issue for the cubic curve; with the W curve, which also reads the speed valid one
+    hour after the label, the weather run of label + 1 h (conservative for the last hour when W_LAST_HOUR is "own")."""
+    from .wind_proxy import CUBIC
+    from . import wind_proxy
+
+    if wind_proxy.WIND_CURVE == CUBIC:
+        return generation_proxy_issue(index)
+    weather = weather_issued_issue(pd.DatetimeIndex(index).tz_convert("UTC") + pd.Timedelta(hours=1))
+    calibration = proxy_calibration_issue(index)
+    return pd.DatetimeIndex(weather.where(weather >= calibration, calibration))
+
+
 def solar_proxy_issue(index) -> pd.DatetimeIndex:
     """As generation_proxy_issue, with the radiation run at its valid time (equal to it as logged)."""
     weather = radiation_issued_issue(index)
@@ -257,7 +270,7 @@ def fuel_morning_trades_issue(index) -> pd.DatetimeIndex:
 
 def residual_v2_issue(index) -> pd.DatetimeIndex:
     """The latest of the load forecast, the generation proxies and the D-1 nuclear hours."""
-    candidates = [load_forecast_issue(index), generation_proxy_issue(index), solar_proxy_issue(index), nuclear_d1_issue(index)]
+    candidates = [load_forecast_issue(index), wind_proxy_issue_for_curve(index), solar_proxy_issue(index), nuclear_d1_issue(index)]
     latest = candidates[0]
     for other in candidates[1:]:
         latest = pd.DatetimeIndex(latest.where(latest >= other, other))
@@ -309,7 +322,7 @@ TIMINGS = {
         "Open-Meteo historical-forecast radiation at its valid time: not point in time.",
     ),
     "wind_proxy": InputTiming(
-        "wind_proxy", generation_proxy_issue,
+        "wind_proxy", wind_proxy_issue_for_curve,
         "Wind generation proxy: lead-day-2 hub-height wind forecasts, weights fitted on actual generation to two days before the month.",
     ),
     "solar_proxy": InputTiming(

@@ -148,6 +148,10 @@ def fetch_fresh(day: str, cache_dir: Path, store: Store, run_id: int, entsoe=Non
             weights = load_weights(weights_path)
             if weights is None:
                 raise FileNotFoundError(f"no {spec.name} proxy weights at {weights_path} (written by refit-model)")
+            if spec.name == "wind":  # the wind proxy's own path, so a weights file fitted with the W curve is applied with it
+                from . import wind_proxy
+
+                return wind_proxy.apply_weights(points, weights)
             return apply_weights(points, weights, spec)
 
         return compute

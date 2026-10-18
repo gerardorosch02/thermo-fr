@@ -145,7 +145,8 @@ def refit_model(hourly: pd.DataFrame, out_dir=DEFAULT_MODEL_DIR, feature_set: st
                 + (" and before the pre-market issue time, 10:05 Paris on D-1." if feature_set != "honest" else "."),
     }
     for spec, actual_of in (PROXIES if save_proxies else ()):
-        weights = latest_weights(hourly, actual_of(hourly), spec)
+        weights = (wind_proxy.latest_weights(hourly, actual_of(hourly)) if spec.name == "wind"  # follows wind_proxy.WIND_CURVE
+                   else latest_weights(hourly, actual_of(hourly), spec))
         name = f"{spec.name}_proxy"
         if weights is not None:
             save_weights(weights, out / f"{name}.json")

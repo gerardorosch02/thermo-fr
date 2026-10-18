@@ -55,7 +55,7 @@ def align_inputs(table: pd.DataFrame, log=print) -> tuple[pd.DataFrame, dict, di
     wind, wind_fits = wind_proxy.rolling_proxy(out[[c for c in WIND_POINT_COLUMNS if c in out]], wind_proxy.actual_wind(out), log=log)
     out["wind_proxy_mw"] = wind
     weights = {"solar": latest_weights(out, solar_proxy.actual_solar(out), solar_proxy.SOLAR),
-               "wind": latest_weights(out, wind_proxy.actual_wind(out), wind_proxy.WIND)}
+               "wind": wind_proxy.latest_weights(out, wind_proxy.actual_wind(out))}
     report = {
         "hour_labels": hour_labels.START_OF_HOUR,
         "relabelled_solar_days": solar_labels.day_ranges(days),
