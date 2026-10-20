@@ -235,37 +235,37 @@
     }
   },
   "live": {
-    "days": 6,
+    "days": 7,
     "shape": {
-      "hours": 144,
-      "days": 6,
+      "hours": 168,
+      "days": 7,
       "model": {
-        "shape_mae": 16.35,
-        "spread_error": 14.59,
-        "cheapest2_hit_rate": 0.75,
-        "dearest2_hit_rate": 0.667
+        "shape_mae": 19.87,
+        "spread_error": 19.72,
+        "cheapest2_hit_rate": 0.714,
+        "dearest2_hit_rate": 0.714
       },
       "d1": {
-        "shape_mae": 20.47,
-        "spread_error": 25.07,
-        "cheapest2_hit_rate": 0.583,
-        "dearest2_hit_rate": 0.667
+        "shape_mae": 25.03,
+        "spread_error": 31.54,
+        "cheapest2_hit_rate": 0.5,
+        "dearest2_hit_rate": 0.643
       }
     },
     "battery": {
-      "days": 6,
-      "perfect_eur_per_day": 240.76,
+      "days": 7,
+      "perfect_eur_per_day": 265.83,
       "model": {
-        "eur_per_day": 233.04,
-        "share_of_perfect": 0.968,
-        "days_traded": 6,
+        "eur_per_day": 251.39,
+        "share_of_perfect": 0.946,
+        "days_traded": 7,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 229.7,
-        "share_of_perfect": 0.954,
-        "days_traded": 6,
+        "eur_per_day": 210.42,
+        "share_of_perfect": 0.792,
+        "days_traded": 7,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -360,6 +360,21 @@
         "discharge_d1": 18,
         "shape_mae_model": 5.81440972222222,
         "shape_mae_d1": 7.202508680555557
+      },
+      {
+        "delivery_day": "2026-10-21",
+        "hours": 24,
+        "value_perfect": 416.24899999999997,
+        "value_model": 361.45579999999995,
+        "traded_model": true,
+        "charge_model": 13,
+        "discharge_model": 19,
+        "value_d1": 94.73649999999992,
+        "traded_d1": true,
+        "charge_d1": 2,
+        "discharge_d1": 18,
+        "shape_mae_model": 40.96255208333333,
+        "shape_mae_d1": 52.41203124999999
       }
     ]
   },
