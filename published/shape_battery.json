@@ -235,37 +235,37 @@
     }
   },
   "live": {
-    "days": 8,
+    "days": 9,
     "shape": {
-      "hours": 192,
-      "days": 8,
+      "hours": 216,
+      "days": 9,
       "model": {
-        "shape_mae": 22.67,
-        "spread_error": 19.68,
-        "cheapest2_hit_rate": 0.688,
-        "dearest2_hit_rate": 0.688
+        "shape_mae": 23.68,
+        "spread_error": 20.53,
+        "cheapest2_hit_rate": 0.667,
+        "dearest2_hit_rate": 0.611
       },
       "d1": {
-        "shape_mae": 29.6,
-        "spread_error": 34.95,
-        "cheapest2_hit_rate": 0.438,
-        "dearest2_hit_rate": 0.625
+        "shape_mae": 30.6,
+        "spread_error": 33.26,
+        "cheapest2_hit_rate": 0.444,
+        "dearest2_hit_rate": 0.556
       }
     },
     "battery": {
-      "days": 8,
-      "perfect_eur_per_day": 268.44,
+      "days": 9,
+      "perfect_eur_per_day": 272.62,
       "model": {
-        "eur_per_day": 252.09,
-        "share_of_perfect": 0.939,
-        "days_traded": 8,
+        "eur_per_day": 251.56,
+        "share_of_perfect": 0.923,
+        "days_traded": 9,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 202.98,
-        "share_of_perfect": 0.756,
-        "days_traded": 8,
+        "eur_per_day": 208.06,
+        "share_of_perfect": 0.763,
+        "days_traded": 9,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -388,8 +388,23 @@
         "traded_d1": true,
         "charge_d1": 15,
         "discharge_d1": 18,
-        "shape_mae_model": 42.23305555555556,
-        "shape_mae_d1": 61.57203993055557
+        "shape_mae_model": 42.23305555555555,
+        "shape_mae_d1": 61.572039930555555
+      },
+      {
+        "delivery_day": "2026-10-23",
+        "hours": 24,
+        "value_perfect": 306.0593,
+        "value_model": 247.28629999999998,
+        "traded_model": true,
+        "charge_model": 3,
+        "discharge_model": 18,
+        "value_d1": 248.6463,
+        "traded_d1": true,
+        "charge_d1": 12,
+        "discharge_d1": 18,
+        "shape_mae_model": 31.80479166666667,
+        "shape_mae_d1": 38.554375
       }
     ]
   },

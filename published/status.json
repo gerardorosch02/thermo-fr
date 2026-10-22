@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-10-22T13:33:10Z",
+  "written_at_utc": "2026-10-22T17:58:55Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -12,12 +12,12 @@
   "from_day": "2026-07-24",
   "tomorrow": "2026-10-23",
   "forecast_versions": 32,
-  "actual_days": 16,
-  "scored_versions": 30,
+  "actual_days": 17,
+  "scored_versions": 32,
   "live_record": {
     "default": {
       "feature_set": "honest_v2",
-      "days": 7,
+      "days": 8,
       "late_only_days": [
         {
           "delivery_day": "2026-10-13",
@@ -27,10 +27,10 @@
       ],
       "window_days": 30,
       "first_premarket_day": "2026-10-14",
-      "last_premarket_day": "2026-10-22",
-      "days_in_window": 7,
-      "model_mae": 24.78,
-      "model_rmse": 33.04,
+      "last_premarket_day": "2026-10-23",
+      "days_in_window": 8,
+      "model_mae": 28.15,
+      "model_rmse": 36.12,
       "scored_against": "the auction result; the EEX traded price is the only benchmark (Versus the market)",
       "status": "ok"
     },
@@ -154,57 +154,57 @@
     "command": "settle",
     "kind": "scheduled",
     "delivery_day": null,
-    "started_at_utc": "2026-10-22T13:20:37Z",
-    "finished_at_utc": "2026-10-22T13:33:09Z",
-    "status": "failed",
-    "message": "prices 2026-10-22: EntsoeApiError: prices 2026-10-21 to 2026-10-24: https://web-api.tp.entsoe.eu/api still failing (HTTP 599) after 6 attempts. The service looks down or is rate limiting us; try again later.; prices 2026-10-23: EntsoeApiError: prices 2026-10-22 to 2026-10-25: https://web-api.tp.entsoe.eu/api still failing (HTTP 599) after 6 attempts. The service looks down or is rate limiting us; try again later."
+    "started_at_utc": "2026-10-22T17:58:43Z",
+    "finished_at_utc": "2026-10-22T17:58:54Z",
+    "status": "ok",
+    "message": ""
   },
   "market": {
     "source": "EEX French Day-Ahead Base and Peak futures traded before the auction, collected locally; traded prices are not republished.",
-    "scored_days": 10,
-    "scored_windows": 10,
+    "scored_days": 11,
+    "scored_windows": 11,
     "min_days_to_show": 20,
     "benchmark": "the only benchmark of the level forecast: the window VWAP of the traded future, scored at the auction result",
     "counts": "windows (one per delivery day and product, base or peak) of settled delivery days whose published pre-market version of the default set (the version shown on the public site, read from published/forecasts.csv on main) was issued before the market window (11:15 Paris on the trade date), scored against the auction result; days whose published versions were all issued later, days with only a local version on the collecting machine, and days without a traded price are not counted; the backfilled walk-forward record in the README (42 windows) is a separate, out-of-sample reissue, not part of this count",
     "versions": "published pre-market versions (the public site's)",
-    "computed_at_utc": "2026-10-21T13:30:06Z",
-    "note": "Versus the market: collecting data, 10 of 20 days.",
+    "computed_at_utc": "2026-10-22T13:30:05Z",
+    "note": "Versus the market: collecting data, 11 of 20 days.",
     "computed_on": "laptop",
     "carried_through": true,
     "carried_note": "this machine holds no traded prices; the aggregates are the last ones computed on the laptop"
   },
   "shape_battery": {
-    "days": 8,
+    "days": 9,
     "shape": {
-      "hours": 192,
-      "days": 8,
+      "hours": 216,
+      "days": 9,
       "model": {
-        "shape_mae": 22.67,
-        "spread_error": 19.68,
-        "cheapest2_hit_rate": 0.688,
-        "dearest2_hit_rate": 0.688
+        "shape_mae": 23.68,
+        "spread_error": 20.53,
+        "cheapest2_hit_rate": 0.667,
+        "dearest2_hit_rate": 0.611
       },
       "d1": {
-        "shape_mae": 29.6,
-        "spread_error": 34.95,
-        "cheapest2_hit_rate": 0.438,
-        "dearest2_hit_rate": 0.625
+        "shape_mae": 30.6,
+        "spread_error": 33.26,
+        "cheapest2_hit_rate": 0.444,
+        "dearest2_hit_rate": 0.556
       }
     },
     "battery": {
-      "days": 8,
-      "perfect_eur_per_day": 268.44,
+      "days": 9,
+      "perfect_eur_per_day": 272.62,
       "model": {
-        "eur_per_day": 252.09,
-        "share_of_perfect": 0.939,
-        "days_traded": 8,
+        "eur_per_day": 251.56,
+        "share_of_perfect": 0.923,
+        "days_traded": 9,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 202.98,
-        "share_of_perfect": 0.756,
-        "days_traded": 8,
+        "eur_per_day": 208.06,
+        "share_of_perfect": 0.763,
+        "days_traded": 9,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -212,19 +212,19 @@
   },
   "probabilistic": {
     "live": {
-      "days": 8,
-      "hours": 192,
+      "days": 9,
+      "hours": 216,
       "negative": {
         "events": 0,
-        "hours": 192,
+        "hours": 216,
         "brier": 0.00041,
         "brier_base_rate": 0.0,
-        "log_loss": 0.0086,
+        "log_loss": 0.0091,
         "reliability": [
           {
             "bin": "0.0-0.1",
-            "n": 190,
-            "mean_forecast": 0.0069,
+            "n": 214,
+            "mean_forecast": 0.0075,
             "observed_frequency": 0.0
           },
           {
@@ -283,7 +283,7 @@
           }
         ]
       },
-      "negative_calibrated_hours": 192
+      "negative_calibrated_hours": 216
     },
     "backtest_file": "probabilistic_backtest.json",
     "calibration": {
