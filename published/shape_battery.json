@@ -283,7 +283,7 @@
         "traded_d1": true,
         "charge_d1": 13,
         "discharge_d1": 18,
-        "shape_mae_model": 14.175564236111109,
+        "shape_mae_model": 14.175564236111105,
         "shape_mae_d1": 17.221666666666668
       },
       {
@@ -298,8 +298,8 @@
         "traded_d1": true,
         "charge_d1": 14,
         "discharge_d1": 19,
-        "shape_mae_model": 15.91993055555556,
-        "shape_mae_d1": 18.779314236111116
+        "shape_mae_model": 15.91993055555555,
+        "shape_mae_d1": 18.77931423611111
       },
       {
         "delivery_day": "2026-10-15",
@@ -329,7 +329,7 @@
         "charge_d1": 13,
         "discharge_d1": 18,
         "shape_mae_model": 20.125104166666677,
-        "shape_mae_d1": 24.300277777777776
+        "shape_mae_d1": 24.300277777777783
       },
       {
         "delivery_day": "2026-10-17",
@@ -343,7 +343,7 @@
         "traded_d1": true,
         "charge_d1": 13,
         "discharge_d1": 18,
-        "shape_mae_model": 32.85390625,
+        "shape_mae_model": 32.853906249999994,
         "shape_mae_d1": 40.17119791666667
       },
       {
@@ -358,7 +358,7 @@
         "traded_d1": true,
         "charge_d1": 3,
         "discharge_d1": 18,
-        "shape_mae_model": 5.81440972222222,
+        "shape_mae_model": 5.814409722222211,
         "shape_mae_d1": 7.202508680555557
       },
       {
@@ -373,8 +373,8 @@
         "traded_d1": true,
         "charge_d1": 2,
         "discharge_d1": 18,
-        "shape_mae_model": 40.96255208333333,
-        "shape_mae_d1": 52.41203124999999
+        "shape_mae_model": 40.96255208333335,
+        "shape_mae_d1": 52.41203125000004
       },
       {
         "delivery_day": "2026-10-22",
@@ -389,7 +389,7 @@
         "charge_d1": 15,
         "discharge_d1": 18,
         "shape_mae_model": 42.23305555555556,
-        "shape_mae_d1": 61.572039930555555
+        "shape_mae_d1": 61.57203993055557
       }
     ]
   },

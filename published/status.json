@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-10-22T08:32:32Z",
+  "written_at_utc": "2026-10-22T13:33:10Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -151,13 +151,13 @@
   },
   "last_run": {
     "run_id": 1,
-    "command": "morning-run",
+    "command": "settle",
     "kind": "scheduled",
-    "delivery_day": "2026-10-23",
-    "started_at_utc": "2026-10-22T08:30:47Z",
-    "finished_at_utc": "2026-10-22T08:32:30Z",
-    "status": "ok",
-    "message": ""
+    "delivery_day": null,
+    "started_at_utc": "2026-10-22T13:20:37Z",
+    "finished_at_utc": "2026-10-22T13:33:09Z",
+    "status": "failed",
+    "message": "prices 2026-10-22: EntsoeApiError: prices 2026-10-21 to 2026-10-24: https://web-api.tp.entsoe.eu/api still failing (HTTP 599) after 6 attempts. The service looks down or is rate limiting us; try again later.; prices 2026-10-23: EntsoeApiError: prices 2026-10-22 to 2026-10-25: https://web-api.tp.entsoe.eu/api still failing (HTTP 599) after 6 attempts. The service looks down or is rate limiting us; try again later."
   },
   "market": {
     "source": "EEX French Day-Ahead Base and Peak futures traded before the auction, collected locally; traded prices are not republished.",
