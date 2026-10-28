@@ -235,37 +235,37 @@
     }
   },
   "live": {
-    "days": 12,
+    "days": 13,
     "shape": {
-      "hours": 288,
-      "days": 12,
+      "hours": 312,
+      "days": 13,
       "model": {
-        "shape_mae": 23.64,
-        "spread_error": 20.04,
-        "cheapest2_hit_rate": 0.667,
-        "dearest2_hit_rate": 0.625
+        "shape_mae": 22.63,
+        "spread_error": 19.14,
+        "cheapest2_hit_rate": 0.654,
+        "dearest2_hit_rate": 0.654
       },
       "d1": {
-        "shape_mae": 33.15,
-        "spread_error": 34.65,
-        "cheapest2_hit_rate": 0.417,
-        "dearest2_hit_rate": 0.583
+        "shape_mae": 31.22,
+        "spread_error": 32.22,
+        "cheapest2_hit_rate": 0.423,
+        "dearest2_hit_rate": 0.615
       }
     },
     "battery": {
-      "days": 12,
-      "perfect_eur_per_day": 266.59,
+      "days": 13,
+      "perfect_eur_per_day": 265.58,
       "model": {
-        "eur_per_day": 245.87,
-        "share_of_perfect": 0.922,
-        "days_traded": 12,
+        "eur_per_day": 246.23,
+        "share_of_perfect": 0.927,
+        "days_traded": 13,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 202.83,
-        "share_of_perfect": 0.761,
-        "days_traded": 12,
+        "eur_per_day": 206.5,
+        "share_of_perfect": 0.778,
+        "days_traded": 13,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -450,6 +450,21 @@
         "discharge_d1": 18,
         "shape_mae_model": 13.180598958333325,
         "shape_mae_d1": 29.074010416666653
+      },
+      {
+        "delivery_day": "2026-10-29",
+        "hours": 24,
+        "value_perfect": 253.3976,
+        "value_model": 250.49509999999998,
+        "traded_model": true,
+        "charge_model": 12,
+        "discharge_model": 18,
+        "value_d1": 250.49509999999998,
+        "traded_d1": true,
+        "charge_d1": 12,
+        "discharge_d1": 18,
+        "shape_mae_model": 10.557500000000003,
+        "shape_mae_d1": 8.031961805555564
       }
     ]
   },
