@@ -235,37 +235,37 @@
     }
   },
   "live": {
-    "days": 14,
+    "days": 15,
     "shape": {
-      "hours": 336,
-      "days": 14,
+      "hours": 360,
+      "days": 15,
       "model": {
-        "shape_mae": 21.82,
-        "spread_error": 19.1,
-        "cheapest2_hit_rate": 0.679,
-        "dearest2_hit_rate": 0.679
+        "shape_mae": 21.74,
+        "spread_error": 19.55,
+        "cheapest2_hit_rate": 0.667,
+        "dearest2_hit_rate": 0.7
       },
       "d1": {
-        "shape_mae": 30.24,
-        "spread_error": 30.71,
-        "cheapest2_hit_rate": 0.429,
-        "dearest2_hit_rate": 0.643
+        "shape_mae": 29.11,
+        "spread_error": 29.79,
+        "cheapest2_hit_rate": 0.433,
+        "dearest2_hit_rate": 0.667
       }
     },
     "battery": {
-      "days": 14,
-      "perfect_eur_per_day": 259.43,
+      "days": 15,
+      "perfect_eur_per_day": 255.62,
       "model": {
-        "eur_per_day": 241.46,
-        "share_of_perfect": 0.931,
-        "days_traded": 14,
+        "eur_per_day": 238.15,
+        "share_of_perfect": 0.932,
+        "days_traded": 15,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 202.85,
-        "share_of_perfect": 0.782,
-        "days_traded": 14,
+        "eur_per_day": 202.11,
+        "share_of_perfect": 0.791,
+        "days_traded": 15,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -480,6 +480,21 @@
         "discharge_d1": 18,
         "shape_mae_model": 11.232656250000003,
         "shape_mae_d1": 17.52569444444445
+      },
+      {
+        "delivery_day": "2026-10-31",
+        "hours": 24,
+        "value_perfect": 202.29499999999996,
+        "value_model": 191.83749999999998,
+        "traded_model": true,
+        "charge_model": 12,
+        "discharge_model": 18,
+        "value_d1": 191.83749999999998,
+        "traded_d1": true,
+        "charge_d1": 12,
+        "discharge_d1": 18,
+        "shape_mae_model": 20.62833333333333,
+        "shape_mae_d1": 13.241579861111099
       }
     ]
   },
