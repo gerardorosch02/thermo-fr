@@ -6,7 +6,7 @@
   "benchmark": "the only benchmark of the level forecast: the window VWAP of the traded future, scored at the auction result",
   "counts": "windows (one per delivery day and product, base or peak) of settled delivery days whose published pre-market version of the default set (the version shown on the public site, read from published/forecasts.csv on main) was issued before the market window (11:15 Paris on the trade date), scored against the auction result; days whose published versions were all issued later, days with only a local version on the collecting machine, and days without a traded price are not counted; the backfilled walk-forward record in the README (42 windows) is a separate, out-of-sample reissue, not part of this count",
   "versions": "published pre-market versions (the public site's)",
-  "computed_at_utc": "2026-10-29T13:30:05Z",
+  "computed_at_utc": "2026-10-30T13:30:05Z",
   "note": "Versus the market: collecting data, 17 of 20 days.",
   "computed_on": "laptop",
   "carried_through": false
