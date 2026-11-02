@@ -2,10 +2,11 @@
   "feature_set": "honest",
   "model": "lightgbm",
   "model_file": "honest.txt",
-  "fitted_at_utc": "2026-10-09T20:36:27Z",
+  "fitted_at_utc": "2026-11-02T07:17:02Z",
+  "trigger": "dispatch",
   "train_from": "2021-01-01",
-  "train_to": "2026-10-01",
-  "train_hours": 50376,
+  "train_to": "2026-11-01",
+  "train_hours": 51120,
   "features": [
     "hour",
     "dow",
@@ -45,37 +46,14 @@
     "reg_lambda": 1.0,
     "random_state": 7
   },
-  "note": "Honest feature set: every input is published before 12:00 Paris on the day before delivery.",
-  "wind_proxy": {
-    "file": "wind_proxy.json",
-    "from": "2025-10-01 00:00:00+00:00",
-    "to": "2026-09-30 23:00:00+00:00",
-    "hours": 8731,
-    "capacity_mw": 21011.2,
-    "mae_mw": 1435.5,
-    "bias_mw": -640.9,
-    "r2": 0.7867,
-    "mean_actual_mw": 5810.1
-  },
-  "solar_proxy": {
-    "file": "solar_proxy.json",
-    "from": "2025-10-01 00:00:00+00:00",
-    "to": "2026-09-30 23:00:00+00:00",
-    "hours": 8731,
-    "capacity_mw": 22403.0,
-    "mae_mw": 1050.6,
-    "bias_mw": -215.7,
-    "r2": 0.8986,
-    "mean_actual_mw": 4037.1
-  },
   "recent_check": {
-    "from": "2026-09-02",
-    "to": "2026-10-01",
+    "from": "2026-10-03",
+    "to": "2026-11-01",
     "hours": 698,
     "excluded_from_stored_fit": false,
     "note": "a check on the last days before the fit, scored by a model fitted without them; the stored file was then fitted on all rows including these days, so this is not an out-of-sample result for the stored file and not the frozen holdout of docs/experiments.md",
-    "mae": 27.73,
-    "rmse": 36.45
+    "mae": 34.93,
+    "rmse": 45.62
   },
   "frozen_holdout": {
     "window": "2026-07-01 to 2026-10-10",
@@ -84,5 +62,6 @@
     "crash_2026_10_01_to_10_10_mae": 33.76,
     "source": "docs/experiments.md, holdout row of 2026-10-10",
     "method": "monthly walk-forward, backtest settings, not this file"
-  }
+  },
+  "note": "Feature set honest: every input is published before 12:00 Paris on the day before delivery."
 }

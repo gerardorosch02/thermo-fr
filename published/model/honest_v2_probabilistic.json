@@ -7,10 +7,10 @@
     "negative": "honest_v2_negative.txt",
     "spike": "honest_v2_spike.txt"
   },
-  "fitted_at_utc": "2026-10-10T11:44:34Z",
+  "fitted_at_utc": "2026-11-02T07:17:00Z",
   "train_from": "2021-01-01",
-  "train_to": "2026-10-10",
-  "train_hours": 50614,
+  "train_to": "2026-11-01",
+  "train_hours": 51120,
   "features": [
     "hour",
     "dow",
@@ -106,7 +106,7 @@
     0.9
   ],
   "alpha": 0.2,
-  "conformal_margin": 12.85,
+  "conformal_margin": 2.763,
   "conformal_window_days": 90,
   "spike_percentile": 0.95,
   "trailing_days": 365,
@@ -114,28 +114,27 @@
     "n_estimators": 300,
     "num_leaves": 31
   },
-  "events": {
-    "negative": {
-      "events": 1645,
-      "hours": 50614,
-      "base_rate": 0.0325
-    },
-    "spike": {
-      "events": 6351,
-      "hours": 49895,
-      "base_rate": 0.1273
-    }
-  },
-  "note": "Quantile forecasts with a conformal 10-90 interval and event probabilities (negative price, spike above the trailing-year 95th percentile); see docs/experiments.md. Without these files the forecast carries no band.",
   "recent_check": {
-    "from": "2026-09-11",
-    "to": "2026-10-10",
-    "hours": 720,
-    "raw_coverage_10_90": 0.7125,
-    "coverage_10_90_with_margin": 0.8014,
-    "pinball_mean": 11.479,
+    "from": "2026-10-03",
+    "to": "2026-11-01",
+    "hours": 698,
+    "raw_coverage_10_90": 0.7679,
+    "coverage_10_90_with_margin": 0.8023,
+    "pinball_mean": 10.688,
     "excluded_from_stored_fit": false,
     "note": "a check on the last days by models fitted without them; the stored files were then fitted on all rows including these days"
+  },
+  "events": {
+    "negative": {
+      "events": 1648,
+      "hours": 51120,
+      "base_rate": 0.0322
+    },
+    "spike": {
+      "events": 6595,
+      "hours": 50401,
+      "base_rate": 0.1309
+    }
   },
   "frozen_holdout": {
     "window": "2026-07-01 to 2026-10-10",
@@ -148,5 +147,6 @@
     "spike_bss_vs_last7": -0.111,
     "source": "docs/experiments.md, holdout rows of 2026-10-11",
     "method": "monthly walk-forward, backtest settings, not these files"
-  }
+  },
+  "note": "Quantile forecasts with a conformal 10-90 interval and event probabilities (negative price, spike above the trailing-year 95th percentile); see docs/experiments.md. Without these files the forecast carries no band."
 }
