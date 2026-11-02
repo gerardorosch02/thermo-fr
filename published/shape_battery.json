@@ -235,37 +235,37 @@
     }
   },
   "live": {
-    "days": 15,
+    "days": 16,
     "shape": {
-      "hours": 360,
-      "days": 15,
+      "hours": 384,
+      "days": 16,
       "model": {
-        "shape_mae": 21.74,
-        "spread_error": 19.55,
-        "cheapest2_hit_rate": 0.667,
-        "dearest2_hit_rate": 0.7
+        "shape_mae": 21.05,
+        "spread_error": 18.82,
+        "cheapest2_hit_rate": 0.656,
+        "dearest2_hit_rate": 0.688
       },
       "d1": {
-        "shape_mae": 29.11,
-        "spread_error": 29.79,
-        "cheapest2_hit_rate": 0.433,
-        "dearest2_hit_rate": 0.667
+        "shape_mae": 27.78,
+        "spread_error": 28.38,
+        "cheapest2_hit_rate": 0.438,
+        "dearest2_hit_rate": 0.656
       }
     },
     "battery": {
-      "days": 15,
-      "perfect_eur_per_day": 255.62,
+      "days": 16,
+      "perfect_eur_per_day": 248.99,
       "model": {
-        "eur_per_day": 238.15,
-        "share_of_perfect": 0.932,
-        "days_traded": 15,
+        "eur_per_day": 230.67,
+        "share_of_perfect": 0.926,
+        "days_traded": 16,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 202.11,
-        "share_of_perfect": 0.791,
-        "days_traded": 15,
+        "eur_per_day": 198.22,
+        "share_of_perfect": 0.796,
+        "days_traded": 16,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -495,6 +495,21 @@
         "discharge_d1": 18,
         "shape_mae_model": 20.62833333333333,
         "shape_mae_d1": 13.241579861111099
+      },
+      {
+        "delivery_day": "2026-11-03",
+        "hours": 24,
+        "value_perfect": 149.52500000000003,
+        "value_model": 118.45410000000004,
+        "traded_model": true,
+        "charge_model": 3,
+        "discharge_model": 18,
+        "value_d1": 139.79659999999996,
+        "traded_d1": true,
+        "charge_d1": 12,
+        "discharge_d1": 18,
+        "shape_mae_model": 10.742204861111107,
+        "shape_mae_d1": 7.763385416666687
       }
     ]
   },
