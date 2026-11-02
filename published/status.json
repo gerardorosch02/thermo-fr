@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-11-01T18:25:56Z",
+  "written_at_utc": "2026-11-02T09:07:36Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -9,9 +9,9 @@
   "fallback_model_file": "model/honest.txt",
   "model_note": "Every forecast version in forecasts.csv and scores.csv carries the model that produced it in the model column: gbm:<file> for a stored model, with the suffix :fallback when the default model's inputs were missing and the fallback model was used, and gbm for a model fitted live.",
   "window_days": 90,
-  "from_day": "2026-08-03",
-  "tomorrow": "2026-11-02",
-  "forecast_versions": 44,
+  "from_day": "2026-08-04",
+  "tomorrow": "2026-11-03",
+  "forecast_versions": 45,
   "actual_days": 27,
   "scored_versions": 44,
   "live_record": {
@@ -58,18 +58,18 @@
   "model": {
     "feature_set": "honest_v2",
     "model_file": "honest_v2.txt",
-    "fitted_at_utc": "2026-10-10T09:27:37Z",
+    "fitted_at_utc": "2026-11-02T07:16:49Z",
     "train_from": "2021-01-01",
-    "train_to": "2026-10-10",
-    "train_hours": 50614,
+    "train_to": "2026-11-01",
+    "train_hours": 51120,
     "recent_check": {
-      "from": "2026-09-11",
-      "to": "2026-10-10",
-      "hours": 720,
+      "from": "2026-10-03",
+      "to": "2026-11-01",
+      "hours": 698,
       "excluded_from_stored_fit": false,
       "note": "a check on the last days before the fit, scored by a model fitted without them; the stored file was then fitted on all rows including these days, so this is not an out-of-sample result for the stored file and not the frozen holdout of docs/experiments.md",
-      "mae": 32.97,
-      "rmse": 44.13
+      "mae": 33.02,
+      "rmse": 43.0
     },
     "frozen_holdout": {
       "window": "2026-07-01 to 2026-10-10",
@@ -127,18 +127,18 @@
   "fallback_model": {
     "feature_set": "honest",
     "model_file": "honest.txt",
-    "fitted_at_utc": "2026-10-09T20:36:27Z",
+    "fitted_at_utc": "2026-11-02T07:17:02Z",
     "train_from": "2021-01-01",
-    "train_to": "2026-10-01",
-    "train_hours": 50376,
+    "train_to": "2026-11-01",
+    "train_hours": 51120,
     "recent_check": {
-      "from": "2026-09-02",
-      "to": "2026-10-01",
+      "from": "2026-10-03",
+      "to": "2026-11-01",
       "hours": 698,
       "excluded_from_stored_fit": false,
       "note": "a check on the last days before the fit, scored by a model fitted without them; the stored file was then fitted on all rows including these days, so this is not an out-of-sample result for the stored file and not the frozen holdout of docs/experiments.md",
-      "mae": 27.73,
-      "rmse": 36.45
+      "mae": 34.93,
+      "rmse": 45.62
     },
     "frozen_holdout": {
       "window": "2026-07-01 to 2026-10-10",
@@ -151,11 +151,11 @@
   },
   "last_run": {
     "run_id": 1,
-    "command": "settle",
+    "command": "morning-run",
     "kind": "scheduled",
-    "delivery_day": null,
-    "started_at_utc": "2026-11-01T18:25:35Z",
-    "finished_at_utc": "2026-11-01T18:25:55Z",
+    "delivery_day": "2026-11-03",
+    "started_at_utc": "2026-11-02T09:05:43Z",
+    "finished_at_utc": "2026-11-02T09:07:34Z",
     "status": "ok",
     "message": ""
   },
@@ -288,17 +288,17 @@
     "backtest_file": "probabilistic_backtest.json",
     "calibration": {
       "applied": true,
-      "fitted_at_utc": "2026-10-12T13:38:11Z",
-      "pairs_hours": 32351,
+      "fitted_at_utc": "2026-11-02T07:17:00Z",
+      "pairs_hours": 32687,
       "pairs_events": 1569,
-      "last_day": "2026-10-10",
+      "last_day": "2026-10-31",
       "method": "isotonic regression (increasing, clipped to [0, 1]) of the outcome on the raw probability, fitted on out-of-sample pairs only: walk-forward backtest predictions and settled live pre-market versions; refitted monthly with the models; applied to the raw probability at issue time",
       "pre_registration": "docs/experiments.md, 2026-10-12, branch prob-recalibration"
     },
     "model": {
-      "fitted_at_utc": "2026-10-10T11:44:34Z",
+      "fitted_at_utc": "2026-11-02T07:17:00Z",
       "train_from": "2021-01-01",
-      "train_to": "2026-10-10"
+      "train_to": "2026-11-01"
     },
     "public_components": [
       "negative"
