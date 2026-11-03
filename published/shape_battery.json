@@ -235,37 +235,37 @@
     }
   },
   "live": {
-    "days": 16,
+    "days": 17,
     "shape": {
-      "hours": 384,
-      "days": 16,
+      "hours": 408,
+      "days": 17,
       "model": {
-        "shape_mae": 21.05,
-        "spread_error": 18.82,
-        "cheapest2_hit_rate": 0.656,
-        "dearest2_hit_rate": 0.688
+        "shape_mae": 20.45,
+        "spread_error": 17.88,
+        "cheapest2_hit_rate": 0.676,
+        "dearest2_hit_rate": 0.706
       },
       "d1": {
-        "shape_mae": 27.78,
-        "spread_error": 28.38,
-        "cheapest2_hit_rate": 0.438,
-        "dearest2_hit_rate": 0.656
+        "shape_mae": 26.62,
+        "spread_error": 27.42,
+        "cheapest2_hit_rate": 0.441,
+        "dearest2_hit_rate": 0.676
       }
     },
     "battery": {
-      "days": 16,
-      "perfect_eur_per_day": 248.99,
+      "days": 17,
+      "perfect_eur_per_day": 241.75,
       "model": {
-        "eur_per_day": 230.67,
-        "share_of_perfect": 0.926,
-        "days_traded": 16,
+        "eur_per_day": 224.51,
+        "share_of_perfect": 0.929,
+        "days_traded": 17,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 198.22,
-        "share_of_perfect": 0.796,
-        "days_traded": 16,
+        "eur_per_day": 192.72,
+        "share_of_perfect": 0.797,
+        "days_traded": 17,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -510,6 +510,21 @@
         "discharge_d1": 18,
         "shape_mae_model": 10.742204861111107,
         "shape_mae_d1": 7.763385416666687
+      },
+      {
+        "delivery_day": "2026-11-04",
+        "hours": 24,
+        "value_perfect": 125.93270000000001,
+        "value_model": 125.93270000000001,
+        "traded_model": true,
+        "charge_model": 3,
+        "discharge_model": 17,
+        "value_d1": 104.78270000000003,
+        "traded_d1": true,
+        "charge_d1": 12,
+        "discharge_d1": 17,
+        "shape_mae_model": 10.783645833333338,
+        "shape_mae_d1": 8.201935763888873
       }
     ]
   },
