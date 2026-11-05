@@ -235,37 +235,37 @@
     }
   },
   "live": {
-    "days": 18,
+    "days": 19,
     "shape": {
-      "hours": 432,
-      "days": 18,
+      "hours": 456,
+      "days": 19,
       "model": {
-        "shape_mae": 20.22,
-        "spread_error": 16.91,
-        "cheapest2_hit_rate": 0.639,
-        "dearest2_hit_rate": 0.694
+        "shape_mae": 19.68,
+        "spread_error": 16.98,
+        "cheapest2_hit_rate": 0.605,
+        "dearest2_hit_rate": 0.684
       },
       "d1": {
-        "shape_mae": 26.29,
-        "spread_error": 25.97,
-        "cheapest2_hit_rate": 0.417,
-        "dearest2_hit_rate": 0.694
+        "shape_mae": 25.45,
+        "spread_error": 24.62,
+        "cheapest2_hit_rate": 0.395,
+        "dearest2_hit_rate": 0.711
       }
     },
     "battery": {
-      "days": 18,
-      "perfect_eur_per_day": 239.84,
+      "days": 19,
+      "perfect_eur_per_day": 236.7,
       "model": {
-        "eur_per_day": 222.62,
-        "share_of_perfect": 0.928,
-        "days_traded": 18,
+        "eur_per_day": 218.88,
+        "share_of_perfect": 0.925,
+        "days_traded": 19,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 193.01,
-        "share_of_perfect": 0.805,
-        "days_traded": 18,
+        "eur_per_day": 191.08,
+        "share_of_perfect": 0.807,
+        "days_traded": 19,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -540,6 +540,21 @@
         "discharge_d1": 17,
         "shape_mae_model": 16.357170138888875,
         "shape_mae_d1": 20.689531249999987
+      },
+      {
+        "delivery_day": "2026-11-06",
+        "hours": 24,
+        "value_perfect": 180.12670000000003,
+        "value_model": 151.57009999999997,
+        "traded_model": true,
+        "charge_model": 12,
+        "discharge_model": 18,
+        "value_d1": 156.39669999999995,
+        "traded_d1": true,
+        "charge_d1": 0,
+        "discharge_d1": 17,
+        "shape_mae_model": 9.972291666666672,
+        "shape_mae_d1": 10.199670138888875
       }
     ]
   },
