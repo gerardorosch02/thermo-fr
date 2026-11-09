@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-11-09T09:33:40Z",
+  "written_at_utc": "2026-11-09T16:03:46Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -12,12 +12,12 @@
   "from_day": "2026-08-11",
   "tomorrow": "2026-11-10",
   "forecast_versions": 56,
-  "actual_days": 34,
-  "scored_versions": 54,
+  "actual_days": 35,
+  "scored_versions": 56,
   "live_record": {
     "default": {
       "feature_set": "honest_v2",
-      "days": 19,
+      "days": 20,
       "late_only_days": [
         {
           "delivery_day": "2026-10-13",
@@ -27,10 +27,10 @@
       ],
       "window_days": 30,
       "first_premarket_day": "2026-10-14",
-      "last_premarket_day": "2026-11-07",
-      "days_in_window": 19,
-      "model_mae": 25.74,
-      "model_rmse": 31.37,
+      "last_premarket_day": "2026-11-10",
+      "days_in_window": 20,
+      "model_mae": 26.0,
+      "model_rmse": 31.88,
       "scored_against": "the auction result; the EEX traded price is the only benchmark (Versus the market)",
       "status": "ok"
     },
@@ -151,11 +151,11 @@
   },
   "last_run": {
     "run_id": 1,
-    "command": "morning-run",
+    "command": "settle",
     "kind": "scheduled",
-    "delivery_day": "2026-11-10",
-    "started_at_utc": "2026-11-09T09:30:37Z",
-    "finished_at_utc": "2026-11-09T09:33:39Z",
+    "delivery_day": null,
+    "started_at_utc": "2026-11-09T16:03:04Z",
+    "finished_at_utc": "2026-11-09T16:03:44Z",
     "status": "ok",
     "message": ""
   },
@@ -167,7 +167,7 @@
     "benchmark": "the only benchmark of the level forecast: the window VWAP of the traded future, scored at the auction result",
     "counts": "windows (one per delivery day and product, base or peak) of settled delivery days whose published pre-market version of the default set (the version shown on the public site, read from published/forecasts.csv on main) was issued before the market window (11:15 Paris on the trade date), scored against the auction result; days whose published versions were all issued later, days with only a local version on the collecting machine, and days without a traded price are not counted; the backfilled walk-forward record in the README (42 windows) is a separate, out-of-sample reissue, not part of this count",
     "versions": "published pre-market versions (the public site's)",
-    "computed_at_utc": "2026-11-08T13:30:05Z",
+    "computed_at_utc": "2026-11-09T16:02:17Z",
     "hit_rate": 0.458,
     "mean_pnl_per_mwh": -1.29,
     "model_mae": 18.27,
@@ -178,37 +178,37 @@
     "carried_note": "this machine holds no traded prices; the aggregates are the last ones computed on the laptop"
   },
   "shape_battery": {
-    "days": 20,
+    "days": 21,
     "shape": {
-      "hours": 480,
-      "days": 20,
+      "hours": 504,
+      "days": 21,
       "model": {
-        "shape_mae": 19.35,
-        "spread_error": 16.69,
-        "cheapest2_hit_rate": 0.6,
-        "dearest2_hit_rate": 0.675
+        "shape_mae": 19.87,
+        "spread_error": 16.42,
+        "cheapest2_hit_rate": 0.595,
+        "dearest2_hit_rate": 0.667
       },
       "d1": {
-        "shape_mae": 25.12,
-        "spread_error": 24.32,
-        "cheapest2_hit_rate": 0.375,
-        "dearest2_hit_rate": 0.725
+        "shape_mae": 25.49,
+        "spread_error": 24.04,
+        "cheapest2_hit_rate": 0.405,
+        "dearest2_hit_rate": 0.714
       }
     },
     "battery": {
-      "days": 20,
-      "perfect_eur_per_day": 230.6,
+      "days": 21,
+      "perfect_eur_per_day": 232.44,
       "model": {
-        "eur_per_day": 213.63,
-        "share_of_perfect": 0.926,
-        "days_traded": 20,
+        "eur_per_day": 213.26,
+        "share_of_perfect": 0.917,
+        "days_traded": 21,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 186.79,
-        "share_of_perfect": 0.81,
-        "days_traded": 20,
+        "eur_per_day": 190.5,
+        "share_of_perfect": 0.82,
+        "days_traded": 21,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -216,19 +216,19 @@
   },
   "probabilistic": {
     "live": {
-      "days": 20,
-      "hours": 480,
+      "days": 21,
+      "hours": 504,
       "negative": {
         "events": 0,
-        "hours": 480,
-        "brier": 0.00052,
+        "hours": 504,
+        "brier": 0.0005,
         "brier_base_rate": 0.0,
-        "log_loss": 0.0081,
+        "log_loss": 0.0077,
         "reliability": [
           {
             "bin": "0.0-0.1",
-            "n": 473,
-            "mean_forecast": 0.0055,
+            "n": 497,
+            "mean_forecast": 0.0053,
             "observed_frequency": 0.0
           },
           {
@@ -287,7 +287,7 @@
           }
         ]
       },
-      "negative_calibrated_hours": 480
+      "negative_calibrated_hours": 504
     },
     "backtest_file": "probabilistic_backtest.json",
     "calibration": {
