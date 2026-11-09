@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-11-09T09:20:48Z",
+  "written_at_utc": "2026-11-09T09:33:40Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -11,7 +11,7 @@
   "window_days": 90,
   "from_day": "2026-08-11",
   "tomorrow": "2026-11-10",
-  "forecast_versions": 55,
+  "forecast_versions": 56,
   "actual_days": 34,
   "scored_versions": 54,
   "live_record": {
@@ -154,8 +154,8 @@
     "command": "morning-run",
     "kind": "scheduled",
     "delivery_day": "2026-11-10",
-    "started_at_utc": "2026-11-09T09:19:02Z",
-    "finished_at_utc": "2026-11-09T09:20:46Z",
+    "started_at_utc": "2026-11-09T09:30:37Z",
+    "finished_at_utc": "2026-11-09T09:33:39Z",
     "status": "ok",
     "message": ""
   },
