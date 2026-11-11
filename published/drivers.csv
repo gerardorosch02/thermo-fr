@@ -1719,3 +1719,30 @@ delivery_day,issued_at_utc,feature_set,feature,group,value,contribution
 2026-11-11,2026-11-10T09:31:55Z,honest_v2,spread_ch_lag1,neighbour prices,-17.97593750000001,-0.05029276396578969
 2026-11-11,2026-11-10T09:31:55Z,honest_v2,residual_v2_mw,load and temperature,1520.424063175087,0.44803274482484
 2026-11-11,2026-11-10T09:31:55Z,honest_v2,expected_value,model average,,115.88257192156242
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,hour,calendar,11.5,0.23857519892924683
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,dow,calendar,3.0,0.3211223657364818
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,month,calendar,11.0,-0.2786181260650218
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,holiday,calendar,0.0,0.011543432991786654
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,day_of_year,calendar,316.0,0.34194827141261275
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,load_fc_mw,load and temperature,52498.8125,2.5532911441079933
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,temp_c,load and temperature,10.716703377386196,-1.8955055588304877
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,wind100_ms,wind,7.2462384259259265,-10.073205804947003
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,radiation_wm2,solar,29.17864583333333,2.141339875101479
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,price_lag1,recent French prices (model following the market),252.2440625,50.72682773971209
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,price_lag2,recent French prices (model following the market),304.4638541666667,15.06011824129024
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,price_lag7,recent French prices (model following the market),261.3982291666666,12.688086055449991
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,price_lag1_mean,recent French prices (model following the market),252.2440625,13.125600873589486
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,price_lag1_min,recent French prices (model following the market),183.26500000000001,-3.553409621150782
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,price_lag1_max,recent French prices (model following the market),324.28999999999996,12.10155415715308
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,price_lag7_mean,recent French prices (model following the market),261.3982291666667,0.3827804959356718
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,wind_proxy_mw,wind,9744.208395939628,-10.901386631669348
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,solar_proxy_mw,solar,486.4875229166667,1.5514411455156722
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,day_type,calendar,0.0,2.37237003578343
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,bridge_day,calendar,0.0,0.004237364493813959
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,pre_holiday,calendar,0.0,-0.005540359400459036
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,post_holiday,calendar,1.0,0.13054609097100597
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,year_end_break,calendar,0.0,0.4843510310462456
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,same_type_lag_days,calendar,2.0,0.18585370186325498
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,price_lag_same_type,recent French prices (model following the market),304.4638541666667,45.76815479796671
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,price_lag_same_type_mean,recent French prices (model following the market),304.46385416666664,-0.13624280489101123
+2026-11-12,2026-11-11T09:07:38Z,honest_v2,expected_value,model average,,115.8966124117586
