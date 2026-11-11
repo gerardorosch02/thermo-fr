@@ -235,37 +235,37 @@
     }
   },
   "live": {
-    "days": 22,
+    "days": 23,
     "shape": {
-      "hours": 528,
-      "days": 22,
+      "hours": 552,
+      "days": 23,
       "model": {
-        "shape_mae": 19.72,
-        "spread_error": 16.4,
-        "cheapest2_hit_rate": 0.591,
-        "dearest2_hit_rate": 0.659
+        "shape_mae": 19.82,
+        "spread_error": 16.77,
+        "cheapest2_hit_rate": 0.609,
+        "dearest2_hit_rate": 0.63
       },
       "d1": {
-        "shape_mae": 25.49,
-        "spread_error": 24.76,
-        "cheapest2_hit_rate": 0.432,
-        "dearest2_hit_rate": 0.705
+        "shape_mae": 26.01,
+        "spread_error": 25.48,
+        "cheapest2_hit_rate": 0.435,
+        "dearest2_hit_rate": 0.674
       }
     },
     "battery": {
-      "days": 22,
-      "perfect_eur_per_day": 230.95,
+      "days": 23,
+      "perfect_eur_per_day": 226.16,
       "model": {
-        "eur_per_day": 212.58,
-        "share_of_perfect": 0.92,
-        "days_traded": 22,
+        "eur_per_day": 206.61,
+        "share_of_perfect": 0.914,
+        "days_traded": 23,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 190.85,
-        "share_of_perfect": 0.826,
-        "days_traded": 22,
+        "eur_per_day": 186.13,
+        "share_of_perfect": 0.823,
+        "days_traded": 23,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -600,6 +600,21 @@
         "discharge_d1": 18,
         "shape_mae_model": 16.651484375000003,
         "shape_mae_d1": 25.37873263888888
+      },
+      {
+        "delivery_day": "2026-11-12",
+        "hours": 24,
+        "value_perfect": 120.77490000000006,
+        "value_model": 75.2679,
+        "traded_model": true,
+        "charge_model": 3,
+        "discharge_model": 18,
+        "value_d1": 82.47070000000002,
+        "traded_d1": true,
+        "charge_d1": 3,
+        "discharge_d1": 17,
+        "shape_mae_model": 21.921562500000007,
+        "shape_mae_d1": 37.50604166666667
       }
     ]
   },
