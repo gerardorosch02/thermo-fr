@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-11-12T09:32:43Z",
+  "written_at_utc": "2026-11-12T13:21:21Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -12,12 +12,12 @@
   "from_day": "2026-08-14",
   "tomorrow": "2026-11-13",
   "forecast_versions": 62,
-  "actual_days": 37,
-  "scored_versions": 60,
+  "actual_days": 38,
+  "scored_versions": 62,
   "live_record": {
     "default": {
       "feature_set": "honest_v2",
-      "days": 22,
+      "days": 23,
       "late_only_days": [
         {
           "delivery_day": "2026-10-13",
@@ -27,10 +27,10 @@
       ],
       "window_days": 30,
       "first_premarket_day": "2026-10-14",
-      "last_premarket_day": "2026-11-12",
-      "days_in_window": 22,
-      "model_mae": 26.57,
-      "model_rmse": 32.54,
+      "last_premarket_day": "2026-11-13",
+      "days_in_window": 23,
+      "model_mae": 26.32,
+      "model_rmse": 32.23,
       "scored_against": "the auction result; the EEX traded price is the only benchmark (Versus the market)",
       "status": "ok"
     },
@@ -151,13 +151,13 @@
   },
   "last_run": {
     "run_id": 1,
-    "command": "morning-run",
+    "command": "settle",
     "kind": "scheduled",
-    "delivery_day": "2026-11-13",
-    "started_at_utc": "2026-11-12T09:30:46Z",
-    "finished_at_utc": "2026-11-12T09:32:41Z",
-    "status": "partial",
-    "message": "model: honest_v2.txt needs price_es_lag1, spread_es_lag1, missing for 2026-11-13; predi"
+    "delivery_day": null,
+    "started_at_utc": "2026-11-12T13:20:50Z",
+    "finished_at_utc": "2026-11-12T13:21:19Z",
+    "status": "ok",
+    "message": ""
   },
   "market": {
     "source": "EEX French Day-Ahead Base and Peak futures traded before the auction, collected locally; traded prices are not republished.",
@@ -178,37 +178,37 @@
     "carried_note": "this machine holds no traded prices; the aggregates are the last ones computed on the laptop"
   },
   "shape_battery": {
-    "days": 23,
+    "days": 24,
     "shape": {
-      "hours": 552,
-      "days": 23,
+      "hours": 576,
+      "days": 24,
       "model": {
-        "shape_mae": 19.82,
-        "spread_error": 16.77,
-        "cheapest2_hit_rate": 0.609,
-        "dearest2_hit_rate": 0.63
+        "shape_mae": 19.87,
+        "spread_error": 17.08,
+        "cheapest2_hit_rate": 0.625,
+        "dearest2_hit_rate": 0.625
       },
       "d1": {
-        "shape_mae": 26.01,
-        "spread_error": 25.48,
-        "cheapest2_hit_rate": 0.435,
-        "dearest2_hit_rate": 0.674
+        "shape_mae": 26.39,
+        "spread_error": 24.71,
+        "cheapest2_hit_rate": 0.438,
+        "dearest2_hit_rate": 0.646
       }
     },
     "battery": {
-      "days": 23,
-      "perfect_eur_per_day": 226.16,
+      "days": 24,
+      "perfect_eur_per_day": 226.34,
       "model": {
-        "eur_per_day": 206.61,
-        "share_of_perfect": 0.914,
-        "days_traded": 23,
+        "eur_per_day": 206.31,
+        "share_of_perfect": 0.911,
+        "days_traded": 24,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 186.13,
-        "share_of_perfect": 0.823,
-        "days_traded": 23,
+        "eur_per_day": 183.76,
+        "share_of_perfect": 0.812,
+        "days_traded": 24,
         "days_skipped": 0,
         "losing_days": 0
       }
