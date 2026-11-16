@@ -37,7 +37,7 @@ import pandas as pd
 from .daytypes import day_table
 from .features import FEATURE_TIMINGS, LEAR_BLOCK_TIMINGS, LEAR_COLUMNS, build_features
 from .timing import check_point_in_time
-from .transforms import MAD_SCALE, asinh_forward, asinh_inverse, robust_scale  # noqa: F401
+from .transforms import MAD_SCALE, asinh_forward, asinh_inverse, asinh_slope_forward, asinh_slope_inverse, robust_scale  # noqa: F401
 
 LEAR_WINDOWS = (364, 728, 1092, 1456)  # calibration windows in days, averaged
 LEAR_START = pd.Timestamp("2021-01-01")  # windows are truncated here
@@ -47,6 +47,12 @@ HOURS = list(range(24))
 BLOCK_TIMINGS = LEAR_BLOCK_TIMINGS  # block name -> timing rule (registered column by column in features.FEATURE_TIMINGS)
 PRICE_BLOCKS = ("price_d1", "price_d2", "price_d3", "price_d7")
 VECTOR_BLOCKS = PRICE_BLOCKS + ("load_d0", "load_d1", "load_d7", "temp_d0", "wind_d0", "rad_d0", "ch_d1", "de_lu_d1")
+
+# Options of the published-recipe experiment (docs/prereg/lear_recipe_prereg.md). The defaults of every function below leave
+# the model exactly as it was: no short windows, slope 1 (the plain asinh), no shared Gram matrix.
+SLOPE_BLOCKS = PRICE_BLOCKS + ("ch_d1", "de_lu_d1")  # the price blocks the asinh slope applies to, with the target
+SHORT_RULE = "target_variance"  # the only short-window penalty rule: AIC with the noise variance set to the target's variance
+MIN_SHORT_ROWS = 14  # a short window with fewer complete training days than this is not fitted
 
 
 def day_hour_table(values: pd.Series, days: pd.DatetimeIndex, hours: np.ndarray) -> pd.DataFrame:
@@ -146,39 +152,87 @@ def fit_scalers(X: pd.DataFrame, Y: pd.DataFrame, blocks: dict) -> dict:
     return scalers
 
 
-def transform(X: pd.DataFrame, blocks: dict, scalers: dict) -> np.ndarray:
+def transform(X: pd.DataFrame, blocks: dict, scalers: dict, slope: float = 1.0) -> np.ndarray:
+    """Scaled and asinh-transformed regressors. `slope` (candidate C) applies to the price blocks of SLOPE_BLOCKS only; the other
+    blocks always take the plain asinh, and slope 1 is the plain asinh for every block."""
     out = X.copy()
     for name, cols in blocks.items():
         if name == "calendar":
             continue
         m, s = scalers[name]
-        out[cols] = asinh_forward(out[cols].to_numpy(), m, s)
+        if slope != 1.0 and name in SLOPE_BLOCKS:
+            out[cols] = asinh_slope_forward(out[cols].to_numpy(), m, s, slope)
+        else:
+            out[cols] = asinh_forward(out[cols].to_numpy(), m, s)
     return out.to_numpy(dtype=float)
 
 
-def fit_hour(Xt: np.ndarray, yt: np.ndarray, max_iter: int = 2500):
-    """LassoLarsIC (AIC) picks the penalty on the training rows; a Lasso with that penalty is the model."""
+def fit_hour(Xt: np.ndarray, yt: np.ndarray, max_iter: int = 2500, noise_variance: float | None = None, gram: np.ndarray | None = None):
+    """LassoLarsIC (AIC) picks the penalty on the training rows; a Lasso with that penalty is the model.
+
+    noise_variance None: scikit-learn estimates it from a full least-squares fit (needs more rows than regressors). A value is
+    passed for short windows. gram: the Gram matrix of Xt, which must then already be centred column by column; it is handed to
+    both estimators instead of being recomputed for every hour.
+    """
     from sklearn.exceptions import ConvergenceWarning
     from sklearn.linear_model import Lasso, LassoLarsIC
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
-        alpha = LassoLarsIC(criterion="aic", max_iter=max_iter).fit(Xt, yt).alpha_
-        model = Lasso(alpha=max(alpha, 1e-12), max_iter=max_iter, precompute=True).fit(Xt, yt)  # Gram precomputed: same solution, faster
+        if gram is None:
+            alpha = LassoLarsIC(criterion="aic", max_iter=max_iter, noise_variance=noise_variance).fit(Xt, yt).alpha_
+            model = Lasso(alpha=max(alpha, 1e-12), max_iter=max_iter, precompute=True).fit(Xt, yt)  # Gram precomputed: same solution, faster
+        else:
+            alpha = LassoLarsIC(criterion="aic", max_iter=max_iter, noise_variance=noise_variance, precompute=gram).fit(Xt, yt).alpha_
+            model = Lasso(alpha=max(alpha, 1e-12), max_iter=max_iter, precompute=gram).fit(Xt, yt)
     return model
 
 
-def fit_window(X: pd.DataFrame, Y: pd.DataFrame, blocks: dict, max_iter: int = 2500):
-    """Scalers and 24 hourly models from the given training days (rows with any missing value are dropped)."""
+def short_noise_variance(yt: np.ndarray) -> float:
+    """The noise variance of the short-window rule: the variance of the transformed target over the training rows (what
+    scikit-learn's LassoLarsIC used before version 1.1, including its guard against a zero variance)."""
+    return float(np.var(yt) + np.finfo("float64").eps)
+
+
+def fit_window(X: pd.DataFrame, Y: pd.DataFrame, blocks: dict, max_iter: int = 2500, short_rule: str | None = None, slope: float = 1.0,
+               share_gram: bool = False):
+    """Scalers and 24 hourly models from the given training days (rows with any missing value are dropped).
+
+    A window with rows <= regressors + 1 is not fitted (None) unless short_rule is "target_variance": then the AIC takes the
+    variance of each hour's transformed target as the noise variance. Windows with more rows keep the original rule whatever
+    short_rule says. slope: the asinh slope of candidate C for the target and the price blocks. share_gram: one centred Gram
+    matrix for the 24 hourly fits of a long window (short windows are always fitted hour by hour as before). The shared Gram
+    matrix failed its acceptance check on the real inputs (lear_recipe.gram_check: the forecasts moved by several EUR/MWh on
+    some days, because the LARS path amplifies rounding-level differences), so nothing uses it; it stays for that check only.
+    """
     ok = X.notna().all(axis=1) & Y.notna().all(axis=1)
     X, Y = X[ok], Y[ok]
-    if len(X) <= X.shape[1] + 1:
-        return None
+    short = len(X) <= X.shape[1] + 1
+    if short:
+        if short_rule is None:
+            return None
+        if short_rule != SHORT_RULE:
+            raise ValueError(f"unknown short_rule {short_rule!r}")
+        if len(X) < MIN_SHORT_ROWS:
+            return None
     scalers = fit_scalers(X, Y, blocks)
-    Xt = transform(X, blocks, scalers)
+    Xt = transform(X, blocks, scalers, slope)
     m, s = scalers["target"]
-    models = [fit_hour(Xt, asinh_forward(Y[h].to_numpy(), m, s), max_iter) for h in HOURS]
-    return {"scalers": scalers, "models": models, "rows": int(len(X))}
+    fitted = {"scalers": scalers, "rows": int(len(X))}
+    if slope != 1.0:
+        fitted["slope"] = float(slope)
+    gram = None
+    if share_gram and not short:
+        offset = Xt.mean(axis=0)
+        Xt = Xt - offset
+        gram = Xt.T @ Xt
+        fitted["offset"] = offset
+    models = []
+    for h in HOURS:
+        yt = asinh_slope_forward(Y[h].to_numpy(), m, s, slope)
+        models.append(fit_hour(Xt, yt, max_iter, short_noise_variance(yt) if short else None, gram))
+    fitted["models"] = models
+    return fitted
 
 
 def predict_window(fitted, X: pd.DataFrame, blocks: dict) -> pd.DataFrame:
@@ -188,10 +242,13 @@ def predict_window(fitted, X: pd.DataFrame, blocks: dict) -> pd.DataFrame:
     ok = X.notna().all(axis=1)
     if not ok.any():
         return out
-    Xt = transform(X[ok], blocks, fitted["scalers"])
+    slope = fitted.get("slope", 1.0)
+    Xt = transform(X[ok], blocks, fitted["scalers"], slope)
+    if "offset" in fitted:
+        Xt = Xt - fitted["offset"]
     m, s = fitted["scalers"]["target"]
     for h, model in zip(HOURS, fitted["models"]):
-        out.loc[ok, h] = asinh_inverse(model.predict(Xt), m, s)
+        out.loc[ok, h] = asinh_slope_inverse(model.predict(Xt), m, s, slope)
     return out
 
 
@@ -203,18 +260,19 @@ def window_days(day: pd.Timestamp, length: int | None, start: pd.Timestamp = LEA
     return first, last
 
 
-def _fit_predict_window(design, price, blocks, anchor, w, start, group):
+def _fit_predict_window(design, price, blocks, anchor, w, start, group, fit_options: dict | None = None):
     first, last = window_days(anchor, w, start)
     train = (design.index >= first) & (design.index <= last)
-    return predict_window(fit_window(design[train], price[train], blocks), design.loc[group], blocks)
+    return predict_window(fit_window(design[train], price[train], blocks, **(fit_options or {})), design.loc[group], blocks)
 
 
 def lear_forecast_days(design: pd.DataFrame, price: pd.DataFrame, blocks: dict, days, windows=LEAR_WINDOWS, recalibrate: str = "daily",
-                       start: pd.Timestamp = LEAR_START, log=print, n_jobs: int = 1) -> pd.DataFrame:
+                       start: pd.Timestamp = LEAR_START, log=print, n_jobs: int = 1, fit_options: dict | None = None) -> pd.DataFrame:
     """Daily table (index day, MultiIndex columns (window, hour) plus ('mean', hour)) of LEAR forecasts for `days`.
 
     recalibrate="daily": every day refits on its own windows (ending D-1). "monthly": one fit per month on windows ending on
-    the day before the month starts, used for every day of the month.
+    the day before the month starts, used for every day of the month. fit_options: keyword arguments for fit_window
+    (short_rule, slope, share_gram); None is the model as it was.
     """
     days = pd.DatetimeIndex(days)
     frames = []
@@ -222,11 +280,12 @@ def lear_forecast_days(design: pd.DataFrame, price: pd.DataFrame, blocks: dict, 
     for group in groups:
         anchor = pd.Timestamp(group[0]) if recalibrate == "daily" else pd.Timestamp(group[0]).to_period("M").to_timestamp()
         if n_jobs == 1:
-            preds = [_fit_predict_window(design, price, blocks, anchor, w, start, group) for w in windows]
+            preds = [_fit_predict_window(design, price, blocks, anchor, w, start, group, fit_options) for w in windows]
         else:
             from joblib import Parallel, delayed
 
-            preds = Parallel(n_jobs=n_jobs)(delayed(_fit_predict_window)(design, price, blocks, anchor, w, start, group) for w in windows)
+            preds = Parallel(n_jobs=n_jobs)(delayed(_fit_predict_window)(design, price, blocks, anchor, w, start, group, fit_options)
+                                            for w in windows)
         per_window = dict(zip(windows, preds))
         stacked = pd.concat(per_window, axis=1)
         mean = pd.concat([per_window[w] for w in windows]).groupby(level=0).mean()
@@ -238,7 +297,7 @@ def lear_forecast_days(design: pd.DataFrame, price: pd.DataFrame, blocks: dict, 
 
 
 def lear_walk_forward(hourly: pd.DataFrame, test_start: str, test_end: str, windows=LEAR_WINDOWS, recalibrate: str = "daily",
-                      start: pd.Timestamp = LEAR_START, log=print, n_jobs: int = 1) -> pd.DataFrame:
+                      start: pd.Timestamp = LEAR_START, log=print, n_jobs: int = 1, fit_options: dict | None = None) -> pd.DataFrame:
     """LEAR forecasts on the hourly rows of the test window [test_start, test_end), with the honest_v2 info columns, the actual
     price and the strict flag, so they align row for row with the gradient boosting walk-forward."""
     hourly = hourly.sort_index()
@@ -248,7 +307,7 @@ def lear_walk_forward(hourly: pd.DataFrame, test_start: str, test_end: str, wind
     rows = (info["delivery_day"] >= pd.Timestamp(test_start)) & (info["delivery_day"] < pd.Timestamp(test_end))
     assert_gate(table.X.index[rows], blocks)
     days = pd.DatetimeIndex(sorted(info.loc[rows, "delivery_day"].unique()))
-    daily = lear_forecast_days(design, price, blocks, days, windows, recalibrate, start, log, n_jobs)
+    daily = lear_forecast_days(design, price, blocks, days, windows, recalibrate, start, log, n_jobs, fit_options)
     out = info[rows].copy()
     out["actual"] = table.y[rows]
     keys = list(zip(out["delivery_day"], out["hour"]))
