@@ -119,11 +119,16 @@ def assert_gate(index: pd.DatetimeIndex, candidate: str) -> None:
 # --- fitting ------------------------------------------------------------------------------------------------------------------
 
 def fit_predict_day(design: pd.DataFrame, price: pd.DataFrame, blocks: dict, extra: dict, day: pd.Timestamp, window: int,
-                    start: pd.Timestamp = lear.LEAR_START, max_iter: int = 2500) -> tuple[pd.Series, dict]:
+                    start: pd.Timestamp = lear.LEAR_START, max_iter: int = 2500, partial: tuple = (),
+                    min_partial_days: int = 28) -> tuple[pd.Series, dict]:
     """One window's forecast of `day`, refitted on the days ending D-1: L0's fit with, for the model of hour h, one more
     regressor per zone of `extra` (that zone's value for hour h). With an empty `extra` this is L0's own computation.
 
-    Returns (24 forecasts, {zone: number of hourly models that kept the zone's regressor})."""
+    A zone named in `partial` may lack values on some training days: those days stay in the fit and its scaled regressor is
+    zero there (the median of the days that have it). If fewer than `min_partial_days` training days have it, or `day` itself
+    lacks it, the zone is left out of this fit, which with no other zone is L0's own computation.
+
+    Returns (24 forecasts, {zone used: number of hourly models that kept the zone's regressor})."""
     day = pd.Timestamp(day)
     out = pd.Series(np.nan, index=lear.HOURS, dtype=float)
     zones = list(extra)
@@ -133,21 +138,29 @@ def fit_predict_day(design: pd.DataFrame, price: pd.DataFrame, blocks: dict, ext
     E = {z: extra[z][train] for z in zones}
     ok = X.notna().all(axis=1) & Y.notna().all(axis=1)
     for z in zones:
-        ok &= E[z].notna().all(axis=1)
+        if z not in partial:
+            ok &= E[z].notna().all(axis=1)
     X, Y = X[ok], Y[ok]
+    rows_extra = {z: extra[z].loc[[day]] for z in zones}
+    has = {z: E[z][ok].notna().all(axis=1).to_numpy() for z in zones}
+    zones = [z for z in zones if z not in partial or (rows_extra[z].notna().all(axis=1).iloc[0] and int(has[z].sum()) >= min_partial_days)]
     if len(X) <= X.shape[1] + len(zones) + 1:
         return out, {}
     row = design.loc[[day]]
-    rows_extra = {z: extra[z].loc[[day]] for z in zones}
-    if not (row.notna().all(axis=1).iloc[0] and all(t.notna().all(axis=1).iloc[0] for t in rows_extra.values())):
+    if not (row.notna().all(axis=1).iloc[0] and all(rows_extra[z].notna().all(axis=1).iloc[0] for z in zones)):
         return out, {}
     scalers = lear.fit_scalers(X, Y, blocks)
     Xt = lear.transform(X, blocks, scalers)
     Xp = lear.transform(row, blocks, scalers)
     m, s = scalers["target"]
-    zone_scale = {z: robust_scale(E[z][ok].to_numpy()) for z in zones}
-    Et = [asinh_forward(E[z][ok].to_numpy(), *zone_scale[z]) for z in zones]
-    Ep = [asinh_forward(rows_extra[z].to_numpy(), *zone_scale[z]) for z in zones]
+    Et, Ep = [], []
+    for z in zones:
+        values = E[z][ok].to_numpy()
+        scale = robust_scale(values[has[z]])
+        scaled = asinh_forward(values, *scale)
+        scaled[~has[z]] = 0.0  # only a partial zone has such days
+        Et.append(scaled)
+        Ep.append(asinh_forward(rows_extra[z].to_numpy(), *scale))
     kept = {z: 0 for z in zones}
     for h in lear.HOURS:
         yt = lear.asinh_slope_forward(Y[h].to_numpy(), m, s, 1.0)
