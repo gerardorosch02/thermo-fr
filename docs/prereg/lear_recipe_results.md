@@ -93,8 +93,8 @@ honest_v2 15.7040 (logged 15.7040), L0 15.3646 (logged 15.36), S1 14.3608 (logge
   in the 15.36 and 14.36 logged in October. Without the day (864 days, 20,735 hours): L0 15.3717, S1 14.3687, honest_v2
   15.7124; gains A -0.0087, B 0.2542, C 0.5222; top 5% differences +2.93, +2.05, +1.37; one-sided upper ends +0.435,
   +0.031, -0.185. Every verdict is unchanged. By the letter of the stop condition this is a stop-class finding; it is
-  recorded here with both sets of figures and the owner decides whether to treat it as a stop with a formal rerun on 864
-  days or as a logged correction. From now on the strict set for models that read day vectors starts on 2024-02-18 and the
+  recorded here with both sets of figures. The owner decided on 2026-11-17 to treat it as a logged correction, with no
+  formal rerun, because no verdict changes. From now on the strict set for models that read day vectors starts on 2024-02-18 and the
   scrambling test must include the first strict day and the clock-change days by name.
 
 ## Departures from the pre-registration
