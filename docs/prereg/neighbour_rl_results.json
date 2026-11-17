@@ -1,0 +1,545 @@
+{
+  "reproduction": {
+    "honest_v2": {
+      "mae": 15.712366685778132,
+      "expected": "15.7124",
+      "printed": "15.7124",
+      "reproduced": true
+    },
+    "L0": {
+      "mae": 15.371674986847308,
+      "expected": "15.3717",
+      "printed": "15.3717",
+      "reproduced": true
+    },
+    "S1": {
+      "mae": 14.368671470854746,
+      "expected": "14.3687",
+      "printed": "14.3687",
+      "reproduced": true
+    },
+    "strict_hours": 20735,
+    "strict_days": 864,
+    "first_day": "2024-02-18",
+    "last_day": "2026-06-30",
+    "ok": true
+  },
+  "fallbacks_to_L0_on_scored_hours": {
+    "H": 0,
+    "I": 0
+  },
+  "replaced_values": {
+    "H": {
+      "de_lu": 50,
+      "be": 0,
+      "nl": 0,
+      "es": 0,
+      "it_north": 0,
+      "ch": 0
+    },
+    "I": {
+      "de_lu": 56,
+      "be": 0,
+      "nl": 72,
+      "es": 528,
+      "it_north": 504,
+      "ch": 6
+    }
+  },
+  "rule": {
+    "baseline": "L0",
+    "baseline_mae": 15.371674986847308,
+    "baseline_slices": {
+      "weekends": 15.39,
+      "holidays": 19.4,
+      "windiest 10%": 17.56,
+      "sunniest 10%": 15.57,
+      "top 5% hours": 20.93,
+      "negative-price hours": 21.51
+    },
+    "one_sided_level": 0.975,
+    "candidates": {
+      "H": {
+        "mae": 15.36219362917036,
+        "gain": 0.009481357676948576,
+        "slices": {
+          "weekends": 15.4,
+          "holidays": 19.0,
+          "windiest 10%": 17.28,
+          "sunniest 10%": 15.43,
+          "top 5% hours": 21.05,
+          "negative-price hours": 21.4
+        },
+        "slice_differences": {
+          "weekends": 0.01,
+          "holidays": -0.4,
+          "windiest 10%": -0.28,
+          "sunniest 10%": -0.14,
+          "top 5% hours": 0.12
+        },
+        "slice_differences_unrounded": {
+          "weekends": 0.016458624099513486,
+          "holidays": -0.3998526819447825,
+          "windiest 10%": -0.2739151616443465,
+          "sunniest 10%": -0.13508622993849428,
+          "top 5% hours": 0.12458022601664709
+        },
+        "paired_vs_L0": {
+          "days": 864,
+          "mean": -0.00959688849890734,
+          "ci95": [
+            -0.10895331096424209,
+            0.08989095036446643
+          ],
+          "share_days_better": 0.47337962962962965,
+          "one_sided_level": 0.975,
+          "upper_one_sided": 0.08989095036446643
+        },
+        "conditions": {
+          "i_mae_at_least_0.25_below_L0": false,
+          "ii_no_slice_worse_by_more_than_1.0": true,
+          "iii_one_sided_97.5_upper_below_zero": false
+        },
+        "idealised": false,
+        "passes": false,
+        "verdict": "fails"
+      },
+      "I": {
+        "mae": 14.567069569771508,
+        "gain": 0.8046054170758001,
+        "slices": {
+          "weekends": 14.17,
+          "holidays": 18.5,
+          "windiest 10%": 15.95,
+          "sunniest 10%": 15.0,
+          "top 5% hours": 19.01,
+          "negative-price hours": 20.43
+        },
+        "slice_differences": {
+          "weekends": -1.22,
+          "holidays": -0.9,
+          "windiest 10%": -1.61,
+          "sunniest 10%": -0.57,
+          "top 5% hours": -1.92
+        },
+        "slice_differences_unrounded": {
+          "weekends": -1.2216579861139198,
+          "holidays": -0.8961527011240165,
+          "windiest 10%": -1.610995329055669,
+          "sunniest 10%": -0.5727710762646847,
+          "top 5% hours": -1.9151459726733933
+        },
+        "paired_vs_L0": {
+          "days": 864,
+          "mean": -0.8048081911576545,
+          "ci95": [
+            -1.057503287745352,
+            -0.5679941225833245
+          ],
+          "share_days_better": 0.5972222222222222,
+          "one_sided_level": 0.975,
+          "upper_one_sided": -0.5679941225833245
+        },
+        "conditions": {
+          "i_mae_at_least_0.25_below_L0": true,
+          "ii_no_slice_worse_by_more_than_1.0": true,
+          "iii_one_sided_97.5_upper_below_zero": true
+        },
+        "idealised": true,
+        "verdict": "ceiling met: build own wind and solar estimates for the neighbours, under a new pre-registration"
+      }
+    }
+  },
+  "extras": {
+    "L0": {
+      "mae": 15.371674986847308,
+      "mae_by_volatility_tercile": {
+        "tercile_1": 13.901357858054972,
+        "tercile_2": 16.183441682327228,
+        "tercile_3": 16.030320710339627
+      },
+      "volatility_tercile_days": {
+        "tercile_1": 288,
+        "tercile_2": 288,
+        "tercile_3": 288
+      },
+      "mae_before_2025_10_01": 15.038551624146942,
+      "mae_from_2025_10_01": 16.092781313645123,
+      "mae_negative_price_hours": 21.508240461281524,
+      "negative_price_hours": 1264,
+      "M1": {
+        "hours": 20735,
+        "mae": 15.371674986847308,
+        "mae_naive_day": 21.846426995418373,
+        "rmae_naive_day": 0.703624212328682,
+        "mae_naive_week": 31.40652103930552,
+        "rmae_naive_week": 0.4894421438022228,
+        "mae_naive_lago": 24.50208578490475,
+        "rmae_naive_lago": 0.627361895709201
+      },
+      "M1_before_2025_10_01": {
+        "hours": 14183,
+        "mae": 15.038551624146942,
+        "mae_naive_day": 20.954645702601706,
+        "rmae_naive_day": 0.7176714814261819,
+        "mae_naive_week": 29.51803074102799,
+        "rmae_naive_week": 0.5094700170240155,
+        "mae_naive_lago": 23.193298314884014,
+        "rmae_naive_lago": 0.6484007328313514
+      },
+      "M1_from_2025_10_01": {
+        "hours": 6552,
+        "mae": 16.092781313645123,
+        "mae_naive_day": 23.77685038919414,
+        "rmae_naive_day": 0.6768256118968055,
+        "mae_naive_week": 35.49450301434677,
+        "rmae_naive_week": 0.4533879881946923,
+        "mae_naive_lago": 27.335195169413918,
+        "rmae_naive_lago": 0.5887201907250974
+      },
+      "M2": {
+        "hourly": {
+          "n": 20735,
+          "slope": 0.889304802515145,
+          "intercept": -1.6373041130542336,
+          "correlation": 0.7614026226656061
+        },
+        "daily": {
+          "n": 864,
+          "slope": 0.915587046766341,
+          "intercept": -1.6902322197830515,
+          "correlation": 0.8060486292730493
+        }
+      },
+      "M4": {
+        "days": 864,
+        "days_with_rank_correlation": 864,
+        "spearman_mean": 0.8778427048598384,
+        "spearman_median": 0.9137949756784979,
+        "spread_capture": 0.9188563265678242
+      },
+      "per_window_mae": {
+        "364": 16.20191251360558,
+        "728": 15.756488349402371,
+        "1092": 15.757384048825397,
+        "1456": 15.828494013087242
+      },
+      "price_bands": {
+        "below 0": {
+          "hours": 1264,
+          "mae": 21.508240461281524
+        },
+        "0 to 20": {
+          "hours": 3955,
+          "mae": 18.671998311119005
+        },
+        "20 to 50": {
+          "hours": 4113,
+          "mae": 16.48483108302166
+        },
+        "50 to 80": {
+          "hours": 4152,
+          "mae": 11.309370933038432
+        },
+        "80 to 133": {
+          "hours": 6204,
+          "mae": 13.078996977346579
+        },
+        "above 133": {
+          "hours": 1047,
+          "mae": 20.818334272055
+        }
+      }
+    },
+    "H": {
+      "mae": 15.36219362917036,
+      "mae_by_volatility_tercile": {
+        "tercile_1": 14.003790298048912,
+        "tercile_2": 16.04964220013446,
+        "tercile_3": 16.033245474374763
+      },
+      "volatility_tercile_days": {
+        "tercile_1": 288,
+        "tercile_2": 288,
+        "tercile_3": 288
+      },
+      "mae_before_2025_10_01": 15.024436099508419,
+      "mae_from_2025_10_01": 16.09333145627588,
+      "mae_negative_price_hours": 21.402908243925268,
+      "negative_price_hours": 1264,
+      "M1": {
+        "hours": 20735,
+        "mae": 15.36219362917036,
+        "mae_naive_day": 21.846426995418373,
+        "rmae_naive_day": 0.7031902119459679,
+        "mae_naive_week": 31.40652103930552,
+        "rmae_naive_week": 0.48914025243179426,
+        "mae_naive_lago": 24.50208578490475,
+        "rmae_naive_lago": 0.626974934461894
+      },
+      "M1_before_2025_10_01": {
+        "hours": 14183,
+        "mae": 15.024436099508419,
+        "mae_naive_day": 20.954645702601706,
+        "rmae_naive_day": 0.716997858744183,
+        "mae_naive_week": 29.51803074102799,
+        "rmae_naive_week": 0.5089918169448041,
+        "mae_naive_lago": 23.193298314884014,
+        "rmae_naive_lago": 0.6477921292404829
+      },
+      "M1_from_2025_10_01": {
+        "hours": 6552,
+        "mae": 16.09333145627588,
+        "mae_naive_day": 23.77685038919414,
+        "rmae_naive_day": 0.6768487496388425,
+        "mae_naive_week": 35.49450301434677,
+        "rmae_naive_week": 0.4534034875702022,
+        "mae_naive_lago": 27.335195169413918,
+        "rmae_naive_lago": 0.5887403165236273
+      },
+      "M2": {
+        "hourly": {
+          "n": 20735,
+          "slope": 0.8862757903380346,
+          "intercept": -1.6661763380262997,
+          "correlation": 0.7633542265801857
+        },
+        "daily": {
+          "n": 864,
+          "slope": 0.9147465410505203,
+          "intercept": -1.724634910248088,
+          "correlation": 0.8089808931305852
+        }
+      },
+      "M4": {
+        "days": 864,
+        "days_with_rank_correlation": 864,
+        "spearman_mean": 0.8751781517856364,
+        "spearman_median": 0.9134782608695651,
+        "spread_capture": 0.9170082795697927
+      },
+      "per_window_mae": {
+        "364": 16.15469267894984,
+        "728": 15.757244917090764,
+        "1092": 15.767484839522188,
+        "1456": 15.835720284338885
+      },
+      "price_bands": {
+        "below 0": {
+          "hours": 1264,
+          "mae": 21.402908243925268
+        },
+        "0 to 20": {
+          "hours": 3955,
+          "mae": 18.74202801683089
+        },
+        "20 to 50": {
+          "hours": 4113,
+          "mae": 16.568078894943255
+        },
+        "50 to 80": {
+          "hours": 4152,
+          "mae": 11.283190573944662
+        },
+        "80 to 133": {
+          "hours": 6204,
+          "mae": 12.965769572637358
+        },
+        "above 133": {
+          "hours": 1047,
+          "mae": 20.940914887676904
+        }
+      }
+    },
+    "I": {
+      "mae": 14.567069569771508,
+      "mae_by_volatility_tercile": {
+        "tercile_1": 13.641316097593538,
+        "tercile_2": 15.014177015574548,
+        "tercile_3": 15.045784854723548
+      },
+      "volatility_tercile_days": {
+        "tercile_1": 288,
+        "tercile_2": 288,
+        "tercile_3": 288
+      },
+      "mae_before_2025_10_01": 14.174277862354096,
+      "mae_from_2025_10_01": 15.417338920550073,
+      "mae_negative_price_hours": 20.431969918710394,
+      "negative_price_hours": 1264,
+      "M1": {
+        "hours": 20735,
+        "mae": 14.567069569771508,
+        "mae_naive_day": 21.846426995418373,
+        "rmae_naive_day": 0.6667941431716276,
+        "mae_naive_week": 31.40652103930552,
+        "rmae_naive_week": 0.4638230879358048,
+        "mae_naive_lago": 24.50208578490475,
+        "rmae_naive_lago": 0.5945236539309642
+      },
+      "M1_before_2025_10_01": {
+        "hours": 14183,
+        "mae": 14.174277862354096,
+        "mae_naive_day": 20.954645702601706,
+        "rmae_naive_day": 0.676426510069518,
+        "mae_naive_week": 29.51803074102799,
+        "rmae_naive_week": 0.48019049735092406,
+        "mae_naive_lago": 23.193298314884014,
+        "rmae_naive_lago": 0.6111367891671504
+      },
+      "M1_from_2025_10_01": {
+        "hours": 6552,
+        "mae": 15.417338920550073,
+        "mae_naive_day": 23.77685038919414,
+        "rmae_naive_day": 0.64841804815144,
+        "mae_naive_week": 35.49450301434677,
+        "rmae_naive_week": 0.434358495294847,
+        "mae_naive_lago": 27.335195169413918,
+        "rmae_naive_lago": 0.5640105667802565
+      },
+      "M2": {
+        "hourly": {
+          "n": 20735,
+          "slope": 0.8998948579282448,
+          "intercept": -1.2842102409361216,
+          "correlation": 0.7882846738204601
+        },
+        "daily": {
+          "n": 864,
+          "slope": 0.9244842809958768,
+          "intercept": -1.3233916667693681,
+          "correlation": 0.8348551778521837
+        }
+      },
+      "M4": {
+        "days": 864,
+        "days_with_rank_correlation": 864,
+        "spearman_mean": 0.883131501458215,
+        "spearman_median": 0.9202000652410297,
+        "spread_capture": 0.9226502922117565
+      },
+      "per_window_mae": {
+        "364": 15.384480328135,
+        "728": 14.95610989614054,
+        "1092": 15.118596230076992,
+        "1456": 15.078727190023818
+      },
+      "price_bands": {
+        "below 0": {
+          "hours": 1264,
+          "mae": 20.431969918710394
+        },
+        "0 to 20": {
+          "hours": 3955,
+          "mae": 17.38509514024315
+        },
+        "20 to 50": {
+          "hours": 4113,
+          "mae": 15.789225391582429
+        },
+        "50 to 80": {
+          "hours": 4152,
+          "mae": 11.088696979365384
+        },
+        "80 to 133": {
+          "hours": 6204,
+          "mae": 12.357318482803581
+        },
+        "above 133": {
+          "hours": 1047,
+          "mae": 18.928336686803842
+        }
+      }
+    }
+  },
+  "S1": {
+    "S1_mae": 14.368671470854746,
+    "honest_v2_mae": 15.712366685778132,
+    "S1_H": {
+      "mae": 14.371990824753738,
+      "paired_vs_S1": {
+        "days": 864,
+        "mean": 0.0032271008969170316,
+        "ci95": [
+          -0.04889318585990647,
+          0.059339651727342825
+        ],
+        "share_days_better": 0.47800925925925924
+      },
+      "slices": {
+        "weekends": 14.14,
+        "holidays": 17.79,
+        "windiest 10%": 16.02,
+        "sunniest 10%": 14.45,
+        "top 5% hours": 20.16,
+        "negative-price hours": 17.02
+      }
+    },
+    "S1_I": {
+      "mae": 13.786023585388437,
+      "paired_vs_S1": {
+        "days": 864,
+        "mean": -0.5826948618327423,
+        "ci95": [
+          -0.7102792310650202,
+          -0.4627470347675115
+        ],
+        "share_days_better": 0.6354166666666666
+      },
+      "slices": {
+        "weekends": 13.27,
+        "holidays": 17.32,
+        "windiest 10%": 15.17,
+        "sunniest 10%": 14.22,
+        "top 5% hours": 19.16,
+        "negative-price hours": 16.05
+      }
+    },
+    "S1_slices": {
+      "weekends": 14.1,
+      "holidays": 18.04,
+      "windiest 10%": 16.19,
+      "sunniest 10%": 14.53,
+      "top 5% hours": 20.08,
+      "negative-price hours": 17.13
+    }
+  },
+  "kept_shares": {
+    "H": {
+      "sample_of_60_days": {
+        "de_lu": 0.7079861111111111,
+        "be": 0.575,
+        "nl": 0.6635416666666667,
+        "es": 0.6269097222222222,
+        "it_north": 0.6626736111111111,
+        "ch": 0.7289930555555556
+      },
+      "all_scored_days": {
+        "de_lu": 0.6921657986111112,
+        "be": 0.5814887152777778,
+        "nl": 0.6594328703703703,
+        "es": 0.6337770061728395,
+        "it_north": 0.6581066743827161,
+        "ch": 0.7258994020061729
+      }
+    },
+    "I": {
+      "sample_of_60_days": {
+        "de_lu": 0.9371527777777777,
+        "be": 0.9961805555555555,
+        "nl": 0.7190972222222223,
+        "es": 0.9213541666666667,
+        "it_north": 0.6072916666666667,
+        "ch": 0.7168402777777778
+      },
+      "all_scored_days": {
+        "de_lu": 0.9303867669753086,
+        "be": 0.9961781442901234,
+        "nl": 0.7112147955246914,
+        "es": 0.9236834490740741,
+        "it_north": 0.6096402391975309,
+        "ch": 0.7039086612654321
+      }
+    }
+  }
+}
