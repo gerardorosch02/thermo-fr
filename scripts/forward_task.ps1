@@ -44,7 +44,7 @@ if ($Install) {
     $action = New-ScheduledTaskAction -Execute $python -Argument $argument -WorkingDirectory $Production
     Register-ScheduledTask -TaskName $name -Action $action -Trigger $triggers -Settings $settings `
         -Description "Forward live log of Q: issues L0, P, Q, S1 and S1-Q beside the pre-market honest_v2 version. Writes only under data\forward." | Out-Null
-    Write-Host "Installed $name: weekdays 09:22 and 09:52."
+    Write-Host "Installed ${name}: weekdays 09:22 and 09:52."
 }
 
 if ($Show -or -not ($Install -or $Remove)) {
