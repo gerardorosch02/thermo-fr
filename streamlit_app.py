@@ -4,9 +4,9 @@ It reads only the files under published/, which a GitHub Actions workflow rewrit
 settlement run. No API is called and no key is needed. It depends on streamlit, pandas and plotly only
 (requirements.txt), not on the thermo_fr package.
 
-Three pages: Overview (the three findings, tomorrow's forecast, what changed since yesterday's forecast),
-Track record (market comparison, the model's own error, negative-price calibration, shape and battery) and
-Method. Several helpers mirror thermo_fr/forecast/brief.py, thermo_fr/forecast/publish.py (live_record) and
+Four pages: Overview (the three findings, tomorrow's forecast, what changed since yesterday's forecast),
+Track record (market comparison, the model's own error, negative-price calibration, shape and battery), Research (the candidate ensemble: backtest, live record,
+limits) and Method. Several helpers mirror thermo_fr/forecast/brief.py, thermo_fr/forecast/publish.py (live_record) and
 thermo_fr/dashboard/probability_text.py; tests keep the copies equal. All user-facing text is in the COPY
 section below.
 """
@@ -499,6 +499,7 @@ def load_published(version: float) -> dict:
         "prob_backtest": _json("probabilistic_backtest.json"),
         "market": _json("market.json"),
         "walkforward": _json("market_walkforward.json"),
+        "research": _json("research.json"),
     }
     # the dataset may carry more than one feature set (the current model's and the fallback's); the app shows the current one.
     out["scores_all"] = out["scores"]
@@ -1175,10 +1176,255 @@ def method() -> None:
         st.caption(f"Data updated {day_text(written.tz_localize(None))}, {written:%H:%M} Paris.")
 
 
+# ============================================================================ research page
+# The candidate ensemble: backtest, live record and the reason they differ. Every figure comes from published/research.json,
+# built by scripts/build_research.py from stored forecasts (aggregates only).
+R_TITLE = "Research"
+R_NO_DATA = "No research figures published yet."
+R_INTRO = ("The forecast on the Overview page comes from one model, a gradient-boosted tree. The candidate to replace it is an ensemble, "
+           "the equal average of that model and a LEAR (a lasso regression per hour, the benchmark of the literature). This page shows "
+           "the ensemble's backtest, its live record so far, and why the two differ.")
+R_BACKTEST_HEADER = "Backtest"
+R_BACKTEST = ("{days} delivery days from {first} to {last}, {hours:,} hours. Every forecast is built from data available at 10:05 Paris on the "
+              "day before delivery, within the limits listed below, and every model is refitted on earlier days only. The ensemble's hourly error is {s1:.2f} EUR/MWh "
+              "against {tree:.2f} for the tree model, {pct:.1f}% lower. The paired daily difference is {mean:.2f}, with a 95% interval "
+              "from {lo:.2f} to {hi:.2f} (moving blocks of seven days). The ensemble was better on {share:.0f}% of days and in "
+              "{months_better} of {months} months.")
+R_TILE_HELP = "Hourly mean absolute error in EUR/MWh."
+R_MONTHLY_TITLE = "Hourly error by month, EUR/MWh"
+R_DIFF_TITLE = "Ensemble minus tree model by month (below zero, the ensemble is better)"
+R_CUM_TITLE = "Error saved by the ensemble against the tree model, running total of daily differences (EUR/MWh)"
+R_HOUR_TITLE = "Hourly error by hour of day, EUR/MWh"
+R_SLICES_HEADER = "Error where forecasting is hardest, EUR/MWh"
+R_SLICES_CAPTION = ("Windy and sunny days and the top hours are picked on what happened, so they are stress views. Only weekends and "
+                    "holidays are known in advance.")
+R_Q = ("Next step, in the backtest only. Adding the forecast French residual load (load minus wind and solar) to the LEAR lowers the "
+       "ensemble's error from {s1:.2f} to {s1_q:.2f} on the {days} days from {first} (paired difference {mean:.2f}, 95% interval "
+       "{lo:.2f} to {hi:.2f}). A forward test of that step, with its rules fixed in advance, counts delivery days from {fwd_first} "
+       "to {fwd_last}.")
+R_LIVE_HEADER = "Live so far"
+R_LIVE = ("Since {first} the ensemble has been issued on weekday mornings beside the public forecast, unseen. {days} of the {expected} "
+          "Tuesday to Saturday delivery days up to {last} have a forecast on record; on the others the run did not happen. Over those "
+          "{days} days it is not ahead: {s1:.1f} EUR/MWh against {tree:.1f} for the tree model. The paired daily difference is "
+          "{mean:+.2f}, with a 95% interval from {lo:+.2f} to {hi:+.2f}.{verdict} The LEAR alone is at {lear:.1f}.")
+R_LIVE_UNDECIDED = " The interval includes zero and the days are few, so they settle nothing."
+R_LIVE_TITLE = "Daily error on the live days, EUR/MWh"
+R_REGIME_HEADER = "Why live differs from the backtest"
+R_REGIME = ("The market moved outside the backtest. In the backtest window the daily average price reached 150 EUR/MWh on {b150} of "
+            "{bdays} days and never 200. In the live weeks it was at 200 or more on {l200} of {ldays} days. In hours priced at 200 or more the "
+            "LEAR forecast {bias_lear:.0f} EUR/MWh too low on average and the tree model {bias_tree:.0f}.")
+R_REGIME_BACK = (" The same pattern shows on the backtest's {b150} highest days ({bias_lear:.0f} against {bias_tree:.0f}), too few to "
+                 "move its totals.")
+R_REGIME_CAUSE = ("The cause is not established yet. One candidate is the LEAR's price transform, which compresses levels far above its "
+                  "training range. Testing that is the next piece of work on the ensemble, and the public forecast stays with the tree "
+                  "model until the live record supports a change.")
+R_LIMITS_HEADER = "Known limits of the backtest"
+R_LIMITS = [
+    "The same {days} days have carried many model choices, so the backtest gain probably flatters the ensemble. The months from July "
+    "2026 were used once as a holdout and are not reused.",
+    "Archived load forecasts are slightly fresher than those available at 10:05. Replaying real revisions on {load_replay_days} days "
+    "raised the LEAR's error by {load_replay_lear:.2f} EUR/MWh and the tree model's by {load_replay_tree:.2f}.",
+    "The German price the models have read is EXAA's early auction and not the coupled auction. Refitting on the coupled price moved "
+    "the errors by {price_max_change:.2f} EUR/MWh at most, in either direction.",
+]
+R_REGIME_TITLE = "Share of days by daily average price, EUR/MWh"
+R_BAND_HEADER = "Risk band"
+R_BAND = ("An hourly interval around the ensemble, built from its own settled errors of the previous 182 days at the same clock hour. "
+          "On {days} backtest days the 80% band covered {c80:.1f}% of prices at a mean width of {w80:.1f} EUR/MWh, and the 95% band "
+          "{c95:.1f}% at {w95:.1f}. A challenger with fitted generalised Pareto tails covered {tc:.1f}% but scored worse once width "
+          "counts ({ts:.1f} against {bs:.1f} on the interval score), so the simple band stays.{holiday}")
+R_BAND_HOLIDAY = " On public holidays the 80% band covered {hol:.1f}%, its weakest known-in-advance case."
+R_BAND_RECENT = " In the first half of 2026, when prices moved most, it covered {recent:.1f}%, so the band is too narrow when the market shifts."
+R_METHOD_HEADER = "How a result is earned"
+R_METHOD = [
+    "Each test is written down with its pass rule before the first fit, and the file's hash goes in the experiment log. "
+    "{registrations} such files, {amendments} dated amendments and {log_rows} log entries so far.",
+    "A candidate passes only if it beats the model it is tested against by at least 0.25 EUR/MWh, no slice gets worse by more than 1.0, and the paired "
+    "interval excludes zero.",
+    "Before a result is read, the code must reproduce the stored forecasts, and a scramble of everything not known at issue time must "
+    "leave the forecast unchanged.",
+    "A reviewer that has not seen the build recomputes the figures. {reviews} reviews so far.",
+    "Results that fail stay on the record: the live figures above, the tail model for the risk band, gas and carbon prices as inputs.",
+]
+R_METHOD_LINK = ("Registrations, results and reviews: "
+                 "[docs/prereg](https://github.com/gerardorosch02/thermo-fr/tree/foundations/docs/prereg).")
+R_BUILT = "Research figures built {day}. Backtest errors use the tree model at the settings of the public file."
+R_SERIES = {"tree": ("Tree model (public)", BLUE), "lear": ("LEAR", ORANGE), "s1": ("Ensemble", AQUA)}
+
+
+def research_models(rows) -> dict:
+    """Model rows of research.json by key."""
+    return {row["key"]: row for row in rows or []}
+
+
+def month_text(month: str) -> str:
+    return f"{pd.Timestamp(month + '-01'):%b %Y}"
+
+
+def research_lines(rows: list, x: str, labels: list, keys=("tree", "lear", "s1")) -> go.Figure:
+    fig = go.Figure()
+    for key in keys:
+        name, colour = R_SERIES[key]
+        fig.add_trace(go.Scatter(x=labels, y=[row[key] for row in rows], name=name, mode="lines",
+                                 line=dict(color=colour, width=2.5 if key == "s1" else 1.5),
+                                 hovertemplate="%{y:.1f}"))
+    return fig
+
+
+def research_monthly_chart(backtest: dict) -> go.Figure:
+    rows = backtest["monthly"]
+    return style(research_lines(rows, "month", [month_text(r["month"]) for r in rows]), "EUR/MWh", height=300, title=R_MONTHLY_TITLE)
+
+
+def research_difference_chart(backtest: dict) -> go.Figure:
+    rows = backtest["monthly"]
+    diff = [round(r["s1"] - r["tree"], 2) for r in rows]
+    fig = go.Figure(go.Bar(x=[month_text(r["month"]) for r in rows], y=diff, marker_color=[AQUA if d < 0 else ORANGE for d in diff],
+                           hovertemplate="%{y:+.2f}<extra></extra>"))
+    fig.add_hline(y=0, line_color=GREY, line_width=1)
+    return style(fig, "EUR/MWh", height=240, title=R_DIFF_TITLE)
+
+
+def research_cumulative_chart(backtest: dict) -> go.Figure:
+    rows = backtest["cumulative"]
+    fig = go.Figure(go.Scatter(x=[pd.Timestamp(r["delivery_day"]) for r in rows], y=[r["saved"] for r in rows], mode="lines",
+                               line=dict(color=AQUA, width=2), fill="tozeroy", fillcolor="rgba(27,175,122,0.12)",
+                               hovertemplate="%{x|%d %b %Y}: %{y:.0f}<extra></extra>"))
+    return style(fig, "EUR/MWh, summed over days", height=260, title=R_CUM_TITLE)
+
+
+def research_hour_chart(backtest: dict) -> go.Figure:
+    rows = backtest["by_hour"]
+    return style(research_lines(rows, "hour", [r["hour"] for r in rows], keys=("tree", "lear", "s1")), "EUR/MWh", "Hour of delivery (Paris)",
+                 height=260, title=R_HOUR_TITLE)
+
+
+def research_live_chart(live: dict) -> go.Figure:
+    rows = live["daily"]
+    fig = go.Figure()
+    for key in ("tree", "s1"):
+        name, colour = R_SERIES[key]
+        fig.add_trace(go.Bar(x=[day_text(r["delivery_day"]) for r in rows], y=[r[key] for r in rows], name=name, marker_color=colour,
+                             hovertemplate="%{y:.1f}"))
+    fig.update_layout(barmode="group")
+    return style(fig, "EUR/MWh", "Delivery day", height=280, title=R_LIVE_TITLE)
+
+
+def research_regime_chart(regime: dict) -> go.Figure:
+    bins = regime["bins"]
+    labels = [b["label"] for b in bins]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=labels, y=[100 * b["backtest_share"] for b in bins], name=f"Backtest ({regime['backtest_days']} days)",
+                         marker_color=GREY, hovertemplate="%{y:.0f}%"))
+    fig.add_trace(go.Bar(x=labels, y=[100 * b["live_share"] for b in bins], name=f"Live ({regime['live_days']} days)", marker_color=BLUE,
+                         hovertemplate="%{y:.0f}%"))
+    fig.update_layout(barmode="group")
+    return style(fig, "% of days", height=260, title=R_REGIME_TITLE)
+
+
+def research_tiles(rows, keys=("tree", "s1", "lear")) -> None:
+    models = research_models(rows)
+    with tiles():
+        for key in keys:
+            if key in models:
+                row = models[key]
+                tile(row["label"], f"{row['mae']:.1f}", help=R_TILE_HELP)
+
+
+def research_backtest_text(backtest: dict) -> str:
+    models, pair = research_models(backtest["models"]), backtest["paired_s1_tree"]
+    tree, s1 = models["tree"]["mae"], models["s1"]["mae"]
+    return R_BACKTEST.format(days=backtest["days"], first=day_text(backtest["first_day"]), last=day_text(backtest["last_day"]),
+                             hours=backtest["hours"], s1=s1, tree=tree, pct=100 * (tree - s1) / tree, mean=pair["mean"], lo=pair["lo"],
+                             hi=pair["hi"], share=100 * pair["share_days_better"], months_better=backtest["months_s1_better"],
+                             months=backtest["months"])
+
+
+def research_live_text(live: dict) -> str:
+    models, pair = research_models(live["models"]), live["paired_s1_tree"]
+    verdict = R_LIVE_UNDECIDED if pair["lo"] < 0 < pair["hi"] else ""
+    return R_LIVE.format(first=day_text(live["first_day"]), last=day_text(live["last_day"]), expected=live["expected_days"], days=live["days"], s1=models["s1"]["mae"], tree=models["tree"]["mae"],
+                         mean=pair["mean"], lo=pair["lo"], hi=pair["hi"], verdict=verdict, lear=models["lear"]["mae"])
+
+
+def research_regime_text(regime: dict, live: dict) -> str:
+    high = live["above_200"]
+    text = R_REGIME.format(b150=regime["backtest_days_150_plus"], bdays=regime["backtest_days"], l200=regime["live_days_200_plus"],
+                           ldays=regime["live_days"], bias_lear=abs(high["bias_lear"]), bias_tree=abs(high["bias_tree"]))
+    back = regime.get("backtest_150_plus")
+    if back:
+        text += R_REGIME_BACK.format(b150=regime["backtest_days_150_plus"], bias_lear=abs(back["bias_lear"]), bias_tree=abs(back["bias_tree"]))
+    return text
+
+
+def research_band_text(band: dict) -> str:
+    rows = {row["level"]: row for row in band["rows"]}
+    holiday = R_BAND_HOLIDAY.format(hol=100 * band["holiday_coverage_80"]) if band.get("holiday_coverage_80") is not None else ""
+    return R_BAND.format(days=band["days"], c80=100 * rows[80]["coverage"], w80=rows[80]["width"], c95=100 * rows[95]["coverage"],
+                         w95=rows[95]["width"], tc=100 * band["challenger_coverage_80"], ts=band["challenger_score_80"],
+                         bs=rows[80]["score"], holiday=holiday) + (
+        R_BAND_RECENT.format(recent=100 * band["coverage_80_2026_h1"]) if band.get("coverage_80_2026_h1") is not None else "")
+
+
+def research() -> None:
+    data = data_or_stop()
+    r = data.get("research") or {}
+    st.title(R_TITLE)
+    backtest, live, regime = r.get("backtest"), r.get("live"), r.get("regime")
+    if not backtest:
+        st.info(R_NO_DATA)
+        return
+    st.markdown(R_INTRO)
+
+    st.subheader(R_BACKTEST_HEADER)
+    research_tiles(backtest["models"])
+    st.markdown(research_backtest_text(backtest))
+    show(research_monthly_chart(backtest))
+    show(research_difference_chart(backtest))
+    if backtest.get("cumulative"):
+        show(research_cumulative_chart(backtest))
+    st.markdown(f"**{R_SLICES_HEADER}**")
+    table = pd.DataFrame(backtest["slices"]).rename(columns={"slice": "", "hours": "Hours", "tree": "Tree model", "lear": "LEAR", "s1": "Ensemble"})
+    st.dataframe(table, hide_index=True, column_config={c: st.column_config.NumberColumn(format="%.1f") for c in ("Tree model", "LEAR", "Ensemble")})
+    st.caption(R_SLICES_CAPTION)
+    show(research_hour_chart(backtest))
+    q, forward = backtest.get("residual_load"), r.get("forward_test") or {}
+    if q and forward.get("first_day"):
+        st.markdown(R_Q.format(s1=q["s1"], s1_q=q["s1_q"], days=q["days"], first=day_text(q["first_day"]), mean=q["paired"]["mean"],
+                               lo=q["paired"]["lo"], hi=q["paired"]["hi"], fwd_first=day_text(forward["first_day"]),
+                               fwd_last=day_text(forward["last_day"])))
+
+    if live:
+        st.subheader(R_LIVE_HEADER)
+        research_tiles(live["models"])
+        st.markdown(research_live_text(live))
+        show(research_live_chart(live))
+    if live and regime:
+        st.subheader(R_REGIME_HEADER)
+        st.markdown(research_regime_text(regime, live))
+        show(research_regime_chart(regime))
+        st.markdown(R_REGIME_CAUSE)
+    if r.get("band"):
+        st.subheader(R_BAND_HEADER)
+        st.markdown(research_band_text(r["band"]))
+    if r.get("limits"):
+        st.subheader(R_LIMITS_HEADER)
+        for line in R_LIMITS:
+            st.markdown("- " + line.format(days=backtest["days"], **r["limits"]))
+    if r.get("ledger"):
+        st.subheader(R_METHOD_HEADER)
+        for line in R_METHOD:
+            st.markdown("- " + line.format(**r["ledger"]))
+        st.markdown(R_METHOD_LINK)
+    if r.get("built_at_utc"):
+        st.caption(R_BUILT.format(day=day_text(pd.Timestamp(r["built_at_utc"]).tz_localize(None))))
+
+
 def main() -> None:
     st.set_page_config(page_title=TITLE, page_icon=":material/bolt:", layout="centered")
     PAGES.update(overview=st.Page(overview, title="Overview", icon=":material/bolt:", default=True),
                  track=st.Page(track_record, title="Track record", icon=":material/insights:"),
+                 research=st.Page(research, title="Research", icon=":material/science:"),
                  method=st.Page(method, title="Method", icon=":material/menu_book:"))
     current = st.navigation(list(PAGES.values()), position="top")
     current.run()

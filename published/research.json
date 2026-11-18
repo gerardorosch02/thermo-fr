@@ -1,0 +1,4152 @@
+{
+ "built_at_utc": "2026-11-18T21:02:07Z",
+ "note": "Aggregates only. Backtest: strict rows of the selection window, the tree model at the settings of the public file. Live: the shadow run's forecasts issued before 11:15 Paris, scored against the auction.",
+ "backtest": {
+  "first_day": "2024-02-18",
+  "last_day": "2026-06-30",
+  "days": 864,
+  "hours": 20735,
+  "mean_price": 59.4,
+  "models": [
+   {
+    "key": "tree",
+    "label": "Tree model (public)",
+    "mae": 16.09
+   },
+   {
+    "key": "lear",
+    "label": "LEAR",
+    "mae": 15.37
+   },
+   {
+    "key": "s1",
+    "label": "Ensemble",
+    "mae": 14.57
+   }
+  ],
+  "paired_s1_tree": {
+   "days": 864,
+   "mean": -1.522,
+   "lo": -1.881,
+   "hi": -1.2,
+   "share_days_better": 0.684
+  },
+  "months": 29,
+  "months_s1_better": 26,
+  "monthly": [
+   {
+    "month": "2024-02",
+    "days": 12,
+    "tree": 9.2,
+    "lear": 9.82,
+    "s1": 7.97
+   },
+   {
+    "month": "2024-03",
+    "days": 31,
+    "tree": 13.69,
+    "lear": 11.15,
+    "s1": 10.92
+   },
+   {
+    "month": "2024-04",
+    "days": 30,
+    "tree": 25.97,
+    "lear": 20.26,
+    "s1": 20.38
+   },
+   {
+    "month": "2024-05",
+    "days": 31,
+    "tree": 15.56,
+    "lear": 15.03,
+    "s1": 13.87
+   },
+   {
+    "month": "2024-06",
+    "days": 30,
+    "tree": 16.58,
+    "lear": 17.94,
+    "s1": 16.08
+   },
+   {
+    "month": "2024-07",
+    "days": 31,
+    "tree": 14.34,
+    "lear": 15.24,
+    "s1": 13.22
+   },
+   {
+    "month": "2024-08",
+    "days": 31,
+    "tree": 15.47,
+    "lear": 16.18,
+    "s1": 15.17
+   },
+   {
+    "month": "2024-09",
+    "days": 30,
+    "tree": 13.48,
+    "lear": 14.9,
+    "s1": 13.04
+   },
+   {
+    "month": "2024-10",
+    "days": 31,
+    "tree": 15.98,
+    "lear": 15.59,
+    "s1": 14.75
+   },
+   {
+    "month": "2024-11",
+    "days": 30,
+    "tree": 13.06,
+    "lear": 11.18,
+    "s1": 10.78
+   },
+   {
+    "month": "2024-12",
+    "days": 31,
+    "tree": 21.0,
+    "lear": 15.78,
+    "s1": 16.82
+   },
+   {
+    "month": "2025-01",
+    "days": 31,
+    "tree": 21.81,
+    "lear": 19.52,
+    "s1": 18.87
+   },
+   {
+    "month": "2025-02",
+    "days": 28,
+    "tree": 11.47,
+    "lear": 9.41,
+    "s1": 9.46
+   },
+   {
+    "month": "2025-03",
+    "days": 31,
+    "tree": 13.34,
+    "lear": 12.85,
+    "s1": 12.15
+   },
+   {
+    "month": "2025-04",
+    "days": 30,
+    "tree": 17.08,
+    "lear": 17.48,
+    "s1": 16.17
+   },
+   {
+    "month": "2025-05",
+    "days": 31,
+    "tree": 11.75,
+    "lear": 14.36,
+    "s1": 12.23
+   },
+   {
+    "month": "2025-06",
+    "days": 30,
+    "tree": 15.9,
+    "lear": 18.05,
+    "s1": 16.41
+   },
+   {
+    "month": "2025-07",
+    "days": 31,
+    "tree": 15.96,
+    "lear": 12.99,
+    "s1": 13.69
+   },
+   {
+    "month": "2025-08",
+    "days": 31,
+    "tree": 15.43,
+    "lear": 13.4,
+    "s1": 13.48
+   },
+   {
+    "month": "2025-09",
+    "days": 30,
+    "tree": 14.82,
+    "lear": 16.24,
+    "s1": 14.43
+   },
+   {
+    "month": "2025-10",
+    "days": 31,
+    "tree": 13.44,
+    "lear": 13.88,
+    "s1": 12.42
+   },
+   {
+    "month": "2025-11",
+    "days": 30,
+    "tree": 12.18,
+    "lear": 12.58,
+    "s1": 11.2
+   },
+   {
+    "month": "2025-12",
+    "days": 31,
+    "tree": 14.28,
+    "lear": 11.62,
+    "s1": 11.29
+   },
+   {
+    "month": "2026-01",
+    "days": 31,
+    "tree": 15.94,
+    "lear": 12.02,
+    "s1": 13.28
+   },
+   {
+    "month": "2026-02",
+    "days": 28,
+    "tree": 16.34,
+    "lear": 16.11,
+    "s1": 15.26
+   },
+   {
+    "month": "2026-03",
+    "days": 31,
+    "tree": 24.01,
+    "lear": 21.22,
+    "s1": 21.78
+   },
+   {
+    "month": "2026-04",
+    "days": 30,
+    "tree": 19.4,
+    "lear": 20.03,
+    "s1": 18.7
+   },
+   {
+    "month": "2026-05",
+    "days": 31,
+    "tree": 17.89,
+    "lear": 20.04,
+    "s1": 18.26
+   },
+   {
+    "month": "2026-06",
+    "days": 30,
+    "tree": 16.78,
+    "lear": 17.41,
+    "s1": 16.19
+   }
+  ],
+  "by_hour": [
+   {
+    "hour": 0,
+    "tree": 16.59,
+    "lear": 11.03,
+    "s1": 12.54
+   },
+   {
+    "hour": 1,
+    "tree": 15.4,
+    "lear": 11.24,
+    "s1": 11.88
+   },
+   {
+    "hour": 2,
+    "tree": 14.54,
+    "lear": 11.32,
+    "s1": 11.57
+   },
+   {
+    "hour": 3,
+    "tree": 14.17,
+    "lear": 12.39,
+    "s1": 11.85
+   },
+   {
+    "hour": 4,
+    "tree": 14.36,
+    "lear": 13.19,
+    "s1": 12.38
+   },
+   {
+    "hour": 5,
+    "tree": 14.54,
+    "lear": 12.71,
+    "s1": 12.38
+   },
+   {
+    "hour": 6,
+    "tree": 15.77,
+    "lear": 13.81,
+    "s1": 13.64
+   },
+   {
+    "hour": 7,
+    "tree": 17.93,
+    "lear": 16.34,
+    "s1": 15.86
+   },
+   {
+    "hour": 8,
+    "tree": 18.45,
+    "lear": 16.62,
+    "s1": 16.29
+   },
+   {
+    "hour": 9,
+    "tree": 16.71,
+    "lear": 15.77,
+    "s1": 15.22
+   },
+   {
+    "hour": 10,
+    "tree": 15.63,
+    "lear": 15.79,
+    "s1": 14.63
+   },
+   {
+    "hour": 11,
+    "tree": 15.49,
+    "lear": 16.43,
+    "s1": 14.73
+   },
+   {
+    "hour": 12,
+    "tree": 15.65,
+    "lear": 16.44,
+    "s1": 14.87
+   },
+   {
+    "hour": 13,
+    "tree": 16.39,
+    "lear": 17.49,
+    "s1": 15.72
+   },
+   {
+    "hour": 14,
+    "tree": 16.63,
+    "lear": 18.56,
+    "s1": 16.15
+   },
+   {
+    "hour": 15,
+    "tree": 15.35,
+    "lear": 17.46,
+    "s1": 15.05
+   },
+   {
+    "hour": 16,
+    "tree": 14.52,
+    "lear": 16.65,
+    "s1": 14.17
+   },
+   {
+    "hour": 17,
+    "tree": 15.62,
+    "lear": 15.79,
+    "s1": 14.43
+   },
+   {
+    "hour": 18,
+    "tree": 17.81,
+    "lear": 16.78,
+    "s1": 16.28
+   },
+   {
+    "hour": 19,
+    "tree": 18.69,
+    "lear": 17.74,
+    "s1": 17.38
+   },
+   {
+    "hour": 20,
+    "tree": 17.73,
+    "lear": 17.42,
+    "s1": 16.67
+   },
+   {
+    "hour": 21,
+    "tree": 17.64,
+    "lear": 17.44,
+    "s1": 16.86
+   },
+   {
+    "hour": 22,
+    "tree": 15.74,
+    "lear": 15.48,
+    "s1": 14.84
+   },
+   {
+    "hour": 23,
+    "tree": 14.84,
+    "lear": 15.01,
+    "s1": 14.27
+   }
+  ],
+  "cumulative": [
+   {
+    "delivery_day": "2024-02-18",
+    "saved": 1.7
+   },
+   {
+    "delivery_day": "2024-02-19",
+    "saved": 3.1
+   },
+   {
+    "delivery_day": "2024-02-20",
+    "saved": 2.6
+   },
+   {
+    "delivery_day": "2024-02-21",
+    "saved": 4.8
+   },
+   {
+    "delivery_day": "2024-02-22",
+    "saved": 3.7
+   },
+   {
+    "delivery_day": "2024-02-23",
+    "saved": 8.0
+   },
+   {
+    "delivery_day": "2024-02-24",
+    "saved": 14.6
+   },
+   {
+    "delivery_day": "2024-02-25",
+    "saved": 9.9
+   },
+   {
+    "delivery_day": "2024-02-26",
+    "saved": 11.8
+   },
+   {
+    "delivery_day": "2024-02-27",
+    "saved": 14.2
+   },
+   {
+    "delivery_day": "2024-02-28",
+    "saved": 13.8
+   },
+   {
+    "delivery_day": "2024-02-29",
+    "saved": 14.8
+   },
+   {
+    "delivery_day": "2024-03-01",
+    "saved": 15.2
+   },
+   {
+    "delivery_day": "2024-03-02",
+    "saved": 16.4
+   },
+   {
+    "delivery_day": "2024-03-03",
+    "saved": 21.2
+   },
+   {
+    "delivery_day": "2024-03-04",
+    "saved": 19.7
+   },
+   {
+    "delivery_day": "2024-03-05",
+    "saved": 21.1
+   },
+   {
+    "delivery_day": "2024-03-06",
+    "saved": 22.6
+   },
+   {
+    "delivery_day": "2024-03-07",
+    "saved": 23.3
+   },
+   {
+    "delivery_day": "2024-03-08",
+    "saved": 24.4
+   },
+   {
+    "delivery_day": "2024-03-09",
+    "saved": 26.8
+   },
+   {
+    "delivery_day": "2024-03-10",
+    "saved": 29.3
+   },
+   {
+    "delivery_day": "2024-03-11",
+    "saved": 31.3
+   },
+   {
+    "delivery_day": "2024-03-12",
+    "saved": 32.8
+   },
+   {
+    "delivery_day": "2024-03-13",
+    "saved": 36.4
+   },
+   {
+    "delivery_day": "2024-03-14",
+    "saved": 38.5
+   },
+   {
+    "delivery_day": "2024-03-15",
+    "saved": 43.2
+   },
+   {
+    "delivery_day": "2024-03-16",
+    "saved": 41.4
+   },
+   {
+    "delivery_day": "2024-03-17",
+    "saved": 42.5
+   },
+   {
+    "delivery_day": "2024-03-18",
+    "saved": 44.0
+   },
+   {
+    "delivery_day": "2024-03-19",
+    "saved": 46.1
+   },
+   {
+    "delivery_day": "2024-03-20",
+    "saved": 50.1
+   },
+   {
+    "delivery_day": "2024-03-21",
+    "saved": 54.8
+   },
+   {
+    "delivery_day": "2024-03-22",
+    "saved": 61.7
+   },
+   {
+    "delivery_day": "2024-03-23",
+    "saved": 70.3
+   },
+   {
+    "delivery_day": "2024-03-24",
+    "saved": 76.4
+   },
+   {
+    "delivery_day": "2024-03-25",
+    "saved": 78.1
+   },
+   {
+    "delivery_day": "2024-03-26",
+    "saved": 91.0
+   },
+   {
+    "delivery_day": "2024-03-27",
+    "saved": 90.8
+   },
+   {
+    "delivery_day": "2024-03-28",
+    "saved": 91.9
+   },
+   {
+    "delivery_day": "2024-03-29",
+    "saved": 97.1
+   },
+   {
+    "delivery_day": "2024-03-30",
+    "saved": 100.6
+   },
+   {
+    "delivery_day": "2024-03-31",
+    "saved": 100.7
+   },
+   {
+    "delivery_day": "2024-04-01",
+    "saved": 100.5
+   },
+   {
+    "delivery_day": "2024-04-02",
+    "saved": 110.3
+   },
+   {
+    "delivery_day": "2024-04-03",
+    "saved": 115.1
+   },
+   {
+    "delivery_day": "2024-04-04",
+    "saved": 127.1
+   },
+   {
+    "delivery_day": "2024-04-05",
+    "saved": 137.5
+   },
+   {
+    "delivery_day": "2024-04-06",
+    "saved": 124.0
+   },
+   {
+    "delivery_day": "2024-04-07",
+    "saved": 120.3
+   },
+   {
+    "delivery_day": "2024-04-08",
+    "saved": 136.0
+   },
+   {
+    "delivery_day": "2024-04-09",
+    "saved": 155.3
+   },
+   {
+    "delivery_day": "2024-04-10",
+    "saved": 160.4
+   },
+   {
+    "delivery_day": "2024-04-11",
+    "saved": 170.4
+   },
+   {
+    "delivery_day": "2024-04-12",
+    "saved": 183.2
+   },
+   {
+    "delivery_day": "2024-04-13",
+    "saved": 199.8
+   },
+   {
+    "delivery_day": "2024-04-14",
+    "saved": 203.1
+   },
+   {
+    "delivery_day": "2024-04-15",
+    "saved": 206.8
+   },
+   {
+    "delivery_day": "2024-04-16",
+    "saved": 225.0
+   },
+   {
+    "delivery_day": "2024-04-17",
+    "saved": 225.6
+   },
+   {
+    "delivery_day": "2024-04-18",
+    "saved": 229.1
+   },
+   {
+    "delivery_day": "2024-04-19",
+    "saved": 237.4
+   },
+   {
+    "delivery_day": "2024-04-20",
+    "saved": 240.1
+   },
+   {
+    "delivery_day": "2024-04-21",
+    "saved": 240.8
+   },
+   {
+    "delivery_day": "2024-04-22",
+    "saved": 243.4
+   },
+   {
+    "delivery_day": "2024-04-23",
+    "saved": 244.6
+   },
+   {
+    "delivery_day": "2024-04-24",
+    "saved": 248.1
+   },
+   {
+    "delivery_day": "2024-04-25",
+    "saved": 250.6
+   },
+   {
+    "delivery_day": "2024-04-26",
+    "saved": 247.9
+   },
+   {
+    "delivery_day": "2024-04-27",
+    "saved": 255.6
+   },
+   {
+    "delivery_day": "2024-04-28",
+    "saved": 259.5
+   },
+   {
+    "delivery_day": "2024-04-29",
+    "saved": 264.9
+   },
+   {
+    "delivery_day": "2024-04-30",
+    "saved": 268.4
+   },
+   {
+    "delivery_day": "2024-05-01",
+    "saved": 276.5
+   },
+   {
+    "delivery_day": "2024-05-02",
+    "saved": 285.4
+   },
+   {
+    "delivery_day": "2024-05-03",
+    "saved": 285.1
+   },
+   {
+    "delivery_day": "2024-05-04",
+    "saved": 281.1
+   },
+   {
+    "delivery_day": "2024-05-05",
+    "saved": 277.8
+   },
+   {
+    "delivery_day": "2024-05-06",
+    "saved": 285.6
+   },
+   {
+    "delivery_day": "2024-05-07",
+    "saved": 288.1
+   },
+   {
+    "delivery_day": "2024-05-08",
+    "saved": 293.0
+   },
+   {
+    "delivery_day": "2024-05-09",
+    "saved": 290.5
+   },
+   {
+    "delivery_day": "2024-05-10",
+    "saved": 298.9
+   },
+   {
+    "delivery_day": "2024-05-11",
+    "saved": 295.0
+   },
+   {
+    "delivery_day": "2024-05-12",
+    "saved": 298.6
+   },
+   {
+    "delivery_day": "2024-05-13",
+    "saved": 301.5
+   },
+   {
+    "delivery_day": "2024-05-14",
+    "saved": 310.1
+   },
+   {
+    "delivery_day": "2024-05-15",
+    "saved": 310.4
+   },
+   {
+    "delivery_day": "2024-05-16",
+    "saved": 311.8
+   },
+   {
+    "delivery_day": "2024-05-17",
+    "saved": 312.6
+   },
+   {
+    "delivery_day": "2024-05-18",
+    "saved": 312.8
+   },
+   {
+    "delivery_day": "2024-05-19",
+    "saved": 311.9
+   },
+   {
+    "delivery_day": "2024-05-20",
+    "saved": 312.0
+   },
+   {
+    "delivery_day": "2024-05-21",
+    "saved": 312.1
+   },
+   {
+    "delivery_day": "2024-05-22",
+    "saved": 312.1
+   },
+   {
+    "delivery_day": "2024-05-23",
+    "saved": 316.7
+   },
+   {
+    "delivery_day": "2024-05-24",
+    "saved": 326.1
+   },
+   {
+    "delivery_day": "2024-05-25",
+    "saved": 325.1
+   },
+   {
+    "delivery_day": "2024-05-26",
+    "saved": 322.7
+   },
+   {
+    "delivery_day": "2024-05-27",
+    "saved": 327.4
+   },
+   {
+    "delivery_day": "2024-05-28",
+    "saved": 325.8
+   },
+   {
+    "delivery_day": "2024-05-29",
+    "saved": 322.8
+   },
+   {
+    "delivery_day": "2024-05-30",
+    "saved": 317.5
+   },
+   {
+    "delivery_day": "2024-05-31",
+    "saved": 320.9
+   },
+   {
+    "delivery_day": "2024-06-01",
+    "saved": 316.4
+   },
+   {
+    "delivery_day": "2024-06-02",
+    "saved": 311.5
+   },
+   {
+    "delivery_day": "2024-06-03",
+    "saved": 314.5
+   },
+   {
+    "delivery_day": "2024-06-04",
+    "saved": 316.3
+   },
+   {
+    "delivery_day": "2024-06-05",
+    "saved": 322.9
+   },
+   {
+    "delivery_day": "2024-06-06",
+    "saved": 322.1
+   },
+   {
+    "delivery_day": "2024-06-07",
+    "saved": 324.6
+   },
+   {
+    "delivery_day": "2024-06-08",
+    "saved": 323.7
+   },
+   {
+    "delivery_day": "2024-06-09",
+    "saved": 321.1
+   },
+   {
+    "delivery_day": "2024-06-10",
+    "saved": 317.1
+   },
+   {
+    "delivery_day": "2024-06-11",
+    "saved": 320.5
+   },
+   {
+    "delivery_day": "2024-06-12",
+    "saved": 321.3
+   },
+   {
+    "delivery_day": "2024-06-13",
+    "saved": 320.0
+   },
+   {
+    "delivery_day": "2024-06-14",
+    "saved": 322.2
+   },
+   {
+    "delivery_day": "2024-06-15",
+    "saved": 327.7
+   },
+   {
+    "delivery_day": "2024-06-16",
+    "saved": 320.8
+   },
+   {
+    "delivery_day": "2024-06-17",
+    "saved": 325.1
+   },
+   {
+    "delivery_day": "2024-06-18",
+    "saved": 326.1
+   },
+   {
+    "delivery_day": "2024-06-19",
+    "saved": 320.6
+   },
+   {
+    "delivery_day": "2024-06-20",
+    "saved": 324.5
+   },
+   {
+    "delivery_day": "2024-06-21",
+    "saved": 324.8
+   },
+   {
+    "delivery_day": "2024-06-22",
+    "saved": 329.6
+   },
+   {
+    "delivery_day": "2024-06-23",
+    "saved": 334.2
+   },
+   {
+    "delivery_day": "2024-06-24",
+    "saved": 335.6
+   },
+   {
+    "delivery_day": "2024-06-25",
+    "saved": 331.0
+   },
+   {
+    "delivery_day": "2024-06-26",
+    "saved": 336.5
+   },
+   {
+    "delivery_day": "2024-06-27",
+    "saved": 337.2
+   },
+   {
+    "delivery_day": "2024-06-28",
+    "saved": 341.4
+   },
+   {
+    "delivery_day": "2024-06-29",
+    "saved": 336.4
+   },
+   {
+    "delivery_day": "2024-06-30",
+    "saved": 335.7
+   },
+   {
+    "delivery_day": "2024-07-01",
+    "saved": 339.9
+   },
+   {
+    "delivery_day": "2024-07-02",
+    "saved": 340.6
+   },
+   {
+    "delivery_day": "2024-07-03",
+    "saved": 340.9
+   },
+   {
+    "delivery_day": "2024-07-04",
+    "saved": 355.2
+   },
+   {
+    "delivery_day": "2024-07-05",
+    "saved": 355.2
+   },
+   {
+    "delivery_day": "2024-07-06",
+    "saved": 349.3
+   },
+   {
+    "delivery_day": "2024-07-07",
+    "saved": 341.4
+   },
+   {
+    "delivery_day": "2024-07-08",
+    "saved": 352.4
+   },
+   {
+    "delivery_day": "2024-07-09",
+    "saved": 355.3
+   },
+   {
+    "delivery_day": "2024-07-10",
+    "saved": 355.5
+   },
+   {
+    "delivery_day": "2024-07-11",
+    "saved": 353.7
+   },
+   {
+    "delivery_day": "2024-07-12",
+    "saved": 353.6
+   },
+   {
+    "delivery_day": "2024-07-13",
+    "saved": 354.1
+   },
+   {
+    "delivery_day": "2024-07-14",
+    "saved": 358.5
+   },
+   {
+    "delivery_day": "2024-07-15",
+    "saved": 358.2
+   },
+   {
+    "delivery_day": "2024-07-16",
+    "saved": 357.1
+   },
+   {
+    "delivery_day": "2024-07-17",
+    "saved": 360.1
+   },
+   {
+    "delivery_day": "2024-07-18",
+    "saved": 365.3
+   },
+   {
+    "delivery_day": "2024-07-19",
+    "saved": 367.9
+   },
+   {
+    "delivery_day": "2024-07-20",
+    "saved": 369.7
+   },
+   {
+    "delivery_day": "2024-07-21",
+    "saved": 365.0
+   },
+   {
+    "delivery_day": "2024-07-22",
+    "saved": 364.7
+   },
+   {
+    "delivery_day": "2024-07-23",
+    "saved": 365.8
+   },
+   {
+    "delivery_day": "2024-07-24",
+    "saved": 368.7
+   },
+   {
+    "delivery_day": "2024-07-25",
+    "saved": 368.1
+   },
+   {
+    "delivery_day": "2024-07-26",
+    "saved": 371.4
+   },
+   {
+    "delivery_day": "2024-07-27",
+    "saved": 371.7
+   },
+   {
+    "delivery_day": "2024-07-28",
+    "saved": 373.1
+   },
+   {
+    "delivery_day": "2024-07-29",
+    "saved": 372.1
+   },
+   {
+    "delivery_day": "2024-07-30",
+    "saved": 367.2
+   },
+   {
+    "delivery_day": "2024-07-31",
+    "saved": 370.3
+   },
+   {
+    "delivery_day": "2024-08-01",
+    "saved": 373.6
+   },
+   {
+    "delivery_day": "2024-08-02",
+    "saved": 373.7
+   },
+   {
+    "delivery_day": "2024-08-03",
+    "saved": 370.7
+   },
+   {
+    "delivery_day": "2024-08-04",
+    "saved": 370.2
+   },
+   {
+    "delivery_day": "2024-08-05",
+    "saved": 367.2
+   },
+   {
+    "delivery_day": "2024-08-06",
+    "saved": 364.5
+   },
+   {
+    "delivery_day": "2024-08-07",
+    "saved": 364.9
+   },
+   {
+    "delivery_day": "2024-08-08",
+    "saved": 363.5
+   },
+   {
+    "delivery_day": "2024-08-09",
+    "saved": 365.3
+   },
+   {
+    "delivery_day": "2024-08-10",
+    "saved": 361.1
+   },
+   {
+    "delivery_day": "2024-08-11",
+    "saved": 361.8
+   },
+   {
+    "delivery_day": "2024-08-12",
+    "saved": 360.7
+   },
+   {
+    "delivery_day": "2024-08-13",
+    "saved": 362.6
+   },
+   {
+    "delivery_day": "2024-08-14",
+    "saved": 362.7
+   },
+   {
+    "delivery_day": "2024-08-15",
+    "saved": 364.3
+   },
+   {
+    "delivery_day": "2024-08-16",
+    "saved": 362.8
+   },
+   {
+    "delivery_day": "2024-08-17",
+    "saved": 371.7
+   },
+   {
+    "delivery_day": "2024-08-18",
+    "saved": 373.9
+   },
+   {
+    "delivery_day": "2024-08-19",
+    "saved": 381.3
+   },
+   {
+    "delivery_day": "2024-08-20",
+    "saved": 381.4
+   },
+   {
+    "delivery_day": "2024-08-21",
+    "saved": 380.1
+   },
+   {
+    "delivery_day": "2024-08-22",
+    "saved": 375.8
+   },
+   {
+    "delivery_day": "2024-08-23",
+    "saved": 369.9
+   },
+   {
+    "delivery_day": "2024-08-24",
+    "saved": 371.1
+   },
+   {
+    "delivery_day": "2024-08-25",
+    "saved": 371.9
+   },
+   {
+    "delivery_day": "2024-08-26",
+    "saved": 376.2
+   },
+   {
+    "delivery_day": "2024-08-27",
+    "saved": 374.2
+   },
+   {
+    "delivery_day": "2024-08-28",
+    "saved": 374.5
+   },
+   {
+    "delivery_day": "2024-08-29",
+    "saved": 376.4
+   },
+   {
+    "delivery_day": "2024-08-30",
+    "saved": 378.9
+   },
+   {
+    "delivery_day": "2024-08-31",
+    "saved": 379.6
+   },
+   {
+    "delivery_day": "2024-09-01",
+    "saved": 382.0
+   },
+   {
+    "delivery_day": "2024-09-02",
+    "saved": 381.9
+   },
+   {
+    "delivery_day": "2024-09-03",
+    "saved": 381.9
+   },
+   {
+    "delivery_day": "2024-09-04",
+    "saved": 385.2
+   },
+   {
+    "delivery_day": "2024-09-05",
+    "saved": 385.2
+   },
+   {
+    "delivery_day": "2024-09-06",
+    "saved": 386.1
+   },
+   {
+    "delivery_day": "2024-09-07",
+    "saved": 387.7
+   },
+   {
+    "delivery_day": "2024-09-08",
+    "saved": 388.1
+   },
+   {
+    "delivery_day": "2024-09-09",
+    "saved": 387.8
+   },
+   {
+    "delivery_day": "2024-09-10",
+    "saved": 382.1
+   },
+   {
+    "delivery_day": "2024-09-11",
+    "saved": 386.0
+   },
+   {
+    "delivery_day": "2024-09-12",
+    "saved": 390.9
+   },
+   {
+    "delivery_day": "2024-09-13",
+    "saved": 391.7
+   },
+   {
+    "delivery_day": "2024-09-14",
+    "saved": 394.9
+   },
+   {
+    "delivery_day": "2024-09-15",
+    "saved": 395.6
+   },
+   {
+    "delivery_day": "2024-09-16",
+    "saved": 392.6
+   },
+   {
+    "delivery_day": "2024-09-17",
+    "saved": 392.0
+   },
+   {
+    "delivery_day": "2024-09-18",
+    "saved": 398.0
+   },
+   {
+    "delivery_day": "2024-09-19",
+    "saved": 399.2
+   },
+   {
+    "delivery_day": "2024-09-20",
+    "saved": 399.9
+   },
+   {
+    "delivery_day": "2024-09-21",
+    "saved": 400.0
+   },
+   {
+    "delivery_day": "2024-09-22",
+    "saved": 397.8
+   },
+   {
+    "delivery_day": "2024-09-23",
+    "saved": 394.7
+   },
+   {
+    "delivery_day": "2024-09-24",
+    "saved": 395.6
+   },
+   {
+    "delivery_day": "2024-09-25",
+    "saved": 397.7
+   },
+   {
+    "delivery_day": "2024-09-26",
+    "saved": 402.6
+   },
+   {
+    "delivery_day": "2024-09-27",
+    "saved": 396.9
+   },
+   {
+    "delivery_day": "2024-09-28",
+    "saved": 397.2
+   },
+   {
+    "delivery_day": "2024-09-29",
+    "saved": 397.6
+   },
+   {
+    "delivery_day": "2024-09-30",
+    "saved": 392.9
+   },
+   {
+    "delivery_day": "2024-10-01",
+    "saved": 394.5
+   },
+   {
+    "delivery_day": "2024-10-02",
+    "saved": 399.6
+   },
+   {
+    "delivery_day": "2024-10-03",
+    "saved": 399.2
+   },
+   {
+    "delivery_day": "2024-10-04",
+    "saved": 408.1
+   },
+   {
+    "delivery_day": "2024-10-05",
+    "saved": 406.2
+   },
+   {
+    "delivery_day": "2024-10-06",
+    "saved": 405.9
+   },
+   {
+    "delivery_day": "2024-10-07",
+    "saved": 406.9
+   },
+   {
+    "delivery_day": "2024-10-08",
+    "saved": 404.9
+   },
+   {
+    "delivery_day": "2024-10-09",
+    "saved": 406.5
+   },
+   {
+    "delivery_day": "2024-10-10",
+    "saved": 407.0
+   },
+   {
+    "delivery_day": "2024-10-11",
+    "saved": 410.6
+   },
+   {
+    "delivery_day": "2024-10-12",
+    "saved": 413.6
+   },
+   {
+    "delivery_day": "2024-10-13",
+    "saved": 416.0
+   },
+   {
+    "delivery_day": "2024-10-14",
+    "saved": 416.1
+   },
+   {
+    "delivery_day": "2024-10-15",
+    "saved": 417.9
+   },
+   {
+    "delivery_day": "2024-10-16",
+    "saved": 420.1
+   },
+   {
+    "delivery_day": "2024-10-17",
+    "saved": 422.7
+   },
+   {
+    "delivery_day": "2024-10-18",
+    "saved": 423.6
+   },
+   {
+    "delivery_day": "2024-10-19",
+    "saved": 424.0
+   },
+   {
+    "delivery_day": "2024-10-20",
+    "saved": 419.9
+   },
+   {
+    "delivery_day": "2024-10-21",
+    "saved": 417.3
+   },
+   {
+    "delivery_day": "2024-10-22",
+    "saved": 415.4
+   },
+   {
+    "delivery_day": "2024-10-23",
+    "saved": 415.1
+   },
+   {
+    "delivery_day": "2024-10-24",
+    "saved": 413.5
+   },
+   {
+    "delivery_day": "2024-10-25",
+    "saved": 417.0
+   },
+   {
+    "delivery_day": "2024-10-26",
+    "saved": 419.7
+   },
+   {
+    "delivery_day": "2024-10-27",
+    "saved": 425.3
+   },
+   {
+    "delivery_day": "2024-10-28",
+    "saved": 423.2
+   },
+   {
+    "delivery_day": "2024-10-29",
+    "saved": 422.5
+   },
+   {
+    "delivery_day": "2024-10-30",
+    "saved": 425.3
+   },
+   {
+    "delivery_day": "2024-10-31",
+    "saved": 430.8
+   },
+   {
+    "delivery_day": "2024-11-01",
+    "saved": 430.0
+   },
+   {
+    "delivery_day": "2024-11-02",
+    "saved": 437.1
+   },
+   {
+    "delivery_day": "2024-11-03",
+    "saved": 437.4
+   },
+   {
+    "delivery_day": "2024-11-04",
+    "saved": 444.0
+   },
+   {
+    "delivery_day": "2024-11-05",
+    "saved": 444.7
+   },
+   {
+    "delivery_day": "2024-11-06",
+    "saved": 447.7
+   },
+   {
+    "delivery_day": "2024-11-07",
+    "saved": 450.8
+   },
+   {
+    "delivery_day": "2024-11-08",
+    "saved": 451.2
+   },
+   {
+    "delivery_day": "2024-11-09",
+    "saved": 451.2
+   },
+   {
+    "delivery_day": "2024-11-10",
+    "saved": 451.7
+   },
+   {
+    "delivery_day": "2024-11-11",
+    "saved": 450.5
+   },
+   {
+    "delivery_day": "2024-11-12",
+    "saved": 455.0
+   },
+   {
+    "delivery_day": "2024-11-13",
+    "saved": 461.1
+   },
+   {
+    "delivery_day": "2024-11-14",
+    "saved": 460.1
+   },
+   {
+    "delivery_day": "2024-11-15",
+    "saved": 461.5
+   },
+   {
+    "delivery_day": "2024-11-16",
+    "saved": 463.3
+   },
+   {
+    "delivery_day": "2024-11-17",
+    "saved": 466.1
+   },
+   {
+    "delivery_day": "2024-11-18",
+    "saved": 467.5
+   },
+   {
+    "delivery_day": "2024-11-19",
+    "saved": 469.8
+   },
+   {
+    "delivery_day": "2024-11-20",
+    "saved": 470.0
+   },
+   {
+    "delivery_day": "2024-11-21",
+    "saved": 469.6
+   },
+   {
+    "delivery_day": "2024-11-22",
+    "saved": 470.4
+   },
+   {
+    "delivery_day": "2024-11-23",
+    "saved": 473.0
+   },
+   {
+    "delivery_day": "2024-11-24",
+    "saved": 484.8
+   },
+   {
+    "delivery_day": "2024-11-25",
+    "saved": 489.2
+   },
+   {
+    "delivery_day": "2024-11-26",
+    "saved": 490.7
+   },
+   {
+    "delivery_day": "2024-11-27",
+    "saved": 493.2
+   },
+   {
+    "delivery_day": "2024-11-28",
+    "saved": 494.6
+   },
+   {
+    "delivery_day": "2024-11-29",
+    "saved": 498.1
+   },
+   {
+    "delivery_day": "2024-11-30",
+    "saved": 499.1
+   },
+   {
+    "delivery_day": "2024-12-01",
+    "saved": 502.9
+   },
+   {
+    "delivery_day": "2024-12-02",
+    "saved": 505.7
+   },
+   {
+    "delivery_day": "2024-12-03",
+    "saved": 509.8
+   },
+   {
+    "delivery_day": "2024-12-04",
+    "saved": 511.1
+   },
+   {
+    "delivery_day": "2024-12-05",
+    "saved": 519.1
+   },
+   {
+    "delivery_day": "2024-12-06",
+    "saved": 518.6
+   },
+   {
+    "delivery_day": "2024-12-07",
+    "saved": 512.7
+   },
+   {
+    "delivery_day": "2024-12-08",
+    "saved": 517.9
+   },
+   {
+    "delivery_day": "2024-12-09",
+    "saved": 517.5
+   },
+   {
+    "delivery_day": "2024-12-10",
+    "saved": 518.9
+   },
+   {
+    "delivery_day": "2024-12-11",
+    "saved": 517.7
+   },
+   {
+    "delivery_day": "2024-12-12",
+    "saved": 520.6
+   },
+   {
+    "delivery_day": "2024-12-13",
+    "saved": 519.5
+   },
+   {
+    "delivery_day": "2024-12-14",
+    "saved": 539.6
+   },
+   {
+    "delivery_day": "2024-12-15",
+    "saved": 538.7
+   },
+   {
+    "delivery_day": "2024-12-16",
+    "saved": 561.2
+   },
+   {
+    "delivery_day": "2024-12-17",
+    "saved": 562.0
+   },
+   {
+    "delivery_day": "2024-12-18",
+    "saved": 562.3
+   },
+   {
+    "delivery_day": "2024-12-19",
+    "saved": 564.8
+   },
+   {
+    "delivery_day": "2024-12-20",
+    "saved": 570.1
+   },
+   {
+    "delivery_day": "2024-12-21",
+    "saved": 573.0
+   },
+   {
+    "delivery_day": "2024-12-22",
+    "saved": 570.7
+   },
+   {
+    "delivery_day": "2024-12-23",
+    "saved": 573.1
+   },
+   {
+    "delivery_day": "2024-12-24",
+    "saved": 586.4
+   },
+   {
+    "delivery_day": "2024-12-25",
+    "saved": 587.2
+   },
+   {
+    "delivery_day": "2024-12-26",
+    "saved": 601.3
+   },
+   {
+    "delivery_day": "2024-12-27",
+    "saved": 614.6
+   },
+   {
+    "delivery_day": "2024-12-28",
+    "saved": 621.3
+   },
+   {
+    "delivery_day": "2024-12-29",
+    "saved": 625.4
+   },
+   {
+    "delivery_day": "2024-12-30",
+    "saved": 628.4
+   },
+   {
+    "delivery_day": "2024-12-31",
+    "saved": 628.8
+   },
+   {
+    "delivery_day": "2025-01-01",
+    "saved": 633.8
+   },
+   {
+    "delivery_day": "2025-01-02",
+    "saved": 631.4
+   },
+   {
+    "delivery_day": "2025-01-03",
+    "saved": 634.1
+   },
+   {
+    "delivery_day": "2025-01-04",
+    "saved": 634.9
+   },
+   {
+    "delivery_day": "2025-01-05",
+    "saved": 627.3
+   },
+   {
+    "delivery_day": "2025-01-06",
+    "saved": 640.1
+   },
+   {
+    "delivery_day": "2025-01-07",
+    "saved": 643.3
+   },
+   {
+    "delivery_day": "2025-01-08",
+    "saved": 639.1
+   },
+   {
+    "delivery_day": "2025-01-09",
+    "saved": 636.8
+   },
+   {
+    "delivery_day": "2025-01-10",
+    "saved": 638.9
+   },
+   {
+    "delivery_day": "2025-01-11",
+    "saved": 637.7
+   },
+   {
+    "delivery_day": "2025-01-12",
+    "saved": 643.0
+   },
+   {
+    "delivery_day": "2025-01-13",
+    "saved": 648.8
+   },
+   {
+    "delivery_day": "2025-01-14",
+    "saved": 650.3
+   },
+   {
+    "delivery_day": "2025-01-15",
+    "saved": 651.3
+   },
+   {
+    "delivery_day": "2025-01-16",
+    "saved": 659.6
+   },
+   {
+    "delivery_day": "2025-01-17",
+    "saved": 657.6
+   },
+   {
+    "delivery_day": "2025-01-18",
+    "saved": 660.3
+   },
+   {
+    "delivery_day": "2025-01-19",
+    "saved": 661.9
+   },
+   {
+    "delivery_day": "2025-01-20",
+    "saved": 658.3
+   },
+   {
+    "delivery_day": "2025-01-21",
+    "saved": 688.4
+   },
+   {
+    "delivery_day": "2025-01-22",
+    "saved": 692.8
+   },
+   {
+    "delivery_day": "2025-01-23",
+    "saved": 696.8
+   },
+   {
+    "delivery_day": "2025-01-24",
+    "saved": 701.4
+   },
+   {
+    "delivery_day": "2025-01-25",
+    "saved": 697.4
+   },
+   {
+    "delivery_day": "2025-01-26",
+    "saved": 703.3
+   },
+   {
+    "delivery_day": "2025-01-27",
+    "saved": 711.7
+   },
+   {
+    "delivery_day": "2025-01-28",
+    "saved": 715.0
+   },
+   {
+    "delivery_day": "2025-01-29",
+    "saved": 714.9
+   },
+   {
+    "delivery_day": "2025-01-30",
+    "saved": 717.6
+   },
+   {
+    "delivery_day": "2025-01-31",
+    "saved": 719.9
+   },
+   {
+    "delivery_day": "2025-02-01",
+    "saved": 723.5
+   },
+   {
+    "delivery_day": "2025-02-02",
+    "saved": 726.8
+   },
+   {
+    "delivery_day": "2025-02-03",
+    "saved": 727.8
+   },
+   {
+    "delivery_day": "2025-02-04",
+    "saved": 731.6
+   },
+   {
+    "delivery_day": "2025-02-05",
+    "saved": 732.0
+   },
+   {
+    "delivery_day": "2025-02-06",
+    "saved": 735.6
+   },
+   {
+    "delivery_day": "2025-02-07",
+    "saved": 739.4
+   },
+   {
+    "delivery_day": "2025-02-08",
+    "saved": 739.4
+   },
+   {
+    "delivery_day": "2025-02-09",
+    "saved": 739.7
+   },
+   {
+    "delivery_day": "2025-02-10",
+    "saved": 746.9
+   },
+   {
+    "delivery_day": "2025-02-11",
+    "saved": 752.0
+   },
+   {
+    "delivery_day": "2025-02-12",
+    "saved": 751.4
+   },
+   {
+    "delivery_day": "2025-02-13",
+    "saved": 750.1
+   },
+   {
+    "delivery_day": "2025-02-14",
+    "saved": 748.0
+   },
+   {
+    "delivery_day": "2025-02-15",
+    "saved": 750.3
+   },
+   {
+    "delivery_day": "2025-02-16",
+    "saved": 747.8
+   },
+   {
+    "delivery_day": "2025-02-17",
+    "saved": 751.2
+   },
+   {
+    "delivery_day": "2025-02-18",
+    "saved": 756.3
+   },
+   {
+    "delivery_day": "2025-02-19",
+    "saved": 758.4
+   },
+   {
+    "delivery_day": "2025-02-20",
+    "saved": 760.4
+   },
+   {
+    "delivery_day": "2025-02-21",
+    "saved": 762.8
+   },
+   {
+    "delivery_day": "2025-02-22",
+    "saved": 767.7
+   },
+   {
+    "delivery_day": "2025-02-23",
+    "saved": 769.8
+   },
+   {
+    "delivery_day": "2025-02-24",
+    "saved": 769.2
+   },
+   {
+    "delivery_day": "2025-02-25",
+    "saved": 771.2
+   },
+   {
+    "delivery_day": "2025-02-26",
+    "saved": 772.6
+   },
+   {
+    "delivery_day": "2025-02-27",
+    "saved": 774.4
+   },
+   {
+    "delivery_day": "2025-02-28",
+    "saved": 776.0
+   },
+   {
+    "delivery_day": "2025-03-01",
+    "saved": 775.9
+   },
+   {
+    "delivery_day": "2025-03-02",
+    "saved": 780.6
+   },
+   {
+    "delivery_day": "2025-03-03",
+    "saved": 782.5
+   },
+   {
+    "delivery_day": "2025-03-04",
+    "saved": 782.1
+   },
+   {
+    "delivery_day": "2025-03-05",
+    "saved": 788.6
+   },
+   {
+    "delivery_day": "2025-03-06",
+    "saved": 792.4
+   },
+   {
+    "delivery_day": "2025-03-07",
+    "saved": 794.0
+   },
+   {
+    "delivery_day": "2025-03-08",
+    "saved": 785.7
+   },
+   {
+    "delivery_day": "2025-03-09",
+    "saved": 779.8
+   },
+   {
+    "delivery_day": "2025-03-10",
+    "saved": 782.5
+   },
+   {
+    "delivery_day": "2025-03-11",
+    "saved": 782.2
+   },
+   {
+    "delivery_day": "2025-03-12",
+    "saved": 783.2
+   },
+   {
+    "delivery_day": "2025-03-13",
+    "saved": 785.9
+   },
+   {
+    "delivery_day": "2025-03-14",
+    "saved": 788.0
+   },
+   {
+    "delivery_day": "2025-03-15",
+    "saved": 791.1
+   },
+   {
+    "delivery_day": "2025-03-16",
+    "saved": 787.3
+   },
+   {
+    "delivery_day": "2025-03-17",
+    "saved": 788.0
+   },
+   {
+    "delivery_day": "2025-03-18",
+    "saved": 789.9
+   },
+   {
+    "delivery_day": "2025-03-19",
+    "saved": 792.7
+   },
+   {
+    "delivery_day": "2025-03-20",
+    "saved": 796.4
+   },
+   {
+    "delivery_day": "2025-03-21",
+    "saved": 794.2
+   },
+   {
+    "delivery_day": "2025-03-22",
+    "saved": 795.4
+   },
+   {
+    "delivery_day": "2025-03-23",
+    "saved": 795.4
+   },
+   {
+    "delivery_day": "2025-03-24",
+    "saved": 806.1
+   },
+   {
+    "delivery_day": "2025-03-25",
+    "saved": 809.4
+   },
+   {
+    "delivery_day": "2025-03-26",
+    "saved": 811.4
+   },
+   {
+    "delivery_day": "2025-03-27",
+    "saved": 811.6
+   },
+   {
+    "delivery_day": "2025-03-28",
+    "saved": 811.9
+   },
+   {
+    "delivery_day": "2025-03-29",
+    "saved": 813.4
+   },
+   {
+    "delivery_day": "2025-03-30",
+    "saved": 814.2
+   },
+   {
+    "delivery_day": "2025-03-31",
+    "saved": 812.6
+   },
+   {
+    "delivery_day": "2025-04-01",
+    "saved": 816.7
+   },
+   {
+    "delivery_day": "2025-04-02",
+    "saved": 817.6
+   },
+   {
+    "delivery_day": "2025-04-03",
+    "saved": 813.7
+   },
+   {
+    "delivery_day": "2025-04-04",
+    "saved": 815.2
+   },
+   {
+    "delivery_day": "2025-04-05",
+    "saved": 816.6
+   },
+   {
+    "delivery_day": "2025-04-06",
+    "saved": 823.4
+   },
+   {
+    "delivery_day": "2025-04-07",
+    "saved": 826.9
+   },
+   {
+    "delivery_day": "2025-04-08",
+    "saved": 827.1
+   },
+   {
+    "delivery_day": "2025-04-09",
+    "saved": 830.6
+   },
+   {
+    "delivery_day": "2025-04-10",
+    "saved": 829.9
+   },
+   {
+    "delivery_day": "2025-04-11",
+    "saved": 829.4
+   },
+   {
+    "delivery_day": "2025-04-12",
+    "saved": 819.4
+   },
+   {
+    "delivery_day": "2025-04-13",
+    "saved": 820.5
+   },
+   {
+    "delivery_day": "2025-04-14",
+    "saved": 819.0
+   },
+   {
+    "delivery_day": "2025-04-15",
+    "saved": 823.7
+   },
+   {
+    "delivery_day": "2025-04-16",
+    "saved": 826.0
+   },
+   {
+    "delivery_day": "2025-04-17",
+    "saved": 826.4
+   },
+   {
+    "delivery_day": "2025-04-18",
+    "saved": 825.9
+   },
+   {
+    "delivery_day": "2025-04-19",
+    "saved": 820.8
+   },
+   {
+    "delivery_day": "2025-04-20",
+    "saved": 827.3
+   },
+   {
+    "delivery_day": "2025-04-21",
+    "saved": 833.1
+   },
+   {
+    "delivery_day": "2025-04-22",
+    "saved": 834.7
+   },
+   {
+    "delivery_day": "2025-04-23",
+    "saved": 835.9
+   },
+   {
+    "delivery_day": "2025-04-24",
+    "saved": 835.9
+   },
+   {
+    "delivery_day": "2025-04-25",
+    "saved": 835.5
+   },
+   {
+    "delivery_day": "2025-04-26",
+    "saved": 833.7
+   },
+   {
+    "delivery_day": "2025-04-27",
+    "saved": 836.0
+   },
+   {
+    "delivery_day": "2025-04-28",
+    "saved": 834.3
+   },
+   {
+    "delivery_day": "2025-04-29",
+    "saved": 838.7
+   },
+   {
+    "delivery_day": "2025-04-30",
+    "saved": 839.8
+   },
+   {
+    "delivery_day": "2025-05-01",
+    "saved": 845.8
+   },
+   {
+    "delivery_day": "2025-05-02",
+    "saved": 847.5
+   },
+   {
+    "delivery_day": "2025-05-03",
+    "saved": 847.5
+   },
+   {
+    "delivery_day": "2025-05-04",
+    "saved": 845.0
+   },
+   {
+    "delivery_day": "2025-05-05",
+    "saved": 843.3
+   },
+   {
+    "delivery_day": "2025-05-06",
+    "saved": 842.4
+   },
+   {
+    "delivery_day": "2025-05-07",
+    "saved": 840.2
+   },
+   {
+    "delivery_day": "2025-05-08",
+    "saved": 838.7
+   },
+   {
+    "delivery_day": "2025-05-09",
+    "saved": 837.8
+   },
+   {
+    "delivery_day": "2025-05-10",
+    "saved": 838.0
+   },
+   {
+    "delivery_day": "2025-05-11",
+    "saved": 834.2
+   },
+   {
+    "delivery_day": "2025-05-12",
+    "saved": 831.2
+   },
+   {
+    "delivery_day": "2025-05-13",
+    "saved": 829.5
+   },
+   {
+    "delivery_day": "2025-05-14",
+    "saved": 830.0
+   },
+   {
+    "delivery_day": "2025-05-15",
+    "saved": 831.8
+   },
+   {
+    "delivery_day": "2025-05-16",
+    "saved": 830.7
+   },
+   {
+    "delivery_day": "2025-05-17",
+    "saved": 831.3
+   },
+   {
+    "delivery_day": "2025-05-18",
+    "saved": 831.1
+   },
+   {
+    "delivery_day": "2025-05-19",
+    "saved": 832.3
+   },
+   {
+    "delivery_day": "2025-05-20",
+    "saved": 837.8
+   },
+   {
+    "delivery_day": "2025-05-21",
+    "saved": 838.7
+   },
+   {
+    "delivery_day": "2025-05-22",
+    "saved": 840.8
+   },
+   {
+    "delivery_day": "2025-05-23",
+    "saved": 840.1
+   },
+   {
+    "delivery_day": "2025-05-24",
+    "saved": 838.4
+   },
+   {
+    "delivery_day": "2025-05-25",
+    "saved": 832.0
+   },
+   {
+    "delivery_day": "2025-05-26",
+    "saved": 829.3
+   },
+   {
+    "delivery_day": "2025-05-27",
+    "saved": 829.8
+   },
+   {
+    "delivery_day": "2025-05-28",
+    "saved": 823.6
+   },
+   {
+    "delivery_day": "2025-05-29",
+    "saved": 826.1
+   },
+   {
+    "delivery_day": "2025-05-30",
+    "saved": 825.2
+   },
+   {
+    "delivery_day": "2025-05-31",
+    "saved": 824.8
+   },
+   {
+    "delivery_day": "2025-06-01",
+    "saved": 826.5
+   },
+   {
+    "delivery_day": "2025-06-02",
+    "saved": 826.5
+   },
+   {
+    "delivery_day": "2025-06-03",
+    "saved": 827.7
+   },
+   {
+    "delivery_day": "2025-06-04",
+    "saved": 827.3
+   },
+   {
+    "delivery_day": "2025-06-05",
+    "saved": 827.5
+   },
+   {
+    "delivery_day": "2025-06-06",
+    "saved": 825.4
+   },
+   {
+    "delivery_day": "2025-06-07",
+    "saved": 822.6
+   },
+   {
+    "delivery_day": "2025-06-08",
+    "saved": 815.7
+   },
+   {
+    "delivery_day": "2025-06-09",
+    "saved": 814.7
+   },
+   {
+    "delivery_day": "2025-06-10",
+    "saved": 817.4
+   },
+   {
+    "delivery_day": "2025-06-11",
+    "saved": 817.5
+   },
+   {
+    "delivery_day": "2025-06-12",
+    "saved": 814.6
+   },
+   {
+    "delivery_day": "2025-06-13",
+    "saved": 816.9
+   },
+   {
+    "delivery_day": "2025-06-14",
+    "saved": 816.8
+   },
+   {
+    "delivery_day": "2025-06-15",
+    "saved": 813.7
+   },
+   {
+    "delivery_day": "2025-06-16",
+    "saved": 812.5
+   },
+   {
+    "delivery_day": "2025-06-17",
+    "saved": 809.9
+   },
+   {
+    "delivery_day": "2025-06-18",
+    "saved": 810.2
+   },
+   {
+    "delivery_day": "2025-06-19",
+    "saved": 810.4
+   },
+   {
+    "delivery_day": "2025-06-20",
+    "saved": 812.4
+   },
+   {
+    "delivery_day": "2025-06-21",
+    "saved": 812.0
+   },
+   {
+    "delivery_day": "2025-06-22",
+    "saved": 807.7
+   },
+   {
+    "delivery_day": "2025-06-23",
+    "saved": 802.7
+   },
+   {
+    "delivery_day": "2025-06-24",
+    "saved": 803.4
+   },
+   {
+    "delivery_day": "2025-06-25",
+    "saved": 803.2
+   },
+   {
+    "delivery_day": "2025-06-26",
+    "saved": 807.0
+   },
+   {
+    "delivery_day": "2025-06-27",
+    "saved": 805.1
+   },
+   {
+    "delivery_day": "2025-06-28",
+    "saved": 805.4
+   },
+   {
+    "delivery_day": "2025-06-29",
+    "saved": 808.5
+   },
+   {
+    "delivery_day": "2025-06-30",
+    "saved": 809.6
+   },
+   {
+    "delivery_day": "2025-07-01",
+    "saved": 809.3
+   },
+   {
+    "delivery_day": "2025-07-02",
+    "saved": 814.9
+   },
+   {
+    "delivery_day": "2025-07-03",
+    "saved": 815.9
+   },
+   {
+    "delivery_day": "2025-07-04",
+    "saved": 814.5
+   },
+   {
+    "delivery_day": "2025-07-05",
+    "saved": 814.2
+   },
+   {
+    "delivery_day": "2025-07-06",
+    "saved": 817.3
+   },
+   {
+    "delivery_day": "2025-07-07",
+    "saved": 819.0
+   },
+   {
+    "delivery_day": "2025-07-08",
+    "saved": 821.4
+   },
+   {
+    "delivery_day": "2025-07-09",
+    "saved": 819.6
+   },
+   {
+    "delivery_day": "2025-07-10",
+    "saved": 823.5
+   },
+   {
+    "delivery_day": "2025-07-11",
+    "saved": 824.1
+   },
+   {
+    "delivery_day": "2025-07-12",
+    "saved": 827.0
+   },
+   {
+    "delivery_day": "2025-07-13",
+    "saved": 829.4
+   },
+   {
+    "delivery_day": "2025-07-14",
+    "saved": 830.2
+   },
+   {
+    "delivery_day": "2025-07-15",
+    "saved": 837.4
+   },
+   {
+    "delivery_day": "2025-07-16",
+    "saved": 842.7
+   },
+   {
+    "delivery_day": "2025-07-17",
+    "saved": 852.1
+   },
+   {
+    "delivery_day": "2025-07-18",
+    "saved": 853.6
+   },
+   {
+    "delivery_day": "2025-07-19",
+    "saved": 853.0
+   },
+   {
+    "delivery_day": "2025-07-20",
+    "saved": 851.4
+   },
+   {
+    "delivery_day": "2025-07-21",
+    "saved": 853.4
+   },
+   {
+    "delivery_day": "2025-07-22",
+    "saved": 857.0
+   },
+   {
+    "delivery_day": "2025-07-23",
+    "saved": 858.8
+   },
+   {
+    "delivery_day": "2025-07-24",
+    "saved": 859.4
+   },
+   {
+    "delivery_day": "2025-07-25",
+    "saved": 863.3
+   },
+   {
+    "delivery_day": "2025-07-26",
+    "saved": 865.6
+   },
+   {
+    "delivery_day": "2025-07-27",
+    "saved": 867.3
+   },
+   {
+    "delivery_day": "2025-07-28",
+    "saved": 870.0
+   },
+   {
+    "delivery_day": "2025-07-29",
+    "saved": 873.9
+   },
+   {
+    "delivery_day": "2025-07-30",
+    "saved": 873.5
+   },
+   {
+    "delivery_day": "2025-07-31",
+    "saved": 880.1
+   },
+   {
+    "delivery_day": "2025-08-01",
+    "saved": 883.0
+   },
+   {
+    "delivery_day": "2025-08-02",
+    "saved": 884.6
+   },
+   {
+    "delivery_day": "2025-08-03",
+    "saved": 886.7
+   },
+   {
+    "delivery_day": "2025-08-04",
+    "saved": 884.4
+   },
+   {
+    "delivery_day": "2025-08-05",
+    "saved": 896.5
+   },
+   {
+    "delivery_day": "2025-08-06",
+    "saved": 901.2
+   },
+   {
+    "delivery_day": "2025-08-07",
+    "saved": 898.3
+   },
+   {
+    "delivery_day": "2025-08-08",
+    "saved": 897.3
+   },
+   {
+    "delivery_day": "2025-08-09",
+    "saved": 898.6
+   },
+   {
+    "delivery_day": "2025-08-10",
+    "saved": 902.6
+   },
+   {
+    "delivery_day": "2025-08-11",
+    "saved": 902.1
+   },
+   {
+    "delivery_day": "2025-08-12",
+    "saved": 904.2
+   },
+   {
+    "delivery_day": "2025-08-13",
+    "saved": 905.2
+   },
+   {
+    "delivery_day": "2025-08-14",
+    "saved": 906.0
+   },
+   {
+    "delivery_day": "2025-08-15",
+    "saved": 907.6
+   },
+   {
+    "delivery_day": "2025-08-16",
+    "saved": 916.0
+   },
+   {
+    "delivery_day": "2025-08-17",
+    "saved": 920.2
+   },
+   {
+    "delivery_day": "2025-08-18",
+    "saved": 923.7
+   },
+   {
+    "delivery_day": "2025-08-19",
+    "saved": 921.2
+   },
+   {
+    "delivery_day": "2025-08-20",
+    "saved": 918.8
+   },
+   {
+    "delivery_day": "2025-08-21",
+    "saved": 919.3
+   },
+   {
+    "delivery_day": "2025-08-22",
+    "saved": 924.0
+   },
+   {
+    "delivery_day": "2025-08-23",
+    "saved": 930.4
+   },
+   {
+    "delivery_day": "2025-08-24",
+    "saved": 934.1
+   },
+   {
+    "delivery_day": "2025-08-25",
+    "saved": 939.8
+   },
+   {
+    "delivery_day": "2025-08-26",
+    "saved": 941.3
+   },
+   {
+    "delivery_day": "2025-08-27",
+    "saved": 939.5
+   },
+   {
+    "delivery_day": "2025-08-28",
+    "saved": 939.9
+   },
+   {
+    "delivery_day": "2025-08-29",
+    "saved": 937.5
+   },
+   {
+    "delivery_day": "2025-08-30",
+    "saved": 939.9
+   },
+   {
+    "delivery_day": "2025-08-31",
+    "saved": 940.7
+   },
+   {
+    "delivery_day": "2025-09-01",
+    "saved": 933.3
+   },
+   {
+    "delivery_day": "2025-09-02",
+    "saved": 930.5
+   },
+   {
+    "delivery_day": "2025-09-03",
+    "saved": 931.2
+   },
+   {
+    "delivery_day": "2025-09-04",
+    "saved": 927.6
+   },
+   {
+    "delivery_day": "2025-09-05",
+    "saved": 928.4
+   },
+   {
+    "delivery_day": "2025-09-06",
+    "saved": 928.0
+   },
+   {
+    "delivery_day": "2025-09-07",
+    "saved": 930.5
+   },
+   {
+    "delivery_day": "2025-09-08",
+    "saved": 935.0
+   },
+   {
+    "delivery_day": "2025-09-09",
+    "saved": 936.8
+   },
+   {
+    "delivery_day": "2025-09-10",
+    "saved": 939.4
+   },
+   {
+    "delivery_day": "2025-09-11",
+    "saved": 938.5
+   },
+   {
+    "delivery_day": "2025-09-12",
+    "saved": 939.4
+   },
+   {
+    "delivery_day": "2025-09-13",
+    "saved": 941.2
+   },
+   {
+    "delivery_day": "2025-09-14",
+    "saved": 937.8
+   },
+   {
+    "delivery_day": "2025-09-15",
+    "saved": 935.8
+   },
+   {
+    "delivery_day": "2025-09-16",
+    "saved": 936.0
+   },
+   {
+    "delivery_day": "2025-09-17",
+    "saved": 938.5
+   },
+   {
+    "delivery_day": "2025-09-18",
+    "saved": 938.6
+   },
+   {
+    "delivery_day": "2025-09-19",
+    "saved": 939.1
+   },
+   {
+    "delivery_day": "2025-09-20",
+    "saved": 937.1
+   },
+   {
+    "delivery_day": "2025-09-21",
+    "saved": 941.1
+   },
+   {
+    "delivery_day": "2025-09-22",
+    "saved": 938.6
+   },
+   {
+    "delivery_day": "2025-09-23",
+    "saved": 940.3
+   },
+   {
+    "delivery_day": "2025-09-24",
+    "saved": 940.6
+   },
+   {
+    "delivery_day": "2025-09-25",
+    "saved": 945.5
+   },
+   {
+    "delivery_day": "2025-09-26",
+    "saved": 948.7
+   },
+   {
+    "delivery_day": "2025-09-27",
+    "saved": 949.4
+   },
+   {
+    "delivery_day": "2025-09-28",
+    "saved": 949.6
+   },
+   {
+    "delivery_day": "2025-09-29",
+    "saved": 951.1
+   },
+   {
+    "delivery_day": "2025-09-30",
+    "saved": 952.4
+   },
+   {
+    "delivery_day": "2025-10-01",
+    "saved": 952.1
+   },
+   {
+    "delivery_day": "2025-10-02",
+    "saved": 950.3
+   },
+   {
+    "delivery_day": "2025-10-03",
+    "saved": 954.4
+   },
+   {
+    "delivery_day": "2025-10-04",
+    "saved": 956.0
+   },
+   {
+    "delivery_day": "2025-10-05",
+    "saved": 954.8
+   },
+   {
+    "delivery_day": "2025-10-06",
+    "saved": 957.8
+   },
+   {
+    "delivery_day": "2025-10-07",
+    "saved": 960.2
+   },
+   {
+    "delivery_day": "2025-10-08",
+    "saved": 961.2
+   },
+   {
+    "delivery_day": "2025-10-09",
+    "saved": 962.0
+   },
+   {
+    "delivery_day": "2025-10-10",
+    "saved": 962.0
+   },
+   {
+    "delivery_day": "2025-10-11",
+    "saved": 965.3
+   },
+   {
+    "delivery_day": "2025-10-12",
+    "saved": 972.3
+   },
+   {
+    "delivery_day": "2025-10-13",
+    "saved": 976.3
+   },
+   {
+    "delivery_day": "2025-10-14",
+    "saved": 976.8
+   },
+   {
+    "delivery_day": "2025-10-15",
+    "saved": 977.1
+   },
+   {
+    "delivery_day": "2025-10-16",
+    "saved": 977.3
+   },
+   {
+    "delivery_day": "2025-10-17",
+    "saved": 978.8
+   },
+   {
+    "delivery_day": "2025-10-18",
+    "saved": 977.9
+   },
+   {
+    "delivery_day": "2025-10-19",
+    "saved": 978.6
+   },
+   {
+    "delivery_day": "2025-10-20",
+    "saved": 976.2
+   },
+   {
+    "delivery_day": "2025-10-21",
+    "saved": 979.5
+   },
+   {
+    "delivery_day": "2025-10-22",
+    "saved": 976.8
+   },
+   {
+    "delivery_day": "2025-10-23",
+    "saved": 972.8
+   },
+   {
+    "delivery_day": "2025-10-24",
+    "saved": 972.2
+   },
+   {
+    "delivery_day": "2025-10-25",
+    "saved": 978.2
+   },
+   {
+    "delivery_day": "2025-10-26",
+    "saved": 981.5
+   },
+   {
+    "delivery_day": "2025-10-27",
+    "saved": 989.5
+   },
+   {
+    "delivery_day": "2025-10-28",
+    "saved": 985.5
+   },
+   {
+    "delivery_day": "2025-10-29",
+    "saved": 985.6
+   },
+   {
+    "delivery_day": "2025-10-30",
+    "saved": 983.3
+   },
+   {
+    "delivery_day": "2025-10-31",
+    "saved": 983.9
+   },
+   {
+    "delivery_day": "2025-11-01",
+    "saved": 976.0
+   },
+   {
+    "delivery_day": "2025-11-02",
+    "saved": 975.2
+   },
+   {
+    "delivery_day": "2025-11-03",
+    "saved": 976.4
+   },
+   {
+    "delivery_day": "2025-11-04",
+    "saved": 975.0
+   },
+   {
+    "delivery_day": "2025-11-05",
+    "saved": 973.9
+   },
+   {
+    "delivery_day": "2025-11-06",
+    "saved": 981.0
+   },
+   {
+    "delivery_day": "2025-11-07",
+    "saved": 976.0
+   },
+   {
+    "delivery_day": "2025-11-08",
+    "saved": 975.2
+   },
+   {
+    "delivery_day": "2025-11-09",
+    "saved": 978.8
+   },
+   {
+    "delivery_day": "2025-11-10",
+    "saved": 972.1
+   },
+   {
+    "delivery_day": "2025-11-11",
+    "saved": 973.1
+   },
+   {
+    "delivery_day": "2025-11-12",
+    "saved": 972.1
+   },
+   {
+    "delivery_day": "2025-11-13",
+    "saved": 973.7
+   },
+   {
+    "delivery_day": "2025-11-14",
+    "saved": 976.1
+   },
+   {
+    "delivery_day": "2025-11-15",
+    "saved": 976.1
+   },
+   {
+    "delivery_day": "2025-11-16",
+    "saved": 976.5
+   },
+   {
+    "delivery_day": "2025-11-17",
+    "saved": 977.8
+   },
+   {
+    "delivery_day": "2025-11-18",
+    "saved": 984.2
+   },
+   {
+    "delivery_day": "2025-11-19",
+    "saved": 986.8
+   },
+   {
+    "delivery_day": "2025-11-20",
+    "saved": 987.6
+   },
+   {
+    "delivery_day": "2025-11-21",
+    "saved": 984.9
+   },
+   {
+    "delivery_day": "2025-11-22",
+    "saved": 989.4
+   },
+   {
+    "delivery_day": "2025-11-23",
+    "saved": 993.1
+   },
+   {
+    "delivery_day": "2025-11-24",
+    "saved": 995.7
+   },
+   {
+    "delivery_day": "2025-11-25",
+    "saved": 995.7
+   },
+   {
+    "delivery_day": "2025-11-26",
+    "saved": 999.9
+   },
+   {
+    "delivery_day": "2025-11-27",
+    "saved": 1006.5
+   },
+   {
+    "delivery_day": "2025-11-28",
+    "saved": 1004.6
+   },
+   {
+    "delivery_day": "2025-11-29",
+    "saved": 1006.8
+   },
+   {
+    "delivery_day": "2025-11-30",
+    "saved": 1013.1
+   },
+   {
+    "delivery_day": "2025-12-01",
+    "saved": 1010.9
+   },
+   {
+    "delivery_day": "2025-12-02",
+    "saved": 1013.3
+   },
+   {
+    "delivery_day": "2025-12-03",
+    "saved": 1014.2
+   },
+   {
+    "delivery_day": "2025-12-04",
+    "saved": 1014.7
+   },
+   {
+    "delivery_day": "2025-12-05",
+    "saved": 1015.5
+   },
+   {
+    "delivery_day": "2025-12-06",
+    "saved": 1014.3
+   },
+   {
+    "delivery_day": "2025-12-07",
+    "saved": 1010.8
+   },
+   {
+    "delivery_day": "2025-12-08",
+    "saved": 1011.5
+   },
+   {
+    "delivery_day": "2025-12-09",
+    "saved": 1012.6
+   },
+   {
+    "delivery_day": "2025-12-10",
+    "saved": 1011.5
+   },
+   {
+    "delivery_day": "2025-12-11",
+    "saved": 1013.8
+   },
+   {
+    "delivery_day": "2025-12-12",
+    "saved": 1014.4
+   },
+   {
+    "delivery_day": "2025-12-13",
+    "saved": 1017.0
+   },
+   {
+    "delivery_day": "2025-12-14",
+    "saved": 1019.7
+   },
+   {
+    "delivery_day": "2025-12-15",
+    "saved": 1030.8
+   },
+   {
+    "delivery_day": "2025-12-16",
+    "saved": 1044.3
+   },
+   {
+    "delivery_day": "2025-12-17",
+    "saved": 1043.9
+   },
+   {
+    "delivery_day": "2025-12-18",
+    "saved": 1042.2
+   },
+   {
+    "delivery_day": "2025-12-19",
+    "saved": 1047.0
+   },
+   {
+    "delivery_day": "2025-12-20",
+    "saved": 1048.6
+   },
+   {
+    "delivery_day": "2025-12-21",
+    "saved": 1054.1
+   },
+   {
+    "delivery_day": "2025-12-22",
+    "saved": 1065.1
+   },
+   {
+    "delivery_day": "2025-12-23",
+    "saved": 1065.1
+   },
+   {
+    "delivery_day": "2025-12-24",
+    "saved": 1062.2
+   },
+   {
+    "delivery_day": "2025-12-25",
+    "saved": 1063.4
+   },
+   {
+    "delivery_day": "2025-12-26",
+    "saved": 1072.2
+   },
+   {
+    "delivery_day": "2025-12-27",
+    "saved": 1085.9
+   },
+   {
+    "delivery_day": "2025-12-28",
+    "saved": 1099.6
+   },
+   {
+    "delivery_day": "2025-12-29",
+    "saved": 1099.4
+   },
+   {
+    "delivery_day": "2025-12-30",
+    "saved": 1104.1
+   },
+   {
+    "delivery_day": "2025-12-31",
+    "saved": 1105.7
+   },
+   {
+    "delivery_day": "2026-01-01",
+    "saved": 1107.2
+   },
+   {
+    "delivery_day": "2026-01-02",
+    "saved": 1114.9
+   },
+   {
+    "delivery_day": "2026-01-03",
+    "saved": 1120.7
+   },
+   {
+    "delivery_day": "2026-01-04",
+    "saved": 1122.9
+   },
+   {
+    "delivery_day": "2026-01-05",
+    "saved": 1121.1
+   },
+   {
+    "delivery_day": "2026-01-06",
+    "saved": 1121.8
+   },
+   {
+    "delivery_day": "2026-01-07",
+    "saved": 1125.5
+   },
+   {
+    "delivery_day": "2026-01-08",
+    "saved": 1124.9
+   },
+   {
+    "delivery_day": "2026-01-09",
+    "saved": 1128.9
+   },
+   {
+    "delivery_day": "2026-01-10",
+    "saved": 1134.3
+   },
+   {
+    "delivery_day": "2026-01-11",
+    "saved": 1135.8
+   },
+   {
+    "delivery_day": "2026-01-12",
+    "saved": 1141.2
+   },
+   {
+    "delivery_day": "2026-01-13",
+    "saved": 1143.4
+   },
+   {
+    "delivery_day": "2026-01-14",
+    "saved": 1146.0
+   },
+   {
+    "delivery_day": "2026-01-15",
+    "saved": 1148.6
+   },
+   {
+    "delivery_day": "2026-01-16",
+    "saved": 1152.2
+   },
+   {
+    "delivery_day": "2026-01-17",
+    "saved": 1153.4
+   },
+   {
+    "delivery_day": "2026-01-18",
+    "saved": 1155.0
+   },
+   {
+    "delivery_day": "2026-01-19",
+    "saved": 1154.1
+   },
+   {
+    "delivery_day": "2026-01-20",
+    "saved": 1159.1
+   },
+   {
+    "delivery_day": "2026-01-21",
+    "saved": 1164.4
+   },
+   {
+    "delivery_day": "2026-01-22",
+    "saved": 1165.8
+   },
+   {
+    "delivery_day": "2026-01-23",
+    "saved": 1171.3
+   },
+   {
+    "delivery_day": "2026-01-24",
+    "saved": 1175.8
+   },
+   {
+    "delivery_day": "2026-01-25",
+    "saved": 1176.3
+   },
+   {
+    "delivery_day": "2026-01-26",
+    "saved": 1177.4
+   },
+   {
+    "delivery_day": "2026-01-27",
+    "saved": 1178.7
+   },
+   {
+    "delivery_day": "2026-01-28",
+    "saved": 1182.6
+   },
+   {
+    "delivery_day": "2026-01-29",
+    "saved": 1184.0
+   },
+   {
+    "delivery_day": "2026-01-30",
+    "saved": 1186.4
+   },
+   {
+    "delivery_day": "2026-01-31",
+    "saved": 1187.9
+   },
+   {
+    "delivery_day": "2026-02-01",
+    "saved": 1187.4
+   },
+   {
+    "delivery_day": "2026-02-02",
+    "saved": 1184.4
+   },
+   {
+    "delivery_day": "2026-02-03",
+    "saved": 1185.1
+   },
+   {
+    "delivery_day": "2026-02-04",
+    "saved": 1185.3
+   },
+   {
+    "delivery_day": "2026-02-05",
+    "saved": 1187.0
+   },
+   {
+    "delivery_day": "2026-02-06",
+    "saved": 1184.9
+   },
+   {
+    "delivery_day": "2026-02-07",
+    "saved": 1185.6
+   },
+   {
+    "delivery_day": "2026-02-08",
+    "saved": 1186.3
+   },
+   {
+    "delivery_day": "2026-02-09",
+    "saved": 1186.2
+   },
+   {
+    "delivery_day": "2026-02-10",
+    "saved": 1192.5
+   },
+   {
+    "delivery_day": "2026-02-11",
+    "saved": 1187.8
+   },
+   {
+    "delivery_day": "2026-02-12",
+    "saved": 1184.0
+   },
+   {
+    "delivery_day": "2026-02-13",
+    "saved": 1183.4
+   },
+   {
+    "delivery_day": "2026-02-14",
+    "saved": 1180.5
+   },
+   {
+    "delivery_day": "2026-02-15",
+    "saved": 1175.8
+   },
+   {
+    "delivery_day": "2026-02-16",
+    "saved": 1178.5
+   },
+   {
+    "delivery_day": "2026-02-17",
+    "saved": 1181.3
+   },
+   {
+    "delivery_day": "2026-02-18",
+    "saved": 1182.0
+   },
+   {
+    "delivery_day": "2026-02-19",
+    "saved": 1187.2
+   },
+   {
+    "delivery_day": "2026-02-20",
+    "saved": 1188.0
+   },
+   {
+    "delivery_day": "2026-02-21",
+    "saved": 1194.4
+   },
+   {
+    "delivery_day": "2026-02-22",
+    "saved": 1194.9
+   },
+   {
+    "delivery_day": "2026-02-23",
+    "saved": 1199.4
+   },
+   {
+    "delivery_day": "2026-02-24",
+    "saved": 1204.0
+   },
+   {
+    "delivery_day": "2026-02-25",
+    "saved": 1211.5
+   },
+   {
+    "delivery_day": "2026-02-26",
+    "saved": 1214.9
+   },
+   {
+    "delivery_day": "2026-02-27",
+    "saved": 1219.6
+   },
+   {
+    "delivery_day": "2026-02-28",
+    "saved": 1218.1
+   },
+   {
+    "delivery_day": "2026-03-01",
+    "saved": 1218.6
+   },
+   {
+    "delivery_day": "2026-03-02",
+    "saved": 1219.8
+   },
+   {
+    "delivery_day": "2026-03-03",
+    "saved": 1219.6
+   },
+   {
+    "delivery_day": "2026-03-04",
+    "saved": 1216.9
+   },
+   {
+    "delivery_day": "2026-03-05",
+    "saved": 1212.9
+   },
+   {
+    "delivery_day": "2026-03-06",
+    "saved": 1214.0
+   },
+   {
+    "delivery_day": "2026-03-07",
+    "saved": 1216.1
+   },
+   {
+    "delivery_day": "2026-03-08",
+    "saved": 1219.9
+   },
+   {
+    "delivery_day": "2026-03-09",
+    "saved": 1225.9
+   },
+   {
+    "delivery_day": "2026-03-10",
+    "saved": 1227.5
+   },
+   {
+    "delivery_day": "2026-03-11",
+    "saved": 1230.5
+   },
+   {
+    "delivery_day": "2026-03-12",
+    "saved": 1224.2
+   },
+   {
+    "delivery_day": "2026-03-13",
+    "saved": 1229.0
+   },
+   {
+    "delivery_day": "2026-03-14",
+    "saved": 1237.6
+   },
+   {
+    "delivery_day": "2026-03-15",
+    "saved": 1234.9
+   },
+   {
+    "delivery_day": "2026-03-16",
+    "saved": 1238.6
+   },
+   {
+    "delivery_day": "2026-03-17",
+    "saved": 1240.2
+   },
+   {
+    "delivery_day": "2026-03-18",
+    "saved": 1243.6
+   },
+   {
+    "delivery_day": "2026-03-19",
+    "saved": 1245.4
+   },
+   {
+    "delivery_day": "2026-03-20",
+    "saved": 1244.8
+   },
+   {
+    "delivery_day": "2026-03-21",
+    "saved": 1251.0
+   },
+   {
+    "delivery_day": "2026-03-22",
+    "saved": 1253.2
+   },
+   {
+    "delivery_day": "2026-03-23",
+    "saved": 1251.1
+   },
+   {
+    "delivery_day": "2026-03-24",
+    "saved": 1252.9
+   },
+   {
+    "delivery_day": "2026-03-25",
+    "saved": 1260.3
+   },
+   {
+    "delivery_day": "2026-03-26",
+    "saved": 1264.7
+   },
+   {
+    "delivery_day": "2026-03-27",
+    "saved": 1267.7
+   },
+   {
+    "delivery_day": "2026-03-28",
+    "saved": 1269.6
+   },
+   {
+    "delivery_day": "2026-03-29",
+    "saved": 1272.4
+   },
+   {
+    "delivery_day": "2026-03-30",
+    "saved": 1278.9
+   },
+   {
+    "delivery_day": "2026-03-31",
+    "saved": 1287.4
+   },
+   {
+    "delivery_day": "2026-04-01",
+    "saved": 1292.8
+   },
+   {
+    "delivery_day": "2026-04-02",
+    "saved": 1293.4
+   },
+   {
+    "delivery_day": "2026-04-03",
+    "saved": 1290.5
+   },
+   {
+    "delivery_day": "2026-04-04",
+    "saved": 1292.2
+   },
+   {
+    "delivery_day": "2026-04-05",
+    "saved": 1296.6
+   },
+   {
+    "delivery_day": "2026-04-06",
+    "saved": 1300.4
+   },
+   {
+    "delivery_day": "2026-04-07",
+    "saved": 1301.9
+   },
+   {
+    "delivery_day": "2026-04-08",
+    "saved": 1298.2
+   },
+   {
+    "delivery_day": "2026-04-09",
+    "saved": 1297.5
+   },
+   {
+    "delivery_day": "2026-04-10",
+    "saved": 1300.3
+   },
+   {
+    "delivery_day": "2026-04-11",
+    "saved": 1295.8
+   },
+   {
+    "delivery_day": "2026-04-12",
+    "saved": 1296.1
+   },
+   {
+    "delivery_day": "2026-04-13",
+    "saved": 1307.7
+   },
+   {
+    "delivery_day": "2026-04-14",
+    "saved": 1311.4
+   },
+   {
+    "delivery_day": "2026-04-15",
+    "saved": 1310.5
+   },
+   {
+    "delivery_day": "2026-04-16",
+    "saved": 1308.8
+   },
+   {
+    "delivery_day": "2026-04-17",
+    "saved": 1303.9
+   },
+   {
+    "delivery_day": "2026-04-18",
+    "saved": 1302.4
+   },
+   {
+    "delivery_day": "2026-04-19",
+    "saved": 1302.6
+   },
+   {
+    "delivery_day": "2026-04-20",
+    "saved": 1302.5
+   },
+   {
+    "delivery_day": "2026-04-21",
+    "saved": 1299.0
+   },
+   {
+    "delivery_day": "2026-04-22",
+    "saved": 1297.0
+   },
+   {
+    "delivery_day": "2026-04-23",
+    "saved": 1297.0
+   },
+   {
+    "delivery_day": "2026-04-24",
+    "saved": 1298.1
+   },
+   {
+    "delivery_day": "2026-04-25",
+    "saved": 1300.5
+   },
+   {
+    "delivery_day": "2026-04-26",
+    "saved": 1304.3
+   },
+   {
+    "delivery_day": "2026-04-27",
+    "saved": 1305.5
+   },
+   {
+    "delivery_day": "2026-04-28",
+    "saved": 1304.0
+   },
+   {
+    "delivery_day": "2026-04-29",
+    "saved": 1306.6
+   },
+   {
+    "delivery_day": "2026-04-30",
+    "saved": 1308.2
+   },
+   {
+    "delivery_day": "2026-05-01",
+    "saved": 1309.4
+   },
+   {
+    "delivery_day": "2026-05-02",
+    "saved": 1309.6
+   },
+   {
+    "delivery_day": "2026-05-03",
+    "saved": 1309.8
+   },
+   {
+    "delivery_day": "2026-05-04",
+    "saved": 1313.6
+   },
+   {
+    "delivery_day": "2026-05-05",
+    "saved": 1314.7
+   },
+   {
+    "delivery_day": "2026-05-06",
+    "saved": 1310.5
+   },
+   {
+    "delivery_day": "2026-05-07",
+    "saved": 1311.9
+   },
+   {
+    "delivery_day": "2026-05-08",
+    "saved": 1312.2
+   },
+   {
+    "delivery_day": "2026-05-09",
+    "saved": 1315.1
+   },
+   {
+    "delivery_day": "2026-05-10",
+    "saved": 1314.2
+   },
+   {
+    "delivery_day": "2026-05-11",
+    "saved": 1310.7
+   },
+   {
+    "delivery_day": "2026-05-12",
+    "saved": 1310.1
+   },
+   {
+    "delivery_day": "2026-05-13",
+    "saved": 1306.8
+   },
+   {
+    "delivery_day": "2026-05-14",
+    "saved": 1304.7
+   },
+   {
+    "delivery_day": "2026-05-15",
+    "saved": 1299.1
+   },
+   {
+    "delivery_day": "2026-05-16",
+    "saved": 1302.1
+   },
+   {
+    "delivery_day": "2026-05-17",
+    "saved": 1305.2
+   },
+   {
+    "delivery_day": "2026-05-18",
+    "saved": 1309.5
+   },
+   {
+    "delivery_day": "2026-05-19",
+    "saved": 1306.6
+   },
+   {
+    "delivery_day": "2026-05-20",
+    "saved": 1305.7
+   },
+   {
+    "delivery_day": "2026-05-21",
+    "saved": 1304.8
+   },
+   {
+    "delivery_day": "2026-05-22",
+    "saved": 1301.4
+   },
+   {
+    "delivery_day": "2026-05-23",
+    "saved": 1300.1
+   },
+   {
+    "delivery_day": "2026-05-24",
+    "saved": 1299.8
+   },
+   {
+    "delivery_day": "2026-05-25",
+    "saved": 1302.7
+   },
+   {
+    "delivery_day": "2026-05-26",
+    "saved": 1301.2
+   },
+   {
+    "delivery_day": "2026-05-27",
+    "saved": 1297.3
+   },
+   {
+    "delivery_day": "2026-05-28",
+    "saved": 1295.4
+   },
+   {
+    "delivery_day": "2026-05-29",
+    "saved": 1294.2
+   },
+   {
+    "delivery_day": "2026-05-30",
+    "saved": 1296.1
+   },
+   {
+    "delivery_day": "2026-05-31",
+    "saved": 1297.0
+   },
+   {
+    "delivery_day": "2026-06-01",
+    "saved": 1292.7
+   },
+   {
+    "delivery_day": "2026-06-02",
+    "saved": 1290.4
+   },
+   {
+    "delivery_day": "2026-06-03",
+    "saved": 1288.0
+   },
+   {
+    "delivery_day": "2026-06-04",
+    "saved": 1286.0
+   },
+   {
+    "delivery_day": "2026-06-05",
+    "saved": 1285.0
+   },
+   {
+    "delivery_day": "2026-06-06",
+    "saved": 1282.1
+   },
+   {
+    "delivery_day": "2026-06-07",
+    "saved": 1282.7
+   },
+   {
+    "delivery_day": "2026-06-08",
+    "saved": 1280.2
+   },
+   {
+    "delivery_day": "2026-06-09",
+    "saved": 1281.7
+   },
+   {
+    "delivery_day": "2026-06-10",
+    "saved": 1280.6
+   },
+   {
+    "delivery_day": "2026-06-11",
+    "saved": 1278.0
+   },
+   {
+    "delivery_day": "2026-06-12",
+    "saved": 1278.7
+   },
+   {
+    "delivery_day": "2026-06-13",
+    "saved": 1279.4
+   },
+   {
+    "delivery_day": "2026-06-14",
+    "saved": 1282.0
+   },
+   {
+    "delivery_day": "2026-06-15",
+    "saved": 1283.6
+   },
+   {
+    "delivery_day": "2026-06-16",
+    "saved": 1290.4
+   },
+   {
+    "delivery_day": "2026-06-17",
+    "saved": 1290.5
+   },
+   {
+    "delivery_day": "2026-06-18",
+    "saved": 1290.4
+   },
+   {
+    "delivery_day": "2026-06-19",
+    "saved": 1289.4
+   },
+   {
+    "delivery_day": "2026-06-20",
+    "saved": 1289.4
+   },
+   {
+    "delivery_day": "2026-06-21",
+    "saved": 1290.2
+   },
+   {
+    "delivery_day": "2026-06-22",
+    "saved": 1294.3
+   },
+   {
+    "delivery_day": "2026-06-23",
+    "saved": 1298.7
+   },
+   {
+    "delivery_day": "2026-06-24",
+    "saved": 1304.6
+   },
+   {
+    "delivery_day": "2026-06-25",
+    "saved": 1315.4
+   },
+   {
+    "delivery_day": "2026-06-26",
+    "saved": 1317.7
+   },
+   {
+    "delivery_day": "2026-06-27",
+    "saved": 1319.7
+   },
+   {
+    "delivery_day": "2026-06-28",
+    "saved": 1315.8
+   },
+   {
+    "delivery_day": "2026-06-29",
+    "saved": 1313.6
+   },
+   {
+    "delivery_day": "2026-06-30",
+    "saved": 1314.8
+   }
+  ],
+  "slices": [
+   {
+    "slice": "Weekends",
+    "hours": 5927,
+    "tree": 15.28,
+    "lear": 15.39,
+    "s1": 14.21
+   },
+   {
+    "slice": "Public holidays",
+    "hours": 648,
+    "tree": 19.65,
+    "lear": 19.4,
+    "s1": 18.29
+   },
+   {
+    "slice": "Windiest tenth of days",
+    "hours": 2088,
+    "tree": 18.68,
+    "lear": 17.56,
+    "s1": 16.76
+   },
+   {
+    "slice": "Sunniest tenth of days",
+    "hours": 2088,
+    "tree": 15.63,
+    "lear": 15.57,
+    "s1": 14.89
+   },
+   {
+    "slice": "Top 5% of hours by price",
+    "hours": 1037,
+    "tree": 22.77,
+    "lear": 20.93,
+    "s1": 20.18
+   }
+  ],
+  "research_settings": {
+   "tree": 15.71,
+   "s1": 14.37
+  },
+  "residual_load": {
+   "first_day": "2024-05-29",
+   "days": 763,
+   "tree": 15.92,
+   "s1": 14.62,
+   "s1_q": 14.34,
+   "paired": {
+    "days": 763,
+    "mean": -0.285,
+    "lo": -0.389,
+    "hi": -0.191,
+    "share_days_better": 0.564
+   }
+  }
+ },
+ "live": {
+  "first_day": "2026-10-20",
+  "last_day": "2026-11-19",
+  "days": 18,
+  "expected_days": 23,
+  "hours": 432,
+  "mean_price": 207.1,
+  "fallback_days": 0,
+  "models": [
+   {
+    "key": "tree",
+    "label": "Tree model (public)",
+    "mae": 26.41
+   },
+   {
+    "key": "lear",
+    "label": "LEAR",
+    "mae": 37.24
+   },
+   {
+    "key": "s1",
+    "label": "Ensemble",
+    "mae": 27.46
+   }
+  ],
+  "paired_s1_tree": {
+   "days": 18,
+   "mean": 1.054,
+   "lo": -1.571,
+   "hi": 3.202,
+   "share_days_better": 0.333
+  },
+  "paired_lear_tree": {
+   "days": 18,
+   "mean": 10.833,
+   "lo": 1.242,
+   "hi": 16.347,
+   "share_days_better": 0.222
+  },
+  "daily": [
+   {
+    "delivery_day": "2026-10-20",
+    "tree": 5.82,
+    "lear": 22.33,
+    "s1": 12.68
+   },
+   {
+    "delivery_day": "2026-10-21",
+    "tree": 33.57,
+    "lear": 34.58,
+    "s1": 33.66
+   },
+   {
+    "delivery_day": "2026-10-22",
+    "tree": 42.37,
+    "lear": 39.27,
+    "s1": 38.96
+   },
+   {
+    "delivery_day": "2026-10-23",
+    "tree": 51.69,
+    "lear": 78.29,
+    "s1": 62.48
+   },
+   {
+    "delivery_day": "2026-10-24",
+    "tree": 42.04,
+    "lear": 17.5,
+    "s1": 28.97
+   },
+   {
+    "delivery_day": "2026-10-27",
+    "tree": 37.39,
+    "lear": 37.33,
+    "s1": 33.97
+   },
+   {
+    "delivery_day": "2026-10-28",
+    "tree": 52.89,
+    "lear": 47.04,
+    "s1": 47.86
+   },
+   {
+    "delivery_day": "2026-10-29",
+    "tree": 21.32,
+    "lear": 25.54,
+    "s1": 21.63
+   },
+   {
+    "delivery_day": "2026-10-30",
+    "tree": 11.78,
+    "lear": 26.98,
+    "s1": 12.6
+   },
+   {
+    "delivery_day": "2026-10-31",
+    "tree": 34.67,
+    "lear": 54.0,
+    "s1": 42.52
+   },
+   {
+    "delivery_day": "2026-11-03",
+    "tree": 10.58,
+    "lear": 32.7,
+    "s1": 17.37
+   },
+   {
+    "delivery_day": "2026-11-04",
+    "tree": 11.48,
+    "lear": 18.26,
+    "s1": 13.27
+   },
+   {
+    "delivery_day": "2026-11-05",
+    "tree": 18.26,
+    "lear": 20.75,
+    "s1": 16.51
+   },
+   {
+    "delivery_day": "2026-11-06",
+    "tree": 10.61,
+    "lear": 33.59,
+    "s1": 17.01
+   },
+   {
+    "delivery_day": "2026-11-07",
+    "tree": 13.01,
+    "lear": 35.31,
+    "s1": 19.3
+   },
+   {
+    "delivery_day": "2026-11-10",
+    "tree": 30.93,
+    "lear": 36.59,
+    "s1": 22.12
+   },
+   {
+    "delivery_day": "2026-11-11",
+    "tree": 21.74,
+    "lear": 71.73,
+    "s1": 25.74
+   },
+   {
+    "delivery_day": "2026-11-19",
+    "tree": 25.17,
+    "lear": 38.51,
+    "s1": 27.63
+   }
+  ],
+  "above_200": {
+   "hours": 289,
+   "share": 0.669,
+   "bias_lear": -24.0,
+   "bias_tree": -6.1
+  }
+ },
+ "regime": {
+  "bins": [
+   {
+    "label": "under 50",
+    "backtest_days": 380,
+    "live_days": 1,
+    "backtest_share": 0.4398,
+    "live_share": 0.0556
+   },
+   {
+    "label": "50 to 100",
+    "backtest_days": 355,
+    "live_days": 2,
+    "backtest_share": 0.4109,
+    "live_share": 0.1111
+   },
+   {
+    "label": "100 to 150",
+    "backtest_days": 119,
+    "live_days": 0,
+    "backtest_share": 0.1377,
+    "live_share": 0.0
+   },
+   {
+    "label": "150 to 200",
+    "backtest_days": 10,
+    "live_days": 3,
+    "backtest_share": 0.0116,
+    "live_share": 0.1667
+   },
+   {
+    "label": "200 to 250",
+    "backtest_days": 0,
+    "live_days": 5,
+    "backtest_share": 0.0,
+    "live_share": 0.2778
+   },
+   {
+    "label": "250 and over",
+    "backtest_days": 0,
+    "live_days": 7,
+    "backtest_share": 0.0,
+    "live_share": 0.3889
+   }
+  ],
+  "backtest_days": 864,
+  "live_days": 18,
+  "backtest_days_150_plus": 10,
+  "live_days_200_plus": 12,
+  "backtest_150_plus": {
+   "tree": 23.1,
+   "lear": 23.1,
+   "bias_lear": -17.2,
+   "bias_tree": -4.9
+  }
+ },
+ "band": {
+  "first_day": "2024-08-18",
+  "last_day": "2026-06-30",
+  "days": 682,
+  "rows": [
+   {
+    "level": 80,
+    "coverage": 0.7801,
+    "width": 43.5,
+    "score": 68.0
+   },
+   {
+    "level": 95,
+    "coverage": 0.9334,
+    "width": 69.7,
+    "score": 103.7
+   }
+  ],
+  "challenger_score_80": 69.7,
+  "challenger_coverage_80": 0.7993,
+  "coverage_80_2026_h1": 0.7271,
+  "holiday_coverage_80": 0.6792
+ },
+ "ledger": {
+  "log_rows": 84,
+  "registrations": 6,
+  "amendments": 3,
+  "reviews": 5
+ },
+ "limits": {
+  "load_replay_days": 59,
+  "load_replay_lear": 0.11,
+  "load_replay_tree": 0.02,
+  "price_max_change": 0.12
+ },
+ "forward_test": {
+  "first_day": "2026-12-01",
+  "last_day": "2027-04-17"
+ }
+}
