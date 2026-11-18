@@ -131,6 +131,25 @@ def q_live(history: pd.DataFrame, day, windows=lear.LEAR_WINDOWS, candidates=CAN
     return out
 
 
+def fill_proxy_gaps(history: pd.DataFrame, log=None) -> tuple[pd.DataFrame, dict]:
+    """The wind and solar proxies where the history lacks them although the point forecasts are there, computed by the project's
+    own point-in-time rule (gen_proxy.rolling_proxy: weights refitted each month on actual generation up to two days before the
+    month). Values already in the history are never replaced. Found necessary on 2026-11-18: data/forecast/inputs.csv on the
+    laptop holds no proxy from 2026-08-20 to 2026-10-09, which would otherwise leave a hole in the regressor's training days."""
+    from . import solar_proxy, wind_proxy
+
+    out = history.copy()
+    filled = {}
+    for module, spec, actual in ((wind_proxy, wind_proxy.WIND, wind_proxy.actual_wind(history)), (solar_proxy, solar_proxy.SOLAR, solar_proxy.actual_solar(history))):
+        columns = [c for c in spec.columns if c in history.columns]
+        proxy, _ = module.rolling_proxy(history[columns], actual)
+        missing = out[spec.output].isna() & proxy.notna()
+        out.loc[missing, spec.output] = proxy[missing]
+        days = delivery_days(out.index[missing.to_numpy()])
+        filled[spec.output] = {"hours": int(missing.sum()), "first_day": str(days.min().date()) if len(days) else None, "last_day": str(days.max().date()) if len(days) else None}
+    return out, filled
+
+
 # --- hashes, the manifest and the write-once record --------------------------------------------------------------------------
 
 def sha256_file(path) -> str:
@@ -307,6 +326,8 @@ def issue(day: str, db=Path("data/forecast.db"), inputs_path=Path("data/forecast
     finally:
         conn.close()
     run_id = int(honest["run_id"])
+    if sorted((Path(out_dir) / "issued").glob(f"{day}_run{run_id:06d}_*.json")):
+        return {"delivery_day": day, "status": "already issued", "morning_run_id": run_id}
     window = window_file(fresh_dir, run_id)
     model = comparator_model(fresh_dir, run_id) or {}
     record = {"delivery_day": day, "morning_run_id": run_id, "honest_forecast_id": int(honest["forecast_id"]),
@@ -316,7 +337,7 @@ def issue(day: str, db=Path("data/forecast.db"), inputs_path=Path("data/forecast
               "code_commit": code_commit(repo), "versions": versions_used(), "flags": [], "kept": {}, "windows": {}}
     curves = {"g": g}
     try:
-        history = live_history(inputs_path, fresh_dir, upto_run_id=run_id)
+        history, record["proxy_gaps_filled"] = fill_proxy_gaps(live_history(inputs_path, fresh_dir, upto_run_id=run_id))
         result = q_live(history, day)
         record["tau_utc"] = result["tau_utc"]
         for name in CANDIDATES:
