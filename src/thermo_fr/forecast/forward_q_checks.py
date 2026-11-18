@@ -76,7 +76,7 @@ def scramble(hourly: pd.DataFrame, days=SCRAMBLE_DAYS, log=print) -> dict:
     return result
 
 
-def replay(db, inputs_path, fresh_dir, out: Path, shard=(0, 1), first: str = REPLAY_FROM, log=print) -> dict:
+def replay(db, inputs_path, fresh_dir, out: Path, shard=(0, 1), first: str = REPLAY_FROM, log=print, folder_name: str = "replay", fill: bool = False) -> dict:
     """L0 through q_live from the saved windows of each pre-market run, against the live LEAR the S2 shadow stored for the same
     run. Forecasts only: the table of auction prices is never opened here."""
     from .shadow import live_history
@@ -85,7 +85,7 @@ def replay(db, inputs_path, fresh_dir, out: Path, shard=(0, 1), first: str = REP
     versions = pd.read_sql_query("SELECT version_id, delivery_day, morning_run_id, issued_at_utc FROM shadow_versions WHERE model = 'LEAR' AND before_window = 1"
                                  " AND fallback = 0 AND delivery_day >= ? ORDER BY delivery_day, version_id", conn, params=(first,))
     versions = versions.groupby("delivery_day").last().reset_index()
-    folder = Path(out) / "replay"
+    folder = Path(out) / folder_name
     folder.mkdir(parents=True, exist_ok=True)
     for k, v in versions.iterrows():
         path = folder / f"{v['delivery_day']}.json"
@@ -97,7 +97,10 @@ def replay(db, inputs_path, fresh_dir, out: Path, shard=(0, 1), first: str = REP
         record = {"delivery_day": v["delivery_day"], "morning_run_id": int(v["morning_run_id"]), "live_issued_at_utc": v["issued_at_utc"]}
         try:
             history = live_history(inputs_path, fresh_dir, upto_run_id=int(v["morning_run_id"]))
+            if fill:  # amendment 1: the daily issue fills the hole in the proxies before q_live
+                history, record["proxy_gaps_filled"] = fq.fill_proxy_gaps(history)
             live = fq.q_live(history, v["delivery_day"])
+            record["p_q_max_abs_difference_by_window"] = {str(w): float((live["P"]["windows"][w] - live["Q"]["windows"][w]).abs().max()) for w in nr.WINDOWS}
             l0 = live["L0"]["hourly"].reindex(stored.index)
             record.update({"hours": int(len(stored)), "l0_max_abs_difference": float((l0 - stored).abs().max()),
                            "l0_mean_abs_difference": float((l0 - stored).abs().mean()),
@@ -113,8 +116,8 @@ def replay(db, inputs_path, fresh_dir, out: Path, shard=(0, 1), first: str = REP
     return {"days": int(len(versions))}
 
 
-def replay_summary(out: Path) -> dict:
-    records = [json.loads(p.read_text()) for p in sorted((Path(out) / "replay").glob("*.json"))]
+def replay_summary(out: Path, folder_name: str = "replay") -> dict:
+    records = [json.loads(p.read_text()) for p in sorted((Path(out) / folder_name).glob("*.json"))]
     good = [r for r in records if "error" not in r]
     return {"days": len(records), "errors": [{"day": r["delivery_day"], "error": r["error"]} for r in records if "error" in r],
             "first_day": records[0]["delivery_day"] if records else None, "last_day": records[-1]["delivery_day"] if records else None,
@@ -233,6 +236,12 @@ def summary(out: Path, frame: pd.DataFrame) -> dict:
         if path.exists():
             result[name] = json.loads(path.read_text())
     result["replay"] = replay_summary(out)
+    if (Path(out) / "replay_filled").exists():
+        result["replay_with_amendment_1"] = replay_summary(out, "replay_filled")
+        records = [json.loads(p.read_text()) for p in sorted((Path(out) / "replay_filled").glob("*.json"))]
+        good = [r for r in records if "error" not in r]
+        result["replay_with_amendment_1"]["p_q_max_abs_difference_by_window"] = {w: max(r["p_q_max_abs_difference_by_window"][w] for r in good) for w in ("364", "728", "1092", "1456")} if good else None
+        result["replay_with_amendment_1"]["mean_abs_difference_between_P_and_Q_forecasts"] = float(np.mean([np.mean(np.abs(np.array(r["forecasts"]["P"]) - np.array(r["forecasts"]["Q"]))) for r in good])) if good else None
     gbm_files = sorted((Path(out) / "gbm_prod").glob("*.csv"))
     if gbm_files:
         gbm = pd.concat([lear_recipe.read_frame(p) for p in gbm_files]).sort_index()
@@ -276,7 +285,7 @@ def main(argv=None) -> None:
     from .inputs import load_inputs
 
     parser = argparse.ArgumentParser(description="Checks before the forward test of Q (docs/prereg/forward_q_prereg.md)")
-    parser.add_argument("stage", choices=["same-path", "scramble", "replay", "vectors", "gbm", "revision", "summary"])
+    parser.add_argument("stage", choices=["same-path", "scramble", "replay", "replay-filled", "vectors", "gbm", "revision", "summary"])
     parser.add_argument("--data", default="data/forecast/inputs.csv")
     parser.add_argument("--frame", default=None, help="frame.csv of the French residual load run")
     parser.add_argument("--db", default="data/forecast.db")
@@ -297,6 +306,8 @@ def main(argv=None) -> None:
         print(json.dumps({k: result[k] for k in ("max_abs_difference", "passes")}))
     elif args.stage == "replay":
         print(replay(args.db, Path(args.data), Path(args.fresh), out, args.shard))
+    elif args.stage == "replay-filled":
+        print(replay(args.db, Path(args.data), Path(args.fresh), out, args.shard, folder_name="replay_filled", fill=True))
     elif args.stage == "vectors":
         vectors = revision_vectors(args.fresh)
         vectors.to_csv(out / "revision_vectors.csv", index_label="day")

@@ -286,6 +286,16 @@ def versions_used() -> dict:
             "scipy": scipy.__version__, "lightgbm": lightgbm.__version__}
 
 
+def code_sha256() -> str:
+    """One hash over every source file of thermo_fr.forecast as it is imported now, in name order. Unlike the commit, it changes
+    when a file was edited without a commit, so a record shows which code really ran."""
+    h = hashlib.sha256()
+    for path in sorted(Path(__file__).parent.glob("*.py")):
+        h.update(path.name.encode())
+        h.update(path.read_bytes().replace(b"\r\n", b"\n"))  # the same hash on Windows and Linux checkouts
+    return h.hexdigest()
+
+
 def code_commit(repo=Path(".")) -> str | None:
     """The checked-out commit, read from .git without running git (no lock files on the laptop's folders)."""
     try:
@@ -334,7 +344,7 @@ def issue(day: str, db=Path("data/forecast.db"), inputs_path=Path("data/forecast
               "honest_issued_at_utc": str(honest["issued_at_utc"]), "honest_model": str(honest["model"]),
               "g_fallback": bool(str(honest["model"]).endswith(":fallback")), "model_sha256": model.get("sha256"),
               "window_file": window.name if window else None, "window_sha256": sha256_file(window) if window else None,
-              "code_commit": code_commit(repo), "versions": versions_used(), "flags": [], "kept": {}, "windows": {}}
+              "code_commit": code_commit(repo), "code_sha256": code_sha256(), "versions": versions_used(), "flags": [], "kept": {}, "windows": {}}
     curves = {"g": g}
     try:
         history, record["proxy_gaps_filled"] = fill_proxy_gaps(live_history(inputs_path, fresh_dir, upto_run_id=run_id))
@@ -360,6 +370,10 @@ def issue(day: str, db=Path("data/forecast.db"), inputs_path=Path("data/forecast
             curves["S1_Q"] = (g + curves["Q"]) / 2
     if record["g_fallback"]:
         record["flags"].append("g fallback")
+    published = Path(".publish-worktree/published/model/honest_v2.txt")  # origin/main as the 14:30 market publish last fetched it
+    record["published_model_sha256"] = sha256_file(published) if published.exists() else None
+    if record["published_model_sha256"] and record["model_sha256"] and not record["g_fallback"] and record["published_model_sha256"] != record["model_sha256"]:
+        record["flags"].append("g file differs from the published file")  # scored, and reported: the laptop's checkout is behind a refit
     issued = clock()
     record["issued_at_utc"] = pd.Timestamp(issued).tz_convert("UTC").strftime("%Y-%m-%dT%H:%M:%SZ")
     record["before_window"] = bool(pd.Timestamp(issued) < premarket_cutoff(day))

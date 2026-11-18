@@ -1,0 +1,357 @@
+{
+ "same_path": {
+  "days": {
+   "2024-02-18": {
+    "L0": 7.105427357601002e-15,
+    "P": 7.105427357601002e-15,
+    "Q": 7.105427357601002e-15
+   },
+   "2024-05-10": {
+    "L0": 7.105427357601002e-15,
+    "P": 7.105427357601002e-15,
+    "Q": 7.105427357601002e-15
+   },
+   "2024-10-27": {
+    "L0": 7.105427357601002e-15,
+    "P": 1.4210854715202004e-14,
+    "Q": 1.4210854715202004e-14
+   },
+   "2025-03-30": {
+    "L0": 7.105427357601002e-15,
+    "P": 7.105427357601002e-15,
+    "Q": 7.105427357601002e-15
+   },
+   "2026-06-24": {
+    "L0": 2.842170943040401e-14,
+    "P": 5.684341886080802e-14,
+    "Q": 5.684341886080802e-14
+   }
+  },
+  "max_abs_difference": 5.684341886080802e-14,
+  "passes": true
+ },
+ "scramble": {
+  "days": {
+   "2024-10-27": {
+    "scrambled_input_values": 894884,
+    "L0": 0.0,
+    "P": 0.0,
+    "Q": 0.0
+   },
+   "2025-03-30": {
+    "scrambled_input_values": 669455,
+    "L0": 0.0,
+    "P": 0.0,
+    "Q": 0.0
+   },
+   "2026-03-29": {
+    "scrambled_input_values": 136559,
+    "L0": 0.0,
+    "P": 0.0,
+    "Q": 0.0
+   }
+  },
+  "max_abs_difference": 0.0,
+  "passes": true
+ },
+ "replay": {
+  "days": 18,
+  "errors": [],
+  "first_day": "2026-10-20",
+  "last_day": "2026-11-19",
+  "l0_max_abs_difference": 1.2002487892459612e-09,
+  "l0_mean_abs_difference": 7.667897592598281e-11,
+  "days_with_L0_P_Q_complete": 18,
+  "q_kept_min_of_24": 24,
+  "seconds_median": 60.8,
+  "passes": true
+ },
+ "replay_with_amendment_1": {
+  "days": 18,
+  "errors": [],
+  "first_day": "2026-10-20",
+  "last_day": "2026-11-19",
+  "l0_max_abs_difference": 1.2002487892459612e-09,
+  "l0_mean_abs_difference": 7.667897592598281e-11,
+  "days_with_L0_P_Q_complete": 18,
+  "q_kept_min_of_24": 23,
+  "seconds_median": 49.25,
+  "passes": true,
+  "p_q_max_abs_difference_by_window": {
+   "364": 0.0,
+   "728": 0.0,
+   "1092": 78.47289473240471,
+   "1456": 95.2514135947037
+  },
+  "mean_abs_difference_between_P_and_Q_forecasts": 5.546614867860622
+ },
+ "production_settings": {
+  "all_864_days": {
+   "honest_v2": 15.712366685778132,
+   "honest_v2_prod": 16.091389617365977,
+   "S1": 14.368671470854746,
+   "S1_prod": 14.56925497686102
+  },
+  "rule_763_days": {
+   "honest_v2": 15.54242906389474,
+   "honest_v2_prod": 15.919890474472412,
+   "research_settings_S1_Q_vs_S1": {
+    "mae": 14.133833624585694,
+    "baseline_mae": 14.395250321896409,
+    "gain": 0.2614166973107146,
+    "days": 763,
+    "mean": -0.2612755414752443,
+    "ci95": [
+     -0.3651953641585881,
+     -0.17002553689073244
+    ],
+    "share_days_better": 0.5674967234600262,
+    "one_sided_level": 0.95,
+    "upper_one_sided": -0.18921748260249868
+   },
+   "production_settings_S1_Q_vs_S1": {
+    "mae": 14.338602097650732,
+    "baseline_mae": 14.623390194819251,
+    "gain": 0.28478809716851927,
+    "days": 763,
+    "mean": -0.2846471706682471,
+    "ci95": [
+     -0.38930572488597665,
+     -0.19130801382505802
+    ],
+    "share_days_better": 0.563564875491481,
+    "one_sided_level": 0.95,
+    "upper_one_sided": -0.20927256307221082
+   },
+   "production_settings_S1_Q_vs_honest_v2": {
+    "mae": 14.338602097650732,
+    "baseline_mae": 15.919890474472412,
+    "gain": 1.5812883768216803,
+    "days": 763,
+    "mean": -1.5808570459071816,
+    "ci95": [
+     -1.9469031772471568,
+     -1.2938654334085207
+    ],
+    "share_days_better": 0.6815203145478375,
+    "one_sided_level": 0.95,
+    "upper_one_sided": -1.3406671522704852
+   },
+   "production_vs_research_honest_v2": {
+    "mae": 15.919890474472412,
+    "baseline_mae": 15.54242906389474,
+    "gain": -0.3774614105776717,
+    "days": 763,
+    "mean": 0.37764638795758065,
+    "ci95": [
+     0.13850483899097094,
+     0.6185469981361577
+    ],
+    "share_days_better": 0.4429882044560944,
+    "one_sided_level": 0.95,
+    "upper_one_sided": 0.580233968582236
+   }
+  }
+ },
+ "load_revision": {
+  "days": 59,
+  "hours": 1416,
+  "archive_load": {
+   "L0": 16.504406655716462,
+   "Q": 15.700319832220112,
+   "honest_v2_prod": 15.807948117181056,
+   "S1_prod": 15.282366388456111,
+   "S1_Q_prod": 14.892893926140838,
+   "gain_Q_over_L0": 0.8040868234963501,
+   "gain_S1_Q_over_S1": 0.38947246231527366
+  },
+  "revised_load": {
+   "L0": 16.611447795271385,
+   "Q": 15.871812502871032,
+   "honest_v2_prod": 15.825853439732,
+   "S1_prod": 15.326097754324788,
+   "S1_Q_prod": 14.962634294943483,
+   "gain_Q_over_L0": 0.7396352924003526,
+   "gain_S1_Q_over_S1": 0.36346345938130575
+  },
+  "mean_abs_change_of_forecast": {
+   "L0": 1.3840977059276982,
+   "Q": 1.4886361683085754,
+   "honest_v2_prod": 0.7965556004050611
+  },
+  "paired_revised_minus_archive": {
+   "L0": {
+    "days": 59,
+    "mean": 0.10704113955492034,
+    "ci95": [
+     -0.23734728651034018,
+     0.4800349971538429
+    ],
+    "share_days_better": 0.4576271186440678
+   },
+   "Q": {
+    "days": 59,
+    "mean": 0.17149267065092233,
+    "ci95": [
+     -0.042789842867015586,
+     0.4795050610026835
+    ],
+    "share_days_better": 0.4067796610169492
+   },
+   "S1_prod": {
+    "days": 59,
+    "mean": 0.04373136586867533,
+    "ci95": [
+     -0.17220694296121636,
+     0.28237947717948225
+    ],
+    "share_days_better": 0.4576271186440678
+   },
+   "S1_Q_prod": {
+    "days": 59,
+    "mean": 0.06974036880264695,
+    "ci95": [
+     -0.1107226255352414,
+     0.29573166917545485
+    ],
+    "share_days_better": 0.4406779661016949
+   }
+  }
+ },
+ "vintage": {
+  "load_before 10:05": {
+   "days": 22,
+   "days_differ": 22,
+   "mean_abs_mw": 705.5741003787879,
+   "pct_of_load": 1.3440183834659023
+  },
+  "load_10:05-11:00": {
+   "days": 21,
+   "days_differ": 21,
+   "mean_abs_mw": 717.6567460317461,
+   "pct_of_load": 1.368622344609427
+  },
+  "load_11:00-12:00": {
+   "days": 20,
+   "days_differ": 18,
+   "mean_abs_mw": 561.3565104166667,
+   "pct_of_load": 1.0726534732134103
+  },
+  "load_after 12:00": {
+   "days": 23,
+   "days_differ": 19,
+   "mean_abs_mw": 493.3485054347827,
+   "pct_of_load": 0.9391798406101463
+  },
+  "load_after_d1": {
+   "hours": 528,
+   "changed": 456,
+   "mean_abs_mw": 515.7734375
+  },
+  "temp_fc_c": {
+   "hours": 504,
+   "changed": 0,
+   "mean_abs": 0.0,
+   "level": 10.11092668344871
+  },
+  "wind100_fc_ms": {
+   "hours": 504,
+   "changed": 0,
+   "mean_abs": 0.0,
+   "level": 6.078772597001764
+  },
+  "radiation_fc_wm2": {
+   "hours": 504,
+   "changed": 0,
+   "mean_abs": 0.0,
+   "level": 77.42390873015873
+  },
+  "wind_pt_Somme_ms": {
+   "hours": 504,
+   "changed": 0,
+   "mean_abs": 0.0,
+   "level": 6.706845238095238
+  },
+  "solar_pt_Landes_wm2": {
+   "hours": 504,
+   "changed": 0,
+   "mean_abs": 0.0,
+   "level": 102.98988095238096
+  },
+  "wind_proxy_mw": {
+   "hours": 504,
+   "changed": 144,
+   "mean_abs": 11.509374714691806,
+   "level": 6499.830471922938
+  },
+  "solar_proxy_mw": {
+   "hours": 504,
+   "changed": 66,
+   "mean_abs": 10.488944980158728,
+   "level": 1759.990908829365
+  },
+  "wind_onshore_mw": {
+   "hours": 0,
+   "changed": 0,
+   "mean_abs": NaN,
+   "p95": NaN,
+   "level": NaN
+  },
+  "wind_offshore_mw": {
+   "hours": 0,
+   "changed": 0,
+   "mean_abs": NaN,
+   "p95": NaN,
+   "level": NaN
+  },
+  "solar_mw": {
+   "hours": 0,
+   "changed": 0,
+   "mean_abs": NaN,
+   "p95": NaN,
+   "level": NaN
+  },
+  "nuclear_mw": {
+   "hours": 899,
+   "changed": 11,
+   "mean_abs": 4.332246941045601,
+   "p95": 0.0,
+   "level": 39799.54638765295
+  },
+  "price_eur_mwh": {
+   "hours": 911,
+   "changed": 0,
+   "mean_abs": 0.0,
+   "p95": 0.0,
+   "level": 197.15145444566414
+  },
+  "price_de_lu_eur_mwh": {
+   "hours": 935,
+   "changed": 817,
+   "mean_abs": 5.696390374331551,
+   "p95": 21.915249999999975,
+   "level": 203.7058983957219
+  },
+  "price_es_eur_mwh": {
+   "hours": 911,
+   "changed": 893,
+   "mean_abs": 6.678515367727773,
+   "p95": 21.45875000000001,
+   "level": 174.5892014270033
+  },
+  "price_be_eur_mwh": {
+   "hours": 911,
+   "changed": 2,
+   "mean_abs": 0.0030268935236004396,
+   "p95": 0.0,
+   "level": 208.82005214050494
+  },
+  "price_ch_eur_mwh": {
+   "hours": 935,
+   "changed": 0,
+   "mean_abs": 0.0,
+   "p95": 0.0,
+   "level": 248.76514705882352
+  }
+ }
+}
