@@ -115,3 +115,20 @@ auction and sees no other reading. Its cautions:
 The forward test starts on 2026-12-01 as registered, on the production data path as it is. A corrected parser is stage
 two. It changes the inputs of L0, Q and the public model, so it needs its own registration and the owner's approval, and
 it should land after the forward test ends or at a point where the owner accepts that the record ends.
+
+## Addendum, 2026-11-18 evening: what sequence 2 is
+
+Written after the results above and changing none of them.
+
+- **Identification from outside sources.** Public projects that read the same documents (the entsoe-py issue tracker, the
+  electricitymaps parsers, two others) describe sequence 1 for DE-LU as the coupled SDAC auction, one of them after matching
+  it to the Bundesnetzagentur price, and sequence 2 as EXAA's independent 10:15 auction. This agrees with the equality test
+  above. It was not checked here against an official price file, since this workspace cannot reach one. Spain's four series
+  since 2025-09-05 are still unidentified.
+- **When sequence 2 for D reaches ENTSO-E.** In the 124 saved morning windows (23 delivery days), the German price for D is
+  absent from all 77 windows fetched before 11:00 Paris on a normal day and present in 19 of the 20 fetched between 11:31
+  and 11:40 and in all 21 fetched after 12:00. The exception is delivery day 2026-10-27, present from 08:03 on the Monday,
+  the Austrian national holiday, for which the auction ran the Friday before. The timing rule blanks every price of D, so
+  no forecast read it.
+- **Consequence.** The series the models have read is a real, separate market observation. By the owner's decision of
+  2026-11-18 the coupled price becomes the German day-ahead price and the EXAA series is stored under its own name.
