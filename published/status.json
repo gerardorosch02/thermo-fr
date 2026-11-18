@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-11-18T09:32:50Z",
+  "written_at_utc": "2026-11-18T13:21:16Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -12,12 +12,12 @@
   "from_day": "2026-08-20",
   "tomorrow": "2026-11-19",
   "forecast_versions": 67,
-  "actual_days": 43,
-  "scored_versions": 65,
+  "actual_days": 44,
+  "scored_versions": 67,
   "live_record": {
     "default": {
       "feature_set": "honest_v2",
-      "days": 24,
+      "days": 25,
       "late_only_days": [
         {
           "delivery_day": "2026-10-13",
@@ -32,10 +32,10 @@
       ],
       "window_days": 30,
       "first_premarket_day": "2026-10-14",
-      "last_premarket_day": "2026-11-14",
-      "days_in_window": 24,
-      "model_mae": 25.79,
-      "model_rmse": 31.52,
+      "last_premarket_day": "2026-11-19",
+      "days_in_window": 25,
+      "model_mae": 25.76,
+      "model_rmse": 31.56,
       "scored_against": "the auction result; the EEX traded price is the only benchmark (Versus the market)",
       "status": "ok"
     },
@@ -156,11 +156,11 @@
   },
   "last_run": {
     "run_id": 1,
-    "command": "morning-run",
+    "command": "settle",
     "kind": "scheduled",
-    "delivery_day": "2026-11-19",
-    "started_at_utc": "2026-11-18T09:30:49Z",
-    "finished_at_utc": "2026-11-18T09:32:48Z",
+    "delivery_day": null,
+    "started_at_utc": "2026-11-18T13:20:43Z",
+    "finished_at_utc": "2026-11-18T13:21:15Z",
     "status": "ok",
     "message": ""
   },
@@ -183,37 +183,37 @@
     "carried_note": "this machine holds no traded prices; the aggregates are the last ones computed on the laptop"
   },
   "shape_battery": {
-    "days": 26,
+    "days": 27,
     "shape": {
-      "hours": 624,
-      "days": 26,
+      "hours": 648,
+      "days": 27,
       "model": {
-        "shape_mae": 19.73,
-        "spread_error": 16.78,
-        "cheapest2_hit_rate": 0.615,
-        "dearest2_hit_rate": 0.615
+        "shape_mae": 19.87,
+        "spread_error": 16.86,
+        "cheapest2_hit_rate": 0.593,
+        "dearest2_hit_rate": 0.63
       },
       "d1": {
-        "shape_mae": 26.58,
-        "spread_error": 23.36,
-        "cheapest2_hit_rate": 0.423,
-        "dearest2_hit_rate": 0.635
+        "shape_mae": 26.31,
+        "spread_error": 23.33,
+        "cheapest2_hit_rate": 0.407,
+        "dearest2_hit_rate": 0.648
       }
     },
     "battery": {
-      "days": 26,
-      "perfect_eur_per_day": 227.43,
+      "days": 27,
+      "perfect_eur_per_day": 231.92,
       "model": {
-        "eur_per_day": 206.27,
-        "share_of_perfect": 0.907,
-        "days_traded": 26,
+        "eur_per_day": 211.43,
+        "share_of_perfect": 0.912,
+        "days_traded": 27,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 185.45,
-        "share_of_perfect": 0.815,
-        "days_traded": 26,
+        "eur_per_day": 191.39,
+        "share_of_perfect": 0.825,
+        "days_traded": 27,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -221,26 +221,26 @@
   },
   "probabilistic": {
     "live": {
-      "days": 24,
-      "hours": 576,
+      "days": 25,
+      "hours": 600,
       "negative": {
-        "events": 0,
-        "hours": 576,
-        "brier": 0.00053,
-        "brier_base_rate": 0.0,
-        "log_loss": 0.0083,
+        "events": 3,
+        "hours": 600,
+        "brier": 0.0048,
+        "brier_base_rate": 0.00497,
+        "log_loss": 0.0222,
         "reliability": [
           {
             "bin": "0.0-0.1",
-            "n": 566,
-            "mean_forecast": 0.0055,
-            "observed_frequency": 0.0
+            "n": 586,
+            "mean_forecast": 0.0065,
+            "observed_frequency": 0.0034
           },
           {
             "bin": "0.1-0.2",
-            "n": 9,
-            "mean_forecast": 0.1404,
-            "observed_frequency": 0.0
+            "n": 13,
+            "mean_forecast": 0.1413,
+            "observed_frequency": 0.0769
           },
           {
             "bin": "0.2-0.3",
@@ -292,7 +292,7 @@
           }
         ]
       },
-      "negative_calibrated_hours": 576
+      "negative_calibrated_hours": 600
     },
     "backtest_file": "probabilistic_backtest.json",
     "calibration": {

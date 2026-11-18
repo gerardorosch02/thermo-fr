@@ -235,37 +235,37 @@
     }
   },
   "live": {
-    "days": 26,
+    "days": 27,
     "shape": {
-      "hours": 624,
-      "days": 26,
+      "hours": 648,
+      "days": 27,
       "model": {
-        "shape_mae": 19.73,
-        "spread_error": 16.78,
-        "cheapest2_hit_rate": 0.615,
-        "dearest2_hit_rate": 0.615
+        "shape_mae": 19.87,
+        "spread_error": 16.86,
+        "cheapest2_hit_rate": 0.593,
+        "dearest2_hit_rate": 0.63
       },
       "d1": {
-        "shape_mae": 26.58,
-        "spread_error": 23.36,
-        "cheapest2_hit_rate": 0.423,
-        "dearest2_hit_rate": 0.635
+        "shape_mae": 26.31,
+        "spread_error": 23.33,
+        "cheapest2_hit_rate": 0.407,
+        "dearest2_hit_rate": 0.648
       }
     },
     "battery": {
-      "days": 26,
-      "perfect_eur_per_day": 227.43,
+      "days": 27,
+      "perfect_eur_per_day": 231.92,
       "model": {
-        "eur_per_day": 206.27,
-        "share_of_perfect": 0.907,
-        "days_traded": 26,
+        "eur_per_day": 211.43,
+        "share_of_perfect": 0.912,
+        "days_traded": 27,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 185.45,
-        "share_of_perfect": 0.815,
-        "days_traded": 26,
+        "eur_per_day": 191.39,
+        "share_of_perfect": 0.825,
+        "days_traded": 27,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -660,6 +660,21 @@
         "discharge_d1": 17,
         "shape_mae_model": 22.467534722222222,
         "shape_mae_d1": 33.55277777777778
+      },
+      {
+        "delivery_day": "2026-11-19",
+        "hours": 24,
+        "value_perfect": 348.59999999999997,
+        "value_model": 345.71999999999997,
+        "traded_model": true,
+        "charge_model": 4,
+        "discharge_model": 18,
+        "value_d1": 345.875,
+        "traded_d1": true,
+        "charge_d1": 3,
+        "discharge_d1": 18,
+        "shape_mae_model": 23.613541666666663,
+        "shape_mae_d1": 19.42625
       }
     ]
   },
