@@ -98,6 +98,7 @@ class TimeSeriesData:
     business_type: str | None = None
     curve_type: str | None = None
     meta: dict = field(default_factory=dict)
+    sequence: str | None = None  # classificationSequence position: a zone can publish several price series (see select_price_sequence)
 
 
 def _local(tag: str) -> str:
@@ -158,6 +159,7 @@ def parse_document(content: bytes) -> list[TimeSeriesData]:
     out = []
     for ts in _children(root, "TimeSeries"):
         curve_type = _child_text(ts, "curveType")
+        sequence = next(((child.text or "").strip() or None for child in ts if _local(child.tag).startswith("classificationSequence")), None)
         for period in _children(ts, "Period"):
             values, resolution = expand_period(period, curve_type)
             out.append(
@@ -168,9 +170,42 @@ def parse_document(content: bytes) -> list[TimeSeriesData]:
                     business_type=_child_text(ts, "businessType"),
                     curve_type=curve_type,
                     meta=meta,
+                    sequence=sequence,
                 )
             )
     return out
+
+
+UNNUMBERED = "unnumbered"
+
+
+def sequence_label(sequence: str | None) -> str:
+    return UNNUMBERED if sequence is None else str(sequence)
+
+
+def coupled_sequence(sequences) -> str | None:
+    """Which of a zone's price series is the coupled day-ahead auction: the unnumbered one when there is one, otherwise the
+    lowest number.
+
+    Found on 2026-11-18 from the raw files of 2021 to 2026 (docs/prereg/price_seq_prereg.md): DE-LU publishes sequences 1 and
+    2 and Spain an unnumbered series beside sequences 1 to 3. In each zone exactly one series equals the French day-ahead price
+    to the cent in a large share of hours, as coupled zones do when no border binds (DE-LU sequence 1: 13% to 49% by year;
+    Spain unnumbered: 27% to 37%); the others do so in about 1% of hours or less. Until this rule the pieces of every series
+    were pooled and the finest resolution won, which stored DE-LU sequence 2 from 2021 and, once two series shared a
+    resolution, a blend that changed from one fetch to the next."""
+    present = set(sequences)
+    if None in present:
+        return None
+    return min(present, key=lambda v: (0, int(v)) if str(v).isdigit() else (1, str(v)))
+
+
+def select_price_sequence(parts: list[TimeSeriesData], sequence: str | None | type(...) = ...) -> list[TimeSeriesData]:
+    """The pieces of one price series only: `sequence` when given (None is the unnumbered one), the coupled one otherwise. Pieces
+    of different series are never combined."""
+    if not parts:
+        return parts
+    wanted = coupled_sequence(p.sequence for p in parts) if sequence is ... else sequence
+    return [p for p in parts if p.sequence == wanted]
 
 
 def combine_resolutions(parts: list[TimeSeriesData]) -> pd.Series:
@@ -309,8 +344,20 @@ class EntsoeApi:
     # Public series, all hourly UTC and clipped to [start, end).
 
     def day_ahead_prices(self, start: str, end: str) -> pd.Series:
+        """The coupled day-ahead price, hourly. Where the zone publishes several series only the coupled one is read
+        (select_price_sequence); which were present and which was used is recorded in details["price_sequences"]."""
         parts = self.query("prices", start, end)
-        return clip(combine_resolutions(parts), start, end).rename("price_eur_mwh")
+        used = select_price_sequence(parts)
+        self.details["price_sequences"] = {"present": sorted({sequence_label(p.sequence) for p in parts}),
+                                           "used": sequence_label(used[0].sequence) if used else None}
+        return clip(combine_resolutions(used), start, end).rename("price_eur_mwh")
+
+    def day_ahead_prices_by_sequence(self, start: str, end: str) -> pd.DataFrame:
+        """Every price series the zone publishes, hourly, one column per series ("unnumbered", "1", "2", ...), never blended."""
+        parts = self.query("prices", start, end)
+        labels = sorted({sequence_label(p.sequence) for p in parts})
+        return pd.DataFrame({label: clip(combine_resolutions([p for p in parts if sequence_label(p.sequence) == label]), start, end)
+                             for label in labels})
 
     def load_forecast(self, start: str, end: str) -> pd.Series:
         parts = self.query("load_forecast", start, end)

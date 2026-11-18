@@ -253,3 +253,63 @@ def test_http_400_acknowledgement_is_reduced_to_its_reason(tmp_path, client_fact
     text = str(excinfo.value)
     assert "HTTP 400" in text and "Unexpected error occurred" in text and "<Reason>" not in text
     assert entsoe_rest.ack_reason("HTTP 599 from x: plain text") == "HTTP 599 from x: plain text"
+
+
+# --- several price series for one zone (found 2026-11-18): only the coupled one is read, and series are never blended -----------
+
+def sequence_price_document(series: list[tuple]) -> bytes:
+    """series: [(sequence or None, [period_xml, ...]), ...] in document order."""
+    body = ""
+    for sequence, periods in series:
+        tag = "" if sequence is None else f"<classificationSequence_AttributeInstanceComponent.position>{sequence}</classificationSequence_AttributeInstanceComponent.position>"
+        body += f"<TimeSeries><mRID>1</mRID>{tag}<curveType>A03</curveType>{''.join(periods)}</TimeSeries>"
+    return (f'<?xml version="1.0" encoding="utf-8"?><Publication_MarketDocument xmlns="{PUB_NS}"><mRID>p</mRID><revisionNumber>1</revisionNumber>'
+            f"<type>A44</type><createdDateTime>2026-10-05T14:41:09Z</createdDateTime>{body}</Publication_MarketDocument>").encode()
+
+
+def _quarter(value):
+    return period_xml("2026-03-01T00:00Z", "2026-03-01T02:00Z", "PT15M", {k: value for k in range(1, 9)}, "price.amount")
+
+
+def _hour(value):
+    return period_xml("2026-03-01T00:00Z", "2026-03-01T02:00Z", "PT60M", {1: value, 2: value}, "price.amount")
+
+
+def test_sequence_is_parsed_and_the_coupled_one_is_the_unnumbered_else_the_lowest():
+    parts = entsoe_rest.parse_document(sequence_price_document([("2", [_quarter(20)]), ("1", [_hour(10)])]))
+    assert sorted(p.sequence for p in parts) == ["1", "2"]
+    assert entsoe_rest.coupled_sequence(["2", "1"]) == "1"
+    assert entsoe_rest.coupled_sequence([None, "1", "2", "3"]) is None
+    assert entsoe_rest.coupled_sequence([None]) is None
+
+
+def test_the_finer_series_no_longer_wins_over_the_coupled_one(tmp_path, client_factory):
+    # DE-LU before October 2025: sequence 1 hourly (the coupled auction), sequence 2 quarter-hourly. The old parser stored sequence 2.
+    handler = lambda url, params: FakeResponse(200, content=sequence_price_document([("2", [_quarter(20)]), ("1", [_hour(10)])]))  # noqa: E731
+    api, _ = make_api(tmp_path, handler, client_factory)
+    s = api.day_ahead_prices("2026-03-01", "2026-03-02")
+    assert list(s.dropna().unique()) == [10.0]
+    assert api.details["price_sequences"] == {"present": ["1", "2"], "used": "1"}
+
+
+def test_two_series_at_one_resolution_are_not_blended_whatever_their_order(tmp_path, client_factory):
+    # DE-LU from October 2025: both series quarter-hourly. The old parser kept an arbitrary mix of the two.
+    for order in ([("2", [_quarter(20)]), ("1", [_quarter(10)])], [("1", [_quarter(10)]), ("2", [_quarter(20)])]):
+        handler = lambda url, params, order=order: FakeResponse(200, content=sequence_price_document(order))  # noqa: E731
+        api, _ = make_api(tmp_path / str(order[0][0]), handler, client_factory)
+        assert list(api.day_ahead_prices("2026-03-01", "2026-03-02").dropna().unique()) == [10.0]
+
+
+def test_spain_reads_the_unnumbered_series_and_every_series_can_be_had_by_name(tmp_path, client_factory):
+    document = sequence_price_document([(None, [_quarter(30)]), ("1", [_quarter(31)]), ("2", [_quarter(32)]), ("3", [_quarter(33)])])
+    api, _ = make_api(tmp_path, lambda url, params: FakeResponse(200, content=document), client_factory)
+    assert list(api.day_ahead_prices("2026-03-01", "2026-03-02").dropna().unique()) == [30.0]
+    table = api.day_ahead_prices_by_sequence("2026-03-01", "2026-03-02")
+    assert list(table.columns) == ["1", "2", "3", "unnumbered"]
+    assert table["2"].dropna().unique().tolist() == [32.0] and table["unnumbered"].dropna().unique().tolist() == [30.0]
+
+
+def test_a_single_series_is_read_as_before(tmp_path, client_factory):
+    api, _ = make_api(tmp_path, lambda url, params: FakeResponse(200, content=price_document([_hour(50)])), client_factory)
+    assert list(api.day_ahead_prices("2026-03-01", "2026-03-02").dropna().unique()) == [50.0]
+    assert api.details["price_sequences"] == {"present": ["unnumbered"], "used": "unnumbered"}
