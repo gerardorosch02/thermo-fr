@@ -1,0 +1,150 @@
+{
+ "half_life_days": 180,
+ "refit_every_days": 7,
+ "grid_anchor": "2024-05-01",
+ "backtest 2024-05-01 to 2026-06-30": {
+  "hours": 18982,
+  "days": 791,
+  "mae": {
+   "yesterday": 25.06913516752713,
+   "H": 22.163006565974833,
+   "G": 18.473158096868453,
+   "W": 17.339373523065035,
+   "C": 17.388437162620612
+  },
+  "bias": {
+   "H": 0.6069563762137521,
+   "G": 0.17178429152332686,
+   "W": -0.06708843746354867
+  },
+  "W_against": {
+   "H": {
+    "gain": 4.8236330429097976,
+    "paired": {
+     "days": 791,
+     "candidate_mae": 17.339373523065035,
+     "base_mae": 22.163006565974833,
+     "mean": -4.825227558489281,
+     "lo": -5.54605546583354,
+     "hi": -4.137552233620219,
+     "one_sided_upper": -4.246047242340571,
+     "mirrored_lower": -5.4472972466661425,
+     "share_days_better": 0.7433628318584071
+    },
+    "slices": {
+     "weekends": -4.869226875235299,
+     "holidays (French or German)": -3.346665609193323,
+     "windiest 10% of days (German wind proxy)": -9.02627771263252,
+     "sunniest 10% of days (German solar proxy)": -4.064727778662949,
+     "top 5% of hours by absolute spread": -23.615384355460286
+    },
+    "conditions": {
+     "gain_at_least_0.25": true,
+     "no_slice_worse_by_more_than_1.0": true,
+     "one_sided_upper_below_zero": true
+    },
+    "verdict_if_this_were_a_test": "passes"
+   },
+   "G": {
+    "gain": 1.1337845738034176,
+    "paired": {
+     "days": 791,
+     "candidate_mae": 17.339373523065035,
+     "base_mae": 18.473158096868453,
+     "mean": -1.1339938517372992,
+     "lo": -1.4916290647089083,
+     "hi": -0.8008970468436666,
+     "one_sided_upper": -0.8610793698340525,
+     "mirrored_lower": -1.4351093628474845,
+     "share_days_better": 0.6308470290771175
+    },
+    "slices": {
+     "weekends": -0.9479653799899452,
+     "holidays (French or German)": -1.2905664414464155,
+     "windiest 10% of days (German wind proxy)": -0.45812888933785345,
+     "sunniest 10% of days (German solar proxy)": -0.550899312388534,
+     "top 5% of hours by absolute spread": -6.396895536463553
+    },
+    "conditions": {
+     "gain_at_least_0.25": true,
+     "no_slice_worse_by_more_than_1.0": true,
+     "one_sided_upper_below_zero": true
+    },
+    "verdict_if_this_were_a_test": "passes"
+   }
+  }
+ },
+ "opened window 2026-07-01 to 2026-10-10": {
+  "hours": 2448,
+  "days": 102,
+  "mae": {
+   "yesterday": 20.469459763071896,
+   "H": 18.530696200162645,
+   "G": 16.71640532263346,
+   "W": 14.838592544480575,
+   "C": 15.7864040755224
+  },
+  "bias": {
+   "H": -5.24271009835954,
+   "G": -0.4579011981327054,
+   "W": -2.2956118741160125
+  },
+  "W_against": {
+   "H": {
+    "gain": 3.69210365568207,
+    "paired": {
+     "days": 102,
+     "candidate_mae": 14.838592544480575,
+     "base_mae": 18.530696200162645,
+     "mean": -3.692103655682069,
+     "lo": -5.493578383632267,
+     "hi": -2.0336773558676144,
+     "one_sided_upper": -2.262585636112383,
+     "mirrored_lower": -5.172642397831421,
+     "share_days_better": 0.7156862745098039
+    },
+    "slices": {
+     "weekends": -2.921011629021626,
+     "holidays (French or German)": -0.9567358787586704,
+     "windiest 10% of days (German wind proxy)": -7.307059521239477,
+     "sunniest 10% of days (German solar proxy)": 0.2154360050568691,
+     "top 5% of hours by absolute spread": -13.51541640174105
+    },
+    "conditions": {
+     "gain_at_least_0.25": true,
+     "no_slice_worse_by_more_than_1.0": true,
+     "one_sided_upper_below_zero": true
+    },
+    "verdict_if_this_were_a_test": "passes"
+   },
+   "G": {
+    "gain": 1.8778127781528848,
+    "paired": {
+     "days": 102,
+     "candidate_mae": 14.838592544480575,
+     "base_mae": 16.71640532263346,
+     "mean": -1.877812778152882,
+     "lo": -2.7045175328445406,
+     "hi": -1.0325965684921212,
+     "one_sided_upper": -1.1795039127412588,
+     "mirrored_lower": -2.5825584374555928,
+     "share_days_better": 0.7254901960784313
+    },
+    "slices": {
+     "weekends": -2.235413240386393,
+     "holidays (French or German)": -2.763802338741791,
+     "windiest 10% of days (German wind proxy)": -0.31383984035440093,
+     "sunniest 10% of days (German solar proxy)": -1.488873283354371,
+     "top 5% of hours by absolute spread": -1.918791881085113
+    },
+    "conditions": {
+     "gain_at_least_0.25": true,
+     "no_slice_worse_by_more_than_1.0": true,
+     "one_sided_upper_below_zero": true
+    },
+    "verdict_if_this_were_a_test": "passes"
+   }
+  }
+ },
+ "predictions_sha256": "ab885a4f3e5fb882a5de62ff4053d58dcbea03faead17d13d64b6b17a6b367cb"
+}
