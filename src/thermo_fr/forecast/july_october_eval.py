@@ -293,8 +293,30 @@ def strict_period(frame: pd.DataFrame) -> pd.DataFrame:
     return rows.dropna(subset=["actual"])
 
 
-def tree_stops(history: pd.DataFrame, out: Path, stored_frame: Path, gbm_prod: Path) -> dict:
-    """Stop conditions 1, 2 (trees) and 4. Condition 1 reads T800's error on the period, a figure the log already holds."""
+def t800_as_logged(raw: pd.DataFrame) -> float:
+    """Amendment 1: T800 on the inputs as they are (proxies not filled), the inputs the logged 25.81 was computed on."""
+    table = build_features(raw, "honest_v2")
+    days = table.info["delivery_day"]
+    parts = []
+    for month in MONTHS[1:]:
+        start = pd.Timestamp(month + "-01")
+        train, test = np.asarray(days < start), np.asarray((days >= start) & (days < start + pd.DateOffset(months=1)))
+        keep = table.y[train].notna()
+        model = make_model("gbm", SETTINGS["T800"])
+        model.fit(table.X[train][keep], table.y[train][keep])
+        part = table.info.loc[test, ["delivery_day", "weather_point_in_time"]].copy()
+        part["T800"] = np.asarray(model.predict(table.X[test]), dtype=float)
+        parts.append(part)
+    frame = pd.concat(parts)
+    frame["delivery_day"] = frame["delivery_day"].dt.strftime("%Y-%m-%d")
+    frame["actual"] = raw["price_eur_mwh"].reindex(frame.index)
+    rows = strict_period(frame)
+    return float((rows["T800"] - rows["actual"]).abs().mean())
+
+
+def tree_stops(history: pd.DataFrame, out: Path, stored_frame: Path, gbm_prod: Path, raw: pd.DataFrame) -> dict:
+    """Stop conditions 1 (as amended), 2 (trees) and 4. Condition 1 reads T800's error on the period on the inputs as they
+    are, a figure the log already holds; its error on the filled history is kept beside it."""
     frame = period_frame(history, out, with_lear=False)
     june = frame[frame["delivery_day"].str.startswith(CHECK_MONTH)]
     stored = pd.read_csv(stored_frame, index_col=0, usecols=["timestamp_utc", "honest_v2"])
@@ -308,8 +330,8 @@ def tree_stops(history: pd.DataFrame, out: Path, stored_frame: Path, gbm_prod: P
         "june_T300_against_stored_production_settings": float((june["T300"] - prod["honest_v2_prod"].reindex(june.index)).abs().max()),
         "june_rows_compared": int(stored["honest_v2"].reindex(june.index).notna().sum()),
         "strict_hours": int(len(period)), "strict_days": int(period["delivery_day"].nunique()),
-        "T800_on_period": t800, "logged": LOGGED_T800}
-    result["passes"] = {"1 logged figure": bool(abs(t800 - LOGGED_T800) <= LOGGED_TOLERANCE),
+        "T800_on_period_filled": t800, "T800_on_period_inputs_as_they_are": t800_as_logged(raw), "logged": LOGGED_T800}
+    result["passes"] = {"1 logged figure (amendment 1: on the inputs as they are)": bool(abs(result["T800_on_period_inputs_as_they_are"] - LOGGED_T800) <= LOGGED_TOLERANCE),
                         "2 trees reproduce June": bool(max(result["june_T800_against_stored_research"], result["june_T300_against_stored_production_settings"]) <= TOLERANCE),
                         "4 hours and days": bool(result["strict_hours"] == EXPECTED_HOURS and result["strict_days"] == EXPECTED_DAYS)}
     return result
@@ -333,8 +355,8 @@ def lear_stops(out: Path, stored_frame: Path) -> dict:
     return {"days": worst, "max_abs_difference": max(done) if done else None, "passes": bool(len(done) == len(CHECK_DAYS) and max(done) <= TOLERANCE)}
 
 
-def summary(history: pd.DataFrame, filled: dict, out: Path, stored_frame: Path, gbm_prod: Path) -> dict:
-    stops = {"trees": tree_stops(history, out, stored_frame, gbm_prod), "lear": lear_stops(out, stored_frame),
+def summary(history: pd.DataFrame, filled: dict, out: Path, stored_frame: Path, gbm_prod: Path, raw: pd.DataFrame) -> dict:
+    stops = {"trees": tree_stops(history, out, stored_frame, gbm_prod, raw), "lear": lear_stops(out, stored_frame),
              "scramble": json.loads((Path(out) / "scramble.json").read_text()) if (Path(out) / "scramble.json").exists() else {"passes": False}}
     passes = all(stops["trees"]["passes"].values()) and stops["lear"]["passes"] and stops["scramble"]["passes"]
     result = {"stops": stops, "stops_pass": bool(passes), "proxies_filled": filled}
@@ -387,11 +409,14 @@ def main(argv=None) -> None:
     args = parser.parse_args(argv)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    history, filled = load_history(Path(args.data))
+    from .inputs import load_inputs
+
+    raw = load_inputs(Path(args.data))
+    history, filled = fq.fill_proxy_gaps(raw)
     if args.stage == "trees":
         trees(history, out)
     elif args.stage == "check-trees":
-        result = tree_stops(history, out, Path(args.frame), Path(args.gbm_prod))
+        result = tree_stops(history, out, Path(args.frame), Path(args.gbm_prod), raw)
         (out / "tree_stops.json").write_text(json.dumps(result, indent=1))
         print(json.dumps(result, indent=1))
     elif args.stage == "lear":
@@ -399,7 +424,7 @@ def main(argv=None) -> None:
     elif args.stage == "scramble":
         print(json.dumps({k: v for k, v in scramble(history, out).items() if k != "days"}))
     else:
-        result = summary(history, filled, out, Path(args.frame), Path(args.gbm_prod))
+        result = summary(history, filled, out, Path(args.frame), Path(args.gbm_prod), raw)
         (out / "results.json").write_text(json.dumps(result, indent=1))
         print(json.dumps({"stops_pass": result["stops_pass"]}))
 
