@@ -1,0 +1,147 @@
+{
+ "raw_files": {
+  "load_forecast_DE_LU_202605310000_202607010000.xml": "6c2b68a171e905d525ff20a851372142152704661e0adf018f7801f825e4b386",
+  "load_forecast_DE_LU_202607010000_202608010000.xml": "762332d1ce811db4665b9dd01ece517e3c3b7f0a6ff3bafa8d653d90dbbc183c",
+  "load_forecast_DE_LU_202608010000_202609010000.xml": "0e65c9b9594783cade9cacd509934940a4bb7bc195b635240ec8c0564b4e70f9",
+  "load_forecast_DE_LU_202609010000_202610010000.xml": "37c302d03716ca385561c685226627045fac035fb96471cfa72c035763b22eb1",
+  "load_forecast_DE_LU_202610010000_202610110000.xml": "4009909d47330ee62a45c14f09487533712c8951f7612fc75e1085e182eb7886",
+  "prices_DE_LU_202605310000_202607010000.xml": "a5ba744d1230af24838ad7b8325ac41268ddc62bc7277e18101eeab6429c2308",
+  "prices_DE_LU_202607010000_202608010000.xml": "e75271c3bf63858b48085739ae2da405896e991fb144c3a28b3b612f45d318d6",
+  "prices_DE_LU_202608010000_202609010000.xml": "0094584d1d18b1f04261950c05c4c1ed38560edd5535c24965b1d2e26c6e5417",
+  "prices_DE_LU_202609010000_202610010000.xml": "f23a2141236a1791ed72895ee3a9ef53ffff2010f1c18edf76923839896dc79a",
+  "prices_DE_LU_202610010000_202610110000.xml": "c3484f748572678ff4e22cb7de55073b7f43bab40447849a432ae53af25b739b",
+  "wind_solar_forecast_DE_LU_202605310000_202607010000.xml": "1cefbe749a8463bd889f3d6673c002c8cd6f7eaeaac91c0698b4ae67401168d1",
+  "wind_solar_forecast_DE_LU_202607010000_202608010000.xml": "721d41536207f8ded333ae4328bdb67a96c8e02fdf68619b37c534cadd5fa78f",
+  "wind_solar_forecast_DE_LU_202608010000_202609010000.xml": "6084ad627c1569f206e53345eb4df99d67a35d8e718ac2ad893a950a6ff3a0f0",
+  "wind_solar_forecast_DE_LU_202609010000_202610010000.xml": "a704ec4834a0b6f4058ee806c63b0e151a3beca60bf574edd95933132709a5ee",
+  "wind_solar_forecast_DE_LU_202610010000_202610110000.xml": "e3751abe9df3f734ca8983fdd26bd6aee904577741627e37485b184ccda0791d"
+ },
+ "overlap": {
+  "German coupled price": {
+   "hours": 720,
+   "missing_in_refetch": 0,
+   "share_equal": 1.0,
+   "largest_difference": 1.1368683772161603e-13,
+   "required_share": 0.999,
+   "pass": true
+  },
+  "German load forecast": {
+   "hours": 720,
+   "missing_in_refetch": 0,
+   "share_equal": 1.0,
+   "largest_difference": 7.275957614183426e-12,
+   "required_share": 0.99,
+   "pass": true
+  },
+  "German onshore forecast": {
+   "hours": 720,
+   "missing_in_refetch": 0,
+   "share_equal": 1.0,
+   "largest_difference": 3.637978807091713e-12,
+   "required_share": 0.99,
+   "pass": true
+  },
+  "German offshore forecast": {
+   "hours": 720,
+   "missing_in_refetch": 0,
+   "share_equal": 1.0,
+   "largest_difference": 9.094947017729282e-13,
+   "required_share": 0.99,
+   "pass": true
+  },
+  "German solar forecast": {
+   "hours": 720,
+   "missing_in_refetch": 0,
+   "share_equal": 1.0,
+   "largest_difference": 7.275957614183426e-12,
+   "required_share": 0.99,
+   "pass": true
+  },
+  "pass": true
+ },
+ "coverage": {
+  "days_in_window": 102,
+  "hours_in_window": 2448,
+  "hours_missing_by_input": {},
+  "expected_days": 102,
+  "expected_hours": 2448,
+  "french_inputs_with_a_fully_missing_day": {},
+  "the_same_inputs_a_year_earlier": {},
+  "french_inputs_newly_missing": [],
+  "pass": true
+ },
+ "development_forecasts_reproduce": {
+  "stored_hours": 18982,
+  "hours_compared": 18982,
+  "largest_difference": 5.684341886080802e-14,
+  "tolerance": 1e-09,
+  "pass": true
+ },
+ "reference_figures_reproduce": {
+  "logged": {
+   "yesterday": 25.06913516752713,
+   "H": 22.163006565974836,
+   "G": 18.473158096868453,
+   "C": 17.388437162620612
+  },
+  "recomputed": {
+   "yesterday": 25.06913516752713,
+   "H": 22.163006565974836,
+   "G": 18.473158096868453,
+   "C": 17.388437162620612
+  },
+  "pass": true
+ },
+ "scramble": {
+  "2026-07-01": {
+   "hours": 24,
+   "largest_difference_H_G": 0.0,
+   "inputs_identical_H_G": true,
+   "C_moved_by": 182.7985600711944,
+   "smallest_change_of_a_scrambled_target": 1.1403444209853717,
+   "pass": true
+  },
+  "2026-08-15": {
+   "hours": 24,
+   "largest_difference_H_G": 0.0,
+   "inputs_identical_H_G": true,
+   "C_moved_by": 62.94546023977196,
+   "smallest_change_of_a_scrambled_target": 1.7502011449458053,
+   "pass": true
+  },
+  "2026-08-26": {
+   "hours": 24,
+   "largest_difference_H_G": 0.0,
+   "inputs_identical_H_G": true,
+   "C_moved_by": 65.87306392514068,
+   "smallest_change_of_a_scrambled_target": 0.494452345591327,
+   "pass": true
+  },
+  "2026-09-30": {
+   "hours": 24,
+   "largest_difference_H_G": 0.0,
+   "inputs_identical_H_G": true,
+   "C_moved_by": 59.86986556047039,
+   "smallest_change_of_a_scrambled_target": 3.51029095679084,
+   "pass": true
+  },
+  "2026-10-10": {
+   "hours": 24,
+   "largest_difference_H_G": 0.0,
+   "inputs_identical_H_G": true,
+   "C_moved_by": 36.58629423109379,
+   "smallest_change_of_a_scrambled_target": 30.482243325120457,
+   "pass": true
+  },
+  "pass": true
+ },
+ "test_hours_scored": {
+  "hours": 2448,
+  "days": 102,
+  "expected_hours": 2448,
+  "expected_days": 102,
+  "pass": true
+ },
+ "test_predictions_sha256": "c197bab143d014432fa9c4ed245cf511bb7ee6149d005f1a5d54450e4969c280",
+ "all_pass": true
+}
