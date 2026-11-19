@@ -1,0 +1,27 @@
+{
+ "2025-10-26": {
+  "hours": 25,
+  "HW": {
+   "largest_difference": 0.0,
+   "inputs_identical": true,
+   "pass": true
+  }
+ },
+ "2026-07-01": {
+  "hours": 24,
+  "HW": {
+   "largest_difference": 0.0,
+   "inputs_identical": true,
+   "pass": true
+  }
+ },
+ "2026-08-26": {
+  "hours": 24,
+  "HW": {
+   "largest_difference": 0.0,
+   "inputs_identical": true,
+   "pass": true
+  }
+ },
+ "pass": true
+}
