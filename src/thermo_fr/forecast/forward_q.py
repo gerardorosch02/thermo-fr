@@ -131,6 +131,45 @@ def q_live(history: pd.DataFrame, day, windows=lear.LEAR_WINDOWS, candidates=CAN
     return out
 
 
+SWITCH_DISTANCE = 1.6  # docs/prereg/distance_switch_prereg.md: at or above it the challenger W issues the tree model alone
+
+
+def distance_from_centre(history: pd.DataFrame, day) -> dict:
+    """How far yesterday's prices sit from the centre of the LEAR's training windows, known at 10:05 Paris on D-1.
+
+    The frozen definition of docs/prereg/distance_switch_prereg.md: the 24 prices of D-1 on the scale each of L0's four windows
+    is fitted on for day D, asinh((p - m_w) / s_w) with (m_w, s_w) the target scaler of window w from its training days ending
+    D-1, averaged over the 24 hours and the four windows. Built from the same table q_live hands to the fit."""
+    day = pd.Timestamp(day)
+    hours = day_hours(day)
+    tau = premarket_issue_for(hours[:1])[0]
+    known = as_known_q(history, tau)
+    known = known[known.index < hours[-1] + pd.Timedelta(hours=1)].sort_index()
+    design, price, blocks = lear.lear_design(known)
+    yesterday = design.loc[[day], blocks["price_d1"]].to_numpy(dtype=float)[0]
+    out = {"yesterday_mean": float(np.mean(yesterday)), "windows": {}}
+    for w in lear.LEAR_WINDOWS:
+        first, last = lear.window_days(day, w)
+        train = (design.index >= first) & (design.index <= last)
+        X, Y = design[train], price[train]
+        ok = X.notna().all(axis=1) & Y.notna().all(axis=1)
+        m, s = lear.fit_scalers(X[ok], Y[ok], blocks)["target"]
+        out["windows"][str(w)] = {"distance": float(np.mean(lear.asinh_forward(yesterday, m, s))), "median": float(np.ravel(m)[0]),
+                                  "scale": float(np.ravel(s)[0])}
+    out["distance"] = float(np.mean([v["distance"] for v in out["windows"].values()]))
+    return out
+
+
+def switch_forecast(g: pd.Series, l0: pd.Series | None, distance: float | None) -> tuple[pd.Series, str]:
+    """The challenger W and the branch it took: the equal-weight ensemble below SWITCH_DISTANCE, the tree model alone at or above
+    it, and the tree model, marked as a fallback, when the LEAR or the distance is missing."""
+    if l0 is None or distance is None or not np.isfinite(distance):
+        return g.copy(), "fallback"
+    if distance >= SWITCH_DISTANCE:
+        return g.copy(), "tree"
+    return (g + l0) / 2, "ensemble"
+
+
 def fill_proxy_gaps(history: pd.DataFrame, log=None) -> tuple[pd.DataFrame, dict]:
     """The wind and solar proxies where the history lacks them although the point forecasts are there, computed by the project's
     own point-in-time rule (gen_proxy.rolling_proxy: weights refitted each month on actual generation up to two days before the
@@ -346,6 +385,7 @@ def issue(day: str, db=Path("data/forecast.db"), inputs_path=Path("data/forecast
               "window_file": window.name if window else None, "window_sha256": sha256_file(window) if window else None,
               "code_commit": code_commit(repo), "code_sha256": code_sha256(), "versions": versions_used(), "flags": [], "kept": {}, "windows": {}}
     curves = {"g": g}
+    history = None
     try:
         history, record["proxy_gaps_filled"] = fill_proxy_gaps(live_history(inputs_path, fresh_dir, upto_run_id=run_id))
         result = q_live(history, day)
@@ -370,6 +410,17 @@ def issue(day: str, db=Path("data/forecast.db"), inputs_path=Path("data/forecast
             curves["S1_Q"] = (g + curves["Q"]) / 2
     if record["g_fallback"]:
         record["flags"].append("g fallback")
+    distance = None  # the distance switch (docs/prereg/distance_switch_prereg.md): written here, before any outcome exists
+    if "L0" in curves and history is not None:
+        try:
+            record["distance"] = distance_from_centre(history, day)
+            distance = record["distance"]["distance"]
+        except Exception as exc:  # noqa: BLE001  a missing distance is a fallback of the switch, written down
+            record["distance_error"] = f"{exc.__class__.__name__}: {exc}"
+    curves["W"], record["switch_branch"] = switch_forecast(g, curves.get("L0"), distance)
+    record["switch_threshold"] = SWITCH_DISTANCE
+    if record["switch_branch"] == "fallback":
+        record["flags"].append("switch fallback")
     published = Path(".publish-worktree/published/model/honest_v2.txt")  # origin/main as the 14:30 market publish last fetched it
     record["published_model_sha256"] = sha256_file(published) if published.exists() else None
     if record["published_model_sha256"] and record["model_sha256"] and not record["g_fallback"] and record["published_model_sha256"] != record["model_sha256"]:
