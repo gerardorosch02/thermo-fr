@@ -1,5 +1,5 @@
 {
- "built_at_utc": "2026-11-18T21:02:07Z",
+ "built_at_utc": "2026-11-19T12:23:35Z",
  "note": "Aggregates only. Backtest: strict rows of the selection window, the tree model at the settings of the public file. Live: the shadow run's forecasts issued before 11:15 Paris, scored against the auction.",
  "backtest": {
   "first_day": "2024-02-18",
@@ -4134,9 +4134,9 @@
   "holiday_coverage_80": 0.6792
  },
  "ledger": {
-  "log_rows": 84,
-  "registrations": 6,
-  "amendments": 3,
+  "log_rows": 92,
+  "registrations": 7,
+  "amendments": 4,
   "reviews": 5
  },
  "limits": {
@@ -4144,6 +4144,50 @@
   "load_replay_lear": 0.11,
   "load_replay_tree": 0.02,
   "price_max_change": 0.12
+ },
+ "july_october": {
+  "first_day": "2026-07-01",
+  "last_day": "2026-10-10",
+  "days": 102,
+  "hours": 2448,
+  "mean_price": 123.4,
+  "tree": 24.14,
+  "lear": 23.79,
+  "s1": 22.66,
+  "comparisons": [
+   {
+    "label": "Ensemble against the tree model",
+    "candidate": 22.66,
+    "base": 24.14,
+    "mean": -1.48,
+    "lo": -2.28,
+    "hi": -0.43,
+    "reading": "supports"
+   },
+   {
+    "label": "Larger tree (800 trees of 63 leaves) against the public setting",
+    "candidate": 23.56,
+    "base": 24.14,
+    "mean": -0.58,
+    "lo": -1.11,
+    "hi": 0.43,
+    "reading": "undecided"
+   },
+   {
+    "label": "Residual load step against the ensemble",
+    "candidate": 22.35,
+    "base": 22.66,
+    "mean": -0.32,
+    "lo": -0.65,
+    "hi": 0.19,
+    "reading": "undecided"
+   }
+  ],
+  "high_days": 0,
+  "max_distance": 1.58,
+  "diagnostic": "too few days",
+  "tree_logged": 25.81,
+  "tree_with_inputs": 23.56
  },
  "forward_test": {
   "first_day": "2026-12-01",

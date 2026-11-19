@@ -159,6 +159,29 @@ def band_block(path) -> dict | None:
     return out
 
 
+def july_october_block(path) -> dict | None:
+    """The one development evaluation on 2026-07-01 to 2026-10-10 (docs/prereg/july_october_eval_results.json on branch foundations)."""
+    if not path or not Path(path).exists():
+        return None
+    r = json.loads(Path(path).read_text())
+    if not r.get("stops_pass"):
+        return None
+    whole = r["models"]["whole period"]
+    labels = {"S1 against T300": "Ensemble against the tree model", "T800 against T300": "Larger tree (800 trees of 63 leaves) against the public setting",
+              "S1-Q against S1": "Residual load step against the ensemble"}
+    rows = []
+    for key, label in labels.items():
+        c = r["comparisons"][key]["whole period"]
+        rows.append({"label": label, "candidate": round(c["candidate_mae"], 2), "base": round(c["base_mae"], 2), "mean": round(c["mean"], 2),
+                     "lo": round(c["lo"], 2), "hi": round(c["hi"], 2), "reading": c["verdict"]})
+    stops = r["stops"]["trees"]
+    return {"first_day": "2026-07-01", "last_day": "2026-10-10", "days": r["hours"]["days"], "hours": r["hours"]["with_every_model"],
+            "mean_price": round(r["mean_price"]["whole period"], 1), "tree": round(whole["T300"]["mae"], 2), "lear": round(whole["L0"]["mae"], 2),
+            "s1": round(whole["S1"]["mae"], 2), "comparisons": rows, "high_days": r["distance"]["bands"]["high"]["days"],
+            "max_distance": round(r["distance"]["distance_summary"]["max"], 2), "diagnostic": r["distance"]["verdict"],
+            "tree_logged": stops["logged"], "tree_with_inputs": round(stops["T800_on_period_filled"], 2)}
+
+
 def ledger_block(experiments, prereg_dir) -> dict | None:
     if not experiments or not Path(experiments).exists():
         return None
@@ -176,6 +199,7 @@ def build(args) -> dict:
                     "Live: the shadow run's forecasts issued before 11:15 Paris, scored against the auction.",
             "backtest": backtest_block(frame), "live": live, "regime": regime_block(frame, live_hourly),
             "band": band_block(args.risk_band), "ledger": ledger_block(args.experiments, args.prereg_dir), "limits": LIMITS,
+            "july_october": july_october_block(args.july_october),
             "forward_test": {"first_day": args.forward_first, "last_day": args.forward_last}}
 
 
@@ -190,6 +214,7 @@ def main() -> None:
     parser.add_argument("--prereg-dir", default="docs/prereg")
     parser.add_argument("--forward-first", default="2026-12-01", help="first counted delivery day of the forward test of the residual-load step")
     parser.add_argument("--forward-last", default="2027-04-17")
+    parser.add_argument("--july-october", default=None, help="july_october_eval_results.json of the development evaluation")
     parser.add_argument("--out", default="published/research.json")
     args = parser.parse_args()
     result = build(args)

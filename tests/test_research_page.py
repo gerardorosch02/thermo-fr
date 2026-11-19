@@ -72,3 +72,13 @@ def test_builder_pairs_days_and_bins_prices():
     assert pair["lo"] == pytest.approx(-2.0) and pair["hi"] == pytest.approx(-2.0)
     bins = build.price_bins(pd.Series([10.0, 50.0, 199.9, 200.0, 400.0]))
     assert list(bins.astype(str)) == ["under 50", "50 to 100", "150 to 200", "200 to 250", "250 and over"]
+
+
+
+def test_july_october_block_reports_all_three_comparisons_and_the_gap():
+    r = json.loads((ROOT / "published" / "research.json").read_text())
+    jo = r["july_october"]
+    assert (jo["first_day"], jo["last_day"], jo["days"], jo["hours"]) == ("2026-07-01", "2026-10-10", 102, 2448)
+    assert len(jo["comparisons"]) == 3 and {c["reading"] for c in jo["comparisons"]} <= {"supports", "contradicts", "undecided"}
+    assert jo["high_days"] == 0 and jo["diagnostic"] == "too few days"  # the live weakness could not be tested on this period
+    assert jo["tree_logged"] == 25.81 and jo["tree_with_inputs"] < jo["tree_logged"]

@@ -1220,14 +1220,26 @@ R_REGIME_CAUSE = ("The cause is not established yet. One candidate is the LEAR's
                   "model until the live record supports a change.")
 R_LIMITS_HEADER = "Known limits of the backtest"
 R_LIMITS = [
-    "The same {days} days have carried many model choices, so the backtest gain probably flatters the ensemble. The months from July "
-    "2026 were used once as a holdout and are not reused.",
+    "The same {days} days have carried many model choices, so the backtest gain probably flatters the ensemble. July to 10 "
+    "October 2026 has since been scored once, as the development evidence shown above, and is spent.",
     "Archived load forecasts are slightly fresher than those available at 10:05. Replaying real revisions on {load_replay_days} days "
     "raised the LEAR's error by {load_replay_lear:.2f} EUR/MWh and the tree model's by {load_replay_tree:.2f}.",
     "The German price the models have read is EXAA's early auction and not the coupled auction. Refitting on the coupled price moved "
     "the errors by {price_max_change:.2f} EUR/MWh at most, in either direction.",
 ]
 R_REGIME_TITLE = "Share of days by daily average price, EUR/MWh"
+R_JO_HEADER = "July to 10 October 2026: one further evaluation"
+R_JO = ("On 19 Nov 2026 the {days} days from {first} to {last} were scored once, on a plan fixed beforehand. They are development "
+        "evidence and not a clean test, because their prices were already known to the project. The mean price was {price:.0f} "
+        "EUR/MWh. The ensemble scored {s1:.2f} against {tree:.2f} for the tree model. The larger tree setting and the residual load "
+        "step were each better by less than their uncertainty.")
+R_JO_GAP = (" No day of the period sat as far above the LEAR's training range as the live weeks did, so the weakness seen live could "
+            "be neither confirmed nor ruled out there.")
+R_JO_BENCH = ("The run also found that an earlier benchmark on these days, {logged:.2f} for the tree model at the larger setting, had been "
+              "measured with three of its inputs missing for half the period. With them that model scores {fixed:.2f}.")
+R_JO_COLUMNS = {"label": "Comparison", "candidate": "Candidate", "base": "Compared with", "mean": "Difference", "interval": "95% interval",
+                "reading": "Reading"}
+R_JO_READING = {"supports": "better", "contradicts": "worse", "undecided": "not decided"}
 R_BAND_HEADER = "Risk band"
 R_BAND = ("An hourly interval around the ensemble, built from its own settled errors of the previous 182 days at the same clock hour. "
           "On {days} backtest days the 80% band covered {c80:.1f}% of prices at a mean width of {w80:.1f} EUR/MWh, and the 95% band "
@@ -1404,6 +1416,17 @@ def research() -> None:
         st.markdown(research_regime_text(regime, live))
         show(research_regime_chart(regime))
         st.markdown(R_REGIME_CAUSE)
+    jo = r.get("july_october")
+    if jo:
+        st.subheader(R_JO_HEADER)
+        st.markdown(R_JO.format(days=jo["days"], first=day_text(jo["first_day"]), last=day_text(jo["last_day"]), price=jo["mean_price"],
+                                s1=jo["s1"], tree=jo["tree"]) + (R_JO_GAP if jo.get("high_days") == 0 else ""))
+        table = pd.DataFrame([{R_JO_COLUMNS["label"]: c["label"], R_JO_COLUMNS["candidate"]: c["candidate"], R_JO_COLUMNS["base"]: c["base"],
+                               R_JO_COLUMNS["mean"]: c["mean"], R_JO_COLUMNS["interval"]: f"{c['lo']:+.2f} to {c['hi']:+.2f}",
+                               R_JO_COLUMNS["reading"]: R_JO_READING.get(c["reading"], c["reading"])} for c in jo["comparisons"]])
+        st.dataframe(table, hide_index=True,
+                     column_config={k: st.column_config.NumberColumn(format="%.2f") for k in (R_JO_COLUMNS["candidate"], R_JO_COLUMNS["base"], R_JO_COLUMNS["mean"])})
+        st.markdown(R_JO_BENCH.format(logged=jo["tree_logged"], fixed=jo["tree_with_inputs"]))
     if r.get("band"):
         st.subheader(R_BAND_HEADER)
         st.markdown(research_band_text(r["band"]))
