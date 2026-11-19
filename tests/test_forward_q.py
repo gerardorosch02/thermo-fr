@@ -90,3 +90,24 @@ def test_chosen_record_is_the_last_one_before_the_window():
                {"delivery_day": "2026-12-01", "issued_at_utc": "2026-11-30T09:50:00Z", "before_window": True, "flags": []},
                {"delivery_day": "2026-12-01", "issued_at_utc": "2026-11-30T10:40:00Z", "before_window": False, "flags": ["late"]}]
     assert fq.chosen_records(records)["2026-12-01"]["issued_at_utc"] == "2026-11-30T09:50:00Z"
+
+
+def test_switch_takes_the_tree_at_or_above_the_threshold():
+    index = pd.date_range("2026-12-01", periods=24, freq="h", tz="UTC")
+    g, l0 = pd.Series(100.0, index=index), pd.Series(60.0, index=index)
+    assert fq.SWITCH_DISTANCE == 1.6
+    below, branch = fq.switch_forecast(g, l0, 1.5999)
+    assert branch == "ensemble" and (below == 80.0).all()
+    at, branch = fq.switch_forecast(g, l0, 1.6)
+    assert branch == "tree" and (at == g).all()
+    above, branch = fq.switch_forecast(g, l0, 3.2)
+    assert branch == "tree" and (above == g).all()
+
+
+def test_switch_falls_back_to_the_tree_when_an_input_is_missing():
+    index = pd.date_range("2026-12-01", periods=24, freq="h", tz="UTC")
+    g, l0 = pd.Series(100.0, index=index), pd.Series(60.0, index=index)
+    for lear_curve, distance in ((None, 0.4), (l0, None), (l0, float("nan"))):
+        out, branch = fq.switch_forecast(g, lear_curve, distance)
+        assert branch == "fallback" and (out == g).all()
+
