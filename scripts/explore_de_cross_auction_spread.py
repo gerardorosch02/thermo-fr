@@ -3,9 +3,9 @@ auction covers Saturday, Sunday and Monday, and the day before a holiday covers 
 delivery day D is taken at 10:15 on A(D), the last working day before D, so a rule may use only spreads of delivery days up to
 A(D) itself (its coupled auction cleared the day before). Data to 2026-06-30 only."""
 import sys, numpy as np, pandas as pd, holidays
-
+pass  # argument: the per-sequence hourly extract of the raw ENTSO-E price documents (price_seq.coupled_series)
 from thermo_fr.forecast.shape import block_bootstrap_mean
-d = pd.read_csv(sys.argv[1])  # the per-sequence hourly extract of the raw ENTSO-E price documents (price_seq.coupled_series); d['t'] = pd.to_datetime(d.timestamp_utc, utc=True); d = d.set_index('t').sort_index()
+d = pd.read_csv(sys.argv[1]); d['t'] = pd.to_datetime(d.timestamp_utc, utc=True); d = d.set_index('t').sort_index()
 sdac = d['de_lu__PT60M__1'].where(d['de_lu__PT60M__1'].notna(), d['de_lu__PT15M__1'])
 f = pd.DataFrame({'sdac': sdac, 'exaa': d['de_lu__PT15M__2']}).dropna()
 loc = f.index.tz_convert('Europe/Paris'); f['day'] = loc.normalize().tz_localize(None); f['hour'] = loc.hour
