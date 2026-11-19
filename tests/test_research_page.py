@@ -82,3 +82,14 @@ def test_july_october_block_reports_all_three_comparisons_and_the_gap():
     assert len(jo["comparisons"]) == 3 and {c["reading"] for c in jo["comparisons"]} <= {"supports", "contradicts", "undecided"}
     assert jo["high_days"] == 0 and jo["diagnostic"] == "too few days"  # the live weakness could not be tested on this period
     assert jo["tree_logged"] == 25.81 and jo["tree_with_inputs"] < jo["tree_logged"]
+
+
+def test_holdout_figures_carry_the_missing_inputs_note():
+    source = (ROOT / "streamlit_app.py").read_text()
+    assert "then lost on the holdout" not in source  # the verdict the missing inputs leave unresolved
+    assert source.count("st.caption(HOLDOUT_NOTE)") == 2 and source.count("st.caption(F1_NOTE)") == 2 and "ERROR_HOLDOUT_NOTE.format(" in source
+    for text in (app.F1_NOTE, app.HOLDOUT_NOTE, app.ERROR_HOLDOUT_NOTE):
+        assert "52 of" in text and "102 days" in text
+    jo = json.loads((ROOT / "published" / "research.json").read_text())["july_october"]
+    note = app.ERROR_HOLDOUT_NOTE.format(fixed=jo["tree_with_inputs"], t300=jo["tree"])
+    assert "23.56" in note and "24.14" in note and "800-tree" in note and "300-tree" in note

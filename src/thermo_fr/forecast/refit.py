@@ -47,11 +47,19 @@ DEFAULT_MODEL_DIR = Path("published/model")
 REFIT_PARAMS: dict = {"n_estimators": 300, "num_leaves": 31}
 # The frozen holdout of docs/experiments.md (2026-07-01 onward, evaluated once per accepted change, strict rows, monthly walk-forward with the
 # backtest settings). Copied here by hand so that the model metadata can carry it; the recent check below is a different, weaker thing.
+# Found on 2026-11-19 (docs/holdout_proxy_gap_inventory.md on branch foundations): the figures below were measured on an inputs
+# file with no wind or solar proxy from 2026-08-20 to 2026-10-10, so the models were scored without those inputs on 52 of the
+# 102 days. The note travels with the figures wherever the metadata is shown.
+HOLDOUT_NOTE = ("measured with the wind and solar proxy inputs missing on 52 of the 102 days; a development replay of 2026-11-19 with "
+                "the proxies reconstructed for the 10:05 Paris cutoff gave 23.56 for honest_v2 at 800 trees of 63 leaves and 24.14 at the "
+                "300 trees of 31 leaves of the published file")
 FROZEN_HOLDOUT = {
     "honest_v2": {"window": "2026-07-01 to 2026-10-10", "strict_hours": 2448, "mae": 25.81, "crash_2026_10_01_to_10_10_mae": 36.00,
-                  "source": "docs/experiments.md, holdout row of 2026-10-10", "method": "monthly walk-forward, backtest settings, not this file"},
+                  "source": "docs/experiments.md, holdout row of 2026-10-10", "method": "monthly walk-forward, backtest settings, not this file",
+                  "note": HOLDOUT_NOTE},
     "honest": {"window": "2026-07-01 to 2026-10-10", "strict_hours": 2448, "mae": 26.23, "crash_2026_10_01_to_10_10_mae": 33.76,
-               "source": "docs/experiments.md, holdout row of 2026-10-10", "method": "monthly walk-forward, backtest settings, not this file"},
+               "source": "docs/experiments.md, holdout row of 2026-10-10", "method": "monthly walk-forward, backtest settings, not this file",
+                  "note": HOLDOUT_NOTE},
 }
 
 

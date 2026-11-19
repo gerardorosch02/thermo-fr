@@ -57,7 +57,11 @@ NO_FORECAST = "No forecast for the next delivery day yet."
 COLLECTING = "{n} of {needed} {unit} so far; shown from {needed}"
 
 FINDINGS_HEADER = "Key findings"
-F1_TITLE = "1. The shape model beat simple shapes, then lost on the holdout."
+F1_TITLE = "1. The shape model beat simple shapes in the backtest. The holdout comparison is unresolved."
+F1_NOTE = ("On the holdout the simple shapes came out ahead, but the model was run without its wind and solar proxy inputs on 52 of "
+           "the 102 days, while the simple shapes use past prices only. How much that changed the ranking is not known.")
+HOLDOUT_NOTE = ("Holdout figures on this page were computed with the model's wind and solar proxy inputs missing on 52 of the 102 days "
+                "(20 Aug to 10 Oct 2026). The effect on this figure has not been measured.")
 F1_BODY = ("A 1 MW / 2 MWh battery earned {model:.1f} EUR/day on the model's shape against {d1:.1f} on yesterday's ({days} selection "
            "days), but {hold_model:.1f} against {hold_d1:.1f} on the {hold_days}-day holdout{interval}.")
 F1_INTERVAL = " (difference {diff:+.1f}, 95% interval {lo:+.1f} to {hi:+.1f})"
@@ -126,6 +130,10 @@ MARKET_LIVE = "Live"
 
 ERROR_HEADER = "Model error against the auction"
 ERROR_HOLDOUT = "On the frozen holdout ({window}) the model's hourly error against the auction was {mae:.1f} EUR/MWh."
+ERROR_HOLDOUT_NOTE = ("That figure is for the 800-tree setting and was measured with the wind and solar proxy inputs missing on 52 of the "
+                      "102 days. A later development replay with the proxies reconstructed for the 10:05 Paris cutoff gave {fixed:.2f}, "
+                      "and {t300:.2f} for the 300-tree setting that is deployed. Whether the reconstructed values were available on "
+                      "each of those mornings is not independently verified. Details are on the Research page.")
 ERROR_LIVE = "The model's own error, no other comparison: MAE {mae:.1f} EUR/MWh over {n} days."
 ERROR_CHART = "Pre-market forecast and auction price, last {days} days"
 ERROR_DAILY_CAPTION = "Daily MAE against the auction, with a 7-day rolling mean."
@@ -873,12 +881,14 @@ def findings(data: dict) -> None:
                         if {"mean_difference", "ci95_low", "ci95_high"} <= set(paired) else "")
             st.markdown(F1_BODY.format(days=b["days"], model=b["model"]["eur_per_day"], d1=b["d1"]["eur_per_day"], hold_days=h["days"],
                                        hold_model=h["model"]["eur_per_day"], hold_d1=h["d1"]["eur_per_day"], interval=interval))
+            st.caption(F1_NOTE)
     with st.container(border=True):
         st.markdown(f"**{F2_TITLE}**")
         r = ((data["prob_backtest"] or {}).get("holdout") or {}).get("recalibration")
         split = calibration_split(data["prob_backtest"])
         if r and split:
             st.markdown(F2_BODY.format(events=r["events"], hours=r["hours"], bss=r["calibrated"]["bss_vs_clim"], high=split["high"]))
+            st.caption(HOLDOUT_NOTE)
     with st.container(border=True):
         st.markdown(f"**{F3_TITLE}**")
         m = market_record(data["walkforward"])
@@ -1015,6 +1025,9 @@ def error_section(data: dict) -> None:
     if holdout.get("mae") is not None:
         first, last = [pd.Timestamp(d.strip()) for d in holdout["window"].split(" to ")]
         st.markdown(ERROR_HOLDOUT.format(window=f"{day_text(first)} to {day_text(last)}", mae=holdout["mae"]))
+        replay = (_json("research.json") or {}).get("july_october") or {}
+        if replay.get("tree_with_inputs") is not None and replay.get("tree_logged") == holdout["mae"]:
+            st.caption(ERROR_HOLDOUT_NOTE.format(fixed=replay["tree_with_inputs"], t300=replay["tree"]))
     if gate["ready"]:
         scores = tables["default"].tail(30).copy()
         scores["rolling"] = scores["mae"].rolling(7, min_periods=1).mean()
@@ -1051,6 +1064,7 @@ def calibration_section(data: dict) -> None:
     r = (backtest.get("holdout") or {}).get("recalibration")
     if r:
         st.markdown("**" + CALIB_TAKEAWAY.format(bss=r["calibrated"]["bss_vs_clim"], bss7=r["calibrated"]["bss_vs_last7"]) + "**")
+        st.caption(HOLDOUT_NOTE)
     split = calibration_split(backtest)
     if split:
         st.markdown((CALIB_DETAIL if split["under"] else CALIB_DETAIL_MIXED).format(**split))
@@ -1095,6 +1109,7 @@ def shape_section(data: dict) -> None:
         st.markdown("**" + SHAPE_TAKEAWAY.format(sel_model=sel["battery"]["model"]["eur_per_day"], sel_d1=sel["battery"]["d1"]["eur_per_day"],
                                                  hold_model=hold["battery"]["model"]["eur_per_day"],
                                                  hold_d1=hold["battery"]["d1"]["eur_per_day"]) + "**")
+        st.caption(F1_NOTE)
     fig = go.Figure()
     for label, color, name in (("selection", BLUE, "Selection window"), ("holdout", ORANGE, "Holdout")):
         record = backtest.get(label)
