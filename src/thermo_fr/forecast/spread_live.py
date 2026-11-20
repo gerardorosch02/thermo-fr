@@ -82,6 +82,7 @@ GERMAN_ITEMS = {"prices_DE_LU": {"documentType": "A44", "in_Domain": DE_LU, "out
                 "wind_solar_forecast_DE_LU": {"documentType": "A69", "processType": "A01", "in_Domain": DE_LU}}
 POINTS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 KMH_TO_MS = 1000.0 / 3600.0
+DUE_BY_THE_GATE = ("load_forecast", "weather_issued", "wind_points", "solar_points", "wind_proxy", "solar_proxy")  # French items that should exist for D at 10:00 Paris
 LIVE_DATA_FROM = "2026-10-11"  # delivery days the stored files do not hold: only rows from here on are ever touched by live fixes
 KNOWN_BY = {  # the timing rule of every input group, written into each record
     "French prices and neighbours' prices of D-1": "about 13:00 Paris on D-2",
@@ -203,7 +204,10 @@ def fetch_french_window(day: pd.Timestamp, paths: Paths, now: pd.Timestamp | Non
         out["files"][path.name] = {"sha256": fq.sha256_file(path), "rows": int(len(fresh))}
         if target == pd.Timestamp(day):
             out["items"] = statuses.items
-    out["errors"] = {item: f"{v['status']}: {v['message']}".strip(": ") for item, v in out["items"].items() if v["status"] != "present"}
+    # Prices, nuclear output and neighbours' prices of D itself never exist at the gate, and the operator's wind and solar
+    # forecast of D is published after it: their absence for D is expected. A failed call is an error for any item.
+    out["errors"] = {item: v["message"] or "failed" for item, v in out["items"].items() if v["status"] == "error"}
+    out["absent_for_D_though_due_by_the_gate"] = sorted(item for item, v in out["items"].items() if v["status"] == "absent" and item in DUE_BY_THE_GATE)
     return out
 
 
@@ -437,6 +441,56 @@ def build_data(paths: Paths, day: pd.Timestamp, upto: pd.Timestamp, live: bool =
     return data, info
 
 
+def differing_columns(a: pd.DataFrame, b: pd.DataFrame) -> dict:
+    """Columns whose values differ between two tables of the same hours, by value and not by storage type: {column: detail}."""
+    out = {}
+    if list(a.columns) != list(b.columns) or len(a) != len(b):
+        return {"<shape>": f"{a.shape} against {b.shape}"}
+    for column in a.columns:
+        x, y = pd.to_numeric(a[column], errors="coerce").to_numpy(float), pd.to_numeric(b[column], errors="coerce").to_numpy(float)
+        both = ~(np.isnan(x) | np.isnan(y))
+        differ = (np.isnan(x) != np.isnan(y)) | (both & (x != y))
+        if differ.any():
+            out[column] = {"hours": int(differ.sum()), "missing_in_one_only": int((np.isnan(x) != np.isnan(y)).sum()),
+                           "largest_difference": float(np.max(np.abs(x[both] - y[both]))) if both.any() else None}
+    return out
+
+
+def fingerprint(table: pd.DataFrame) -> dict:
+    """Per column: missing count, sum and sum of squares. Enough to see whether two machines built the same table, and where not."""
+    values = table.apply(pd.to_numeric, errors="coerce").to_numpy(float)
+    return {"rows": int(len(table)), "columns": {c: [int(np.isnan(values[:, k]).sum()), float(np.nansum(values[:, k])), float(np.nansum(values[:, k] ** 2))]
+                                                 for k, c in enumerate(table.columns)}}
+
+
+def compare_fingerprints(mine: dict, reference: dict, rtol: float = 1e-9) -> dict:
+    """Columns whose fingerprint differs from the reference: {column: [mine, reference]}."""
+    out = {}
+    if mine["rows"] != reference["rows"]:
+        out["<rows>"] = [mine["rows"], reference["rows"]]
+    for column in sorted(set(mine["columns"]) | set(reference["columns"])):
+        a, b = mine["columns"].get(column), reference["columns"].get(column)
+        if a is None or b is None or a[0] != b[0] or any(abs(x - y) > rtol * max(1.0, abs(x), abs(y)) for x, y in zip(a[1:], b[1:])):
+            out[column] = [a, b]
+    return out
+
+
+def lightgbm_probe() -> dict:
+    """LightGBM on a small synthetic table that is bit for bit the same on every machine (numpy's seeded generator), with the
+    frozen settings and with a single-threaded deterministic variant. If the forecasts differ between machines here, the
+    difference is in the library on that machine and not in the data."""
+    import lightgbm as lgb
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(6000, 12))
+    y = 30 * np.tanh(X[:, 0]) + 10 * X[:, 1] * X[:, 2] + 5 * np.abs(X[:, 3]) + rng.normal(scale=20, size=6000)
+    out = {"input_checksum": float(X.sum() + y.sum())}
+    for name, extra in (("frozen_settings", {}), ("single_thread_deterministic", {"n_jobs": 1, "deterministic": True, "force_row_wise": True})):
+        model = lgb.LGBMRegressor(**{**se.PARAMS, **extra}).fit(X[:5000], y[:5000])
+        out[name] = [float(v) for v in model.predict(X[5000:5024])]
+    return out
+
+
 def forecasts(data: se.Data, day: pd.Timestamp, log=lambda *_: None) -> tuple[pd.DataFrame, dict, dict]:
     """The six forecasts of `day`, how each model was trained, and the evidence about its inputs."""
     feat = se.features(data)
@@ -466,11 +520,15 @@ def forecasts(data: se.Data, day: pd.Timestamp, log=lambda *_: None) -> tuple[pd
     missing = {c: int(n) for c, n in g_rows.isna().sum().items() if n}
     scrambled = se.features(se.scrambled(data, f"{day:%Y-%m-%d}"))
     rows_s = np.asarray(scrambled["frame"]["delivery_day"] == day)
+    moved = {name: differing_columns(table, scrambled["sets"][name].loc[rows_s]) for name, table in (("H", h_rows), ("G", g_rows))}
     evidence = {"hours": int(rows.sum()), "input_hours_missing_for_D": missing, "inputs_with_a_missing_hour": len(missing),
-                "inputs_identical_when_everything_unknown_at_the_gate_is_scrambled": {"H": bool(h_rows.equals(scrambled["sets"]["H"].loc[rows_s])),
-                                                                                      "G": bool(g_rows.equals(scrambled["sets"]["G"].loc[rows_s]))},
+                "inputs_identical_when_everything_unknown_at_the_gate_is_scrambled": {name: not columns for name, columns in moved.items()},
+                "inputs_that_moved_under_the_scramble": moved["G"],
                 "german_proxies_present_hours": int((feat["px"].loc[rows, ["wind", "solar"]].notna().all(axis=1)).sum()),
                 "yesterdays_spread_present_hours": int(feat["yesterday"][rows].notna().sum())}
+    known = np.asarray(frame["delivery_day"] <= day)
+    evidence["fingerprint"] = {"inputs_of_D": fingerprint(g_rows), "all_rows_to_D": fingerprint(feat["sets"]["G"].loc[known]),
+                               "target": fingerprint(feat["y"][known].to_frame("spread")), "W_weights_sum": float(sw.weights(labelled[labelled < week], week).sum())}
     return out[list(MODELS)], models, evidence
 
 
@@ -642,7 +700,9 @@ def _issue(paths: Paths, day: pd.Timestamp, gate: dict, started: pd.Timestamp, d
             done = clock()
             record["fetch"][name] = {**result, "began_utc": iso(begun), "finished_utc": iso(done), "finished_by_cutoff": bool(done <= gate["cutoff"])}
             if result.get("errors"):
-                record["flags"].append(f"{name}: {len(result['errors'])} item(s) missing or failed")
+                record["flags"].append(f"{name}: {len(result['errors'])} item(s) failed")
+            if result.get("absent_for_D_though_due_by_the_gate"):
+                record["flags"].append(f"{name}: not on the source for D though due by the gate: {', '.join(result['absent_for_D_though_due_by_the_gate'])}")
             log(f"{name}: finished {iso(done)}")
         record["all_fetches_finished_by_cutoff"] = all(v["finished_by_cutoff"] for v in record["fetch"].values())
         if not record["all_fetches_finished_by_cutoff"]:
@@ -658,7 +718,12 @@ def _issue(paths: Paths, day: pd.Timestamp, gate: dict, started: pd.Timestamp, d
         record["flags"].append("ENTSO-E rows without a German wind forecast were removed whole, so their lags are missing and not zero")
     record["static_sha256"] = {**{f.name: fq.sha256_file(f) for f in sorted(paths.static.glob("*")) if f.is_file()}, "raw_first_test": folder_sha256(paths.static / "raw_first_test")}
     curves, models, evidence = forecasts(data, day, log=log)
+    record["fingerprint"] = evidence.pop("fingerprint")
     record["training"], record["evidence"] = models, evidence
+    not_there_yet = [what for what, absent in (("the French load forecast of D", "load_fc_mw" in evidence["input_hours_missing_for_D"]),
+                                               ("yesterday's spread (a French or German price of D-1)", evidence["yesterdays_spread_present_hours"] < evidence["hours"])) if absent]
+    if not_there_yet and not dry_run and clock() < gate["last_chance"]:
+        return out("postponed", reason=f"not on the sources yet: {'; '.join(not_there_yet)}; nothing written, the next trigger tries again", fetch=record["fetch"])
     if not all(evidence["inputs_identical_when_everything_unknown_at_the_gate_is_scrambled"].values()):
         record["flags"].append("an input of D depends on a value not known at the gate")
     if evidence["inputs_with_a_missing_hour"]:
@@ -688,19 +753,47 @@ def _issue(paths: Paths, day: pd.Timestamp, gate: dict, started: pd.Timestamp, d
     return out("issued", record=path.as_posix(), flags=record["flags"], seconds=record["seconds"])
 
 
+def selftest_material(paths: Paths, log=print) -> tuple[pd.DataFrame, dict, dict]:
+    day = pd.Timestamp(SELFTEST_DAY)
+    data, _ = build_data(paths, day, upto=utc_now(), live=False)
+    curves, _, evidence = forecasts(data, day, log=log)
+    return curves, evidence, lightgbm_probe()
+
+
 def selftest(paths: Paths, log=print) -> dict:
     """No network. Rebuild the forecasts of SELFTEST_DAY from the static files alone, through the logger's own code path, and
-    compare them with the frozen batch forecasts shipped as static/reference.json. It involves no price of the test window."""
-    day = pd.Timestamp(SELFTEST_DAY)
+    compare them with the frozen batch forecasts shipped as static/reference.json. It involves no price of the test window.
+
+    Three things are compared with the reference machine, in this order: the tables (every input column and the target, over
+    all rows), LightGBM on a synthetic table that is identical everywhere, and the six forecasts. The verdict says which of
+    them, if any, differs."""
     reference = json.loads((paths.static / "reference.json").read_text())
-    data, info = build_data(paths, day, upto=utc_now(), live=False)
-    curves, models, evidence = forecasts(data, day, log=log)
+    curves, evidence, probe = selftest_material(paths, log=log)
     stamps = [iso(t) for t in curves.index]
+    prints = evidence.pop("fingerprint")
+    tables = {name: compare_fingerprints(prints[name], reference["fingerprint"][name]) for name in ("inputs_of_D", "all_rows_to_D", "target")}
+    weights_same = abs(prints["W_weights_sum"] - reference["fingerprint"]["W_weights_sum"]) <= 1e-9 * abs(reference["fingerprint"]["W_weights_sum"])
+    library = {name: float(np.max(np.abs(np.asarray(probe[name]) - np.asarray(reference["lightgbm_probe"][name])))) for name in ("frozen_settings", "single_thread_deterministic")}
     result = {"day": SELFTEST_DAY, "hours": len(stamps), "timestamps_match": stamps == reference["timestamps_utc"], "code_sha256": code_sha256(),
-              "code_matches_reference": code_sha256() == reference.get("code_sha256"), "largest_difference": {}, "evidence": evidence, "versions": fq.versions_used()}
+              "code_matches_reference": code_sha256() == reference.get("code_sha256"), "versions": fq.versions_used(), "reference_machine": reference.get("reference_machine"),
+              "tables": {"identical_to_the_reference_machine": not any(tables.values()) and weights_same,
+                         "number_of_columns_that_differ": {name: len(diff) for name, diff in tables.items()},
+                         "columns_that_differ": {name: dict(list(diff.items())[:12]) for name, diff in tables.items() if diff}},
+              "lightgbm_on_identical_synthetic_data": {"input_identical": abs(probe["input_checksum"] - reference["lightgbm_probe"]["input_checksum"]) < 1e-9,
+                                                       "largest_difference_from_the_reference_machine": library},
+              "forecasts": {"largest_difference": {}, "mean_absolute_difference": {}}, "evidence": evidence}
     for name in MODELS:
-        result["largest_difference"][name] = float(np.max(np.abs(curves[name].to_numpy() - np.asarray(reference["forecasts"][name], dtype=float))))
-    result["pass"] = bool(result["timestamps_match"] and max(result["largest_difference"].values()) <= SELFTEST_TOLERANCE
+        gap = np.abs(curves[name].to_numpy() - np.asarray(reference["forecasts"][name], dtype=float))
+        result["forecasts"]["largest_difference"][name] = float(gap.max())
+        result["forecasts"]["mean_absolute_difference"][name] = float(gap.mean())
+    exact = max(result["forecasts"]["largest_difference"].values()) <= SELFTEST_TOLERANCE
+    same_tables = result["tables"]["identical_to_the_reference_machine"]
+    same_library = max(library.values()) <= SELFTEST_TOLERANCE
+    result["verdict"] = ("forecasts identical to the reference machine" if exact and same_tables else
+                         "the tables differ from the reference machine: the data or the feature code behaves differently here" if not same_tables else
+                         "the tables are identical; LightGBM itself gives different numbers on this machine, on identical synthetic data too" if not same_library else
+                         "the tables and the LightGBM probe are identical, yet the forecasts differ: not explained")
+    result["pass"] = bool(result["timestamps_match"] and exact and same_tables
                           and all(evidence["inputs_identical_when_everything_unknown_at_the_gate_is_scrambled"].values()))
     return result
 

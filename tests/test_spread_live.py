@@ -131,7 +131,9 @@ def replay_root(tmp_path):
 @needs_data
 def test_the_selftest_rebuilds_the_frozen_batch_forecasts_through_the_loggers_own_path(replay_root):
     result = sl.selftest(replay_root, log=lambda *_: None)
-    assert result["pass"] and result["hours"] == 24 and max(result["largest_difference"].values()) < 1e-9
+    assert result["pass"] and result["hours"] == 24 and max(result["forecasts"]["largest_difference"].values()) < 1e-9
+    assert result["tables"]["identical_to_the_reference_machine"] and result["verdict"] == "forecasts identical to the reference machine"
+    assert max(result["lightgbm_on_identical_synthetic_data"]["largest_difference_from_the_reference_machine"].values()) == 0.0
 
 
 def steps_with_a_failed_german_fetch(paths, day, started, stamp):
@@ -163,7 +165,7 @@ def test_one_morning_end_to_end_without_network(replay_root, monkeypatch):
     # 10:31 Paris: past the last chance, so it issues with what there is and says so
     now["t"] = pd.Timestamp("2026-10-09T08:31:00Z")
     out = sl.issue(replay_root, clock=clock, log=quiet)
-    assert out["status"] == "issued" and "german_raw failed" in out["flags"] and "german_points: 1 item(s) missing or failed" in out["flags"]
+    assert out["status"] == "issued" and "german_raw failed" in out["flags"] and "german_points: 1 item(s) failed" in out["flags"]
     assert "a fetch finished after 10:05 Paris" in out["flags"] and "production folder not found: no production window is read" in out["flags"]
     record = json.loads(Path(out["record"]).read_text())
     assert Path(out["record"]).name == "2026-10-10.json"
@@ -277,3 +279,27 @@ def test_the_points_fetch_writes_one_table_per_kind_in_the_static_columns_and_ke
     assert wind["de_wind_pt_Ostholstein_ms"].iloc[0] == pytest.approx(10.0)  # 36 km/h is 10 m/s
     solar = pd.read_csv(tmp_path / out["solar"]["file"], index_col=0)
     assert out["solar"]["hours_all_points_present"] == 24 and solar.iloc[0, 0] == 36.0
+
+
+def test_differing_columns_compares_values_not_storage_types():
+    a = pd.DataFrame({"x": [1.0, np.nan, 3.0], "flag": [True, False, True], "y": [np.nan, np.nan, np.nan]})
+    b = pd.DataFrame({"x": [1.0, np.nan, 3.0], "flag": [1.0, 0.0, 1.0], "y": pd.Series([None, None, None], dtype=object)})
+    assert sl.differing_columns(a, b) == {}
+    c = b.assign(x=[1.0, 2.0, 3.5])
+    assert sl.differing_columns(a, c) == {"x": {"hours": 2, "missing_in_one_only": 1, "largest_difference": 0.5}}
+
+
+def test_fingerprints_name_the_column_that_differs():
+    table = pd.DataFrame({"a": [1.0, 2.0, np.nan], "b": [0.1, 0.2, 0.3]})
+    same = sl.compare_fingerprints(sl.fingerprint(table), sl.fingerprint(table.copy()))
+    other = sl.compare_fingerprints(sl.fingerprint(table.assign(b=[0.1, 0.2, 0.3000001])), sl.fingerprint(table))
+    assert same == {} and list(other) == ["b"]
+    assert list(sl.compare_fingerprints(sl.fingerprint(table.assign(a=[1.0, 2.0, 0.0])), sl.fingerprint(table))) == ["a"]  # a zero is not a missing value
+
+
+def test_an_item_absent_for_the_delivery_day_is_an_error_only_if_it_is_due_by_the_gate():
+    items = {"prices": {"status": "absent", "message": ""}, "nuclear_actual": {"status": "absent", "message": ""}, "wind_solar_forecast": {"status": "absent", "message": ""},
+             "load_forecast": {"status": "absent", "message": ""}, "weather_issued": {"status": "present", "message": ""}, "wind_points": {"status": "error", "message": "timeout"}}
+    errors = {item: v["message"] or "failed" for item, v in items.items() if v["status"] == "error"}
+    absent = sorted(item for item, v in items.items() if v["status"] == "absent" and item in sl.DUE_BY_THE_GATE)
+    assert errors == {"wind_points": "timeout"} and absent == ["load_forecast"]
