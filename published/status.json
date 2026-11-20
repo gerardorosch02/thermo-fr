@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-11-19T21:31:07Z",
+  "written_at_utc": "2026-11-20T09:08:28Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -9,9 +9,9 @@
   "fallback_model_file": "model/honest.txt",
   "model_note": "Every forecast version in forecasts.csv and scores.csv carries the model that produced it in the model column: gbm:<file> for a stored model, with the suffix :fallback when the default model's inputs were missing and the fallback model was used, and gbm for a model fitted live.",
   "window_days": 90,
-  "from_day": "2026-08-21",
-  "tomorrow": "2026-11-20",
-  "forecast_versions": 68,
+  "from_day": "2026-08-22",
+  "tomorrow": "2026-11-21",
+  "forecast_versions": 69,
   "actual_days": 45,
   "scored_versions": 68,
   "live_record": {
@@ -156,13 +156,13 @@
   },
   "last_run": {
     "run_id": 1,
-    "command": "settle",
+    "command": "morning-run",
     "kind": "scheduled",
-    "delivery_day": null,
-    "started_at_utc": "2026-11-19T21:30:30Z",
-    "finished_at_utc": "2026-11-19T21:31:06Z",
-    "status": "ok",
-    "message": ""
+    "delivery_day": "2026-11-21",
+    "started_at_utc": "2026-11-20T09:05:41Z",
+    "finished_at_utc": "2026-11-20T09:08:26Z",
+    "status": "partial",
+    "message": "model: honest_v2.txt needs price_nl_lag1, price_it_north_lag1, spread_nl_lag1, spread_i"
   },
   "market": {
     "source": "EEX French Day-Ahead Base and Peak futures traded before the auction, collected locally; traded prices are not republished.",
