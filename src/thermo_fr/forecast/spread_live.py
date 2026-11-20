@@ -75,6 +75,11 @@ GERMAN_REFRESH_DAYS = 10  # each morning the last ten days are fetched again
 POINT_REFRESH_DAYS = 5
 SELFTEST_DAY = "2026-10-10"  # the last day of the opened window: rebuilt from the static files and compared with the frozen batch
 SELFTEST_TOLERANCE = 1e-6
+# The models answer a change in the last bits of their inputs with a different fit (docs/prereg/spread_w_amendment_3.md): on the
+# self-test day, inputs perturbed by one part in 1e15 to 1e9 moved the six forecasts by 1.3 to 5.6 EUR/MWh on average and by up to
+# 12.3 at one hour. A machine whose tables agree with the reference to 1e-9 but not bit for bit therefore passes if its forecasts
+# stay inside these bands, set at about one and a half times the largest values seen.
+NUMERICAL_BAND_MEAN, NUMERICAL_BAND_MAX = 8.0, 20.0
 ENTSOE_URL = "https://web-api.tp.entsoe.eu/api"
 DE_LU = "10Y1001A1001A82H"
 GERMAN_ITEMS = {"prices_DE_LU": {"documentType": "A44", "in_Domain": DE_LU, "out_Domain": DE_LU},
@@ -460,7 +465,8 @@ def fingerprint(table: pd.DataFrame) -> dict:
     """Per column: missing count, sum and sum of squares. Enough to see whether two machines built the same table, and where not."""
     values = table.apply(pd.to_numeric, errors="coerce").to_numpy(float)
     return {"rows": int(len(table)), "columns": {c: [int(np.isnan(values[:, k]).sum()), float(np.nansum(values[:, k])), float(np.nansum(values[:, k] ** 2))]
-                                                 for k, c in enumerate(table.columns)}}
+                                                 for k, c in enumerate(table.columns)},
+            "bits": {c: hashlib.sha256(np.ascontiguousarray(values[:, k]).tobytes()).hexdigest()[:16] for k, c in enumerate(table.columns)}}
 
 
 def compare_fingerprints(mine: dict, reference: dict, rtol: float = 1e-9) -> dict:
@@ -773,10 +779,14 @@ def selftest(paths: Paths, log=print) -> dict:
     prints = evidence.pop("fingerprint")
     tables = {name: compare_fingerprints(prints[name], reference["fingerprint"][name]) for name in ("inputs_of_D", "all_rows_to_D", "target")}
     weights_same = abs(prints["W_weights_sum"] - reference["fingerprint"]["W_weights_sum"]) <= 1e-9 * abs(reference["fingerprint"]["W_weights_sum"])
+    last_bits = {name: sorted(c for c, h in prints[name]["bits"].items() if reference["fingerprint"][name]["bits"].get(c) != h) for name in ("inputs_of_D", "all_rows_to_D", "target")}
     library = {name: float(np.max(np.abs(np.asarray(probe[name]) - np.asarray(reference["lightgbm_probe"][name])))) for name in ("frozen_settings", "single_thread_deterministic")}
     result = {"day": SELFTEST_DAY, "hours": len(stamps), "timestamps_match": stamps == reference["timestamps_utc"], "code_sha256": code_sha256(),
               "code_matches_reference": code_sha256() == reference.get("code_sha256"), "versions": fq.versions_used(), "reference_machine": reference.get("reference_machine"),
               "tables": {"identical_to_the_reference_machine": not any(tables.values()) and weights_same,
+                         "bit_for_bit_identical": not any(last_bits.values()),
+                         "columns_not_bit_for_bit_identical": {name: len(columns) for name, columns in last_bits.items()},
+                         "examples_not_bit_for_bit": last_bits["all_rows_to_D"][:12],
                          "number_of_columns_that_differ": {name: len(diff) for name, diff in tables.items()},
                          "columns_that_differ": {name: dict(list(diff.items())[:12]) for name, diff in tables.items() if diff}},
               "lightgbm_on_identical_synthetic_data": {"input_identical": abs(probe["input_checksum"] - reference["lightgbm_probe"]["input_checksum"]) < 1e-9,
@@ -788,13 +798,23 @@ def selftest(paths: Paths, log=print) -> dict:
         result["forecasts"]["mean_absolute_difference"][name] = float(gap.mean())
     exact = max(result["forecasts"]["largest_difference"].values()) <= SELFTEST_TOLERANCE
     same_tables = result["tables"]["identical_to_the_reference_machine"]
+    bitwise = result["tables"]["bit_for_bit_identical"]
     same_library = max(library.values()) <= SELFTEST_TOLERANCE
-    result["verdict"] = ("forecasts identical to the reference machine" if exact and same_tables else
-                         "the tables differ from the reference machine: the data or the feature code behaves differently here" if not same_tables else
-                         "the tables are identical; LightGBM itself gives different numbers on this machine, on identical synthetic data too" if not same_library else
-                         "the tables and the LightGBM probe are identical, yet the forecasts differ: not explained")
-    result["pass"] = bool(result["timestamps_match"] and exact and same_tables
-                          and all(evidence["inputs_identical_when_everything_unknown_at_the_gate_is_scrambled"].values()))
+    in_band = (max(result["forecasts"]["mean_absolute_difference"].values()) <= NUMERICAL_BAND_MEAN and max(result["forecasts"]["largest_difference"].values()) <= NUMERICAL_BAND_MAX)
+    result["numerical_band"] = {"mean": NUMERICAL_BAND_MEAN, "largest": NUMERICAL_BAND_MAX, "inside": bool(in_band)}
+    if not same_tables:
+        verdict, ok = "the tables differ from the reference machine: the data or the feature code behaves differently here", False
+    elif not same_library:
+        verdict, ok = "the tables agree, but LightGBM gives different numbers on this machine even on identical synthetic data", False
+    elif exact:
+        verdict, ok = "forecasts identical to the reference machine", True
+    elif not bitwise and in_band:
+        verdict, ok = ("the tables agree with the reference machine to one part in a billion but not bit for bit, LightGBM is identical on identical data, and the "
+                       "forecasts differ by an amount the models show for any change in the last bits of their inputs: same model, machine-dependent numbers"), True
+    else:
+        verdict, ok = "the forecasts differ from the reference machine by more than last-bit differences in the inputs explain", False
+    result["verdict"] = verdict
+    result["pass"] = bool(ok and result["timestamps_match"] and all(evidence["inputs_identical_when_everything_unknown_at_the_gate_is_scrambled"].values()))
     return result
 
 

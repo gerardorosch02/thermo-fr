@@ -303,3 +303,32 @@ def test_an_item_absent_for_the_delivery_day_is_an_error_only_if_it_is_due_by_th
     errors = {item: v["message"] or "failed" for item, v in items.items() if v["status"] == "error"}
     absent = sorted(item for item, v in items.items() if v["status"] == "absent" and item in sl.DUE_BY_THE_GATE)
     assert errors == {"wind_points": "timeout"} and absent == ["load_forecast"]
+
+
+@needs_data
+def test_the_selftest_verdict_on_another_machine(replay_root, monkeypatch):
+    curves, evidence, probe = sl.selftest_material(replay_root, log=lambda *_: None)
+    rng = np.random.default_rng(0)
+
+    def machine(noise=0.0, last_bits=False, wrong_table=False, wrong_library=False):
+        import copy
+
+        ev = copy.deepcopy(evidence)
+        if last_bits:
+            ev["fingerprint"]["all_rows_to_D"]["bits"]["s_m7"] = "0" * 16
+        if wrong_table:
+            ev["fingerprint"]["all_rows_to_D"]["columns"]["s_m7"][1] += 5.0
+        pr = copy.deepcopy(probe)
+        if wrong_library:
+            pr["frozen_settings"][0] += 0.3
+        monkeypatch.setattr(sl, "selftest_material", lambda paths, log=print: (curves + noise * rng.standard_normal(curves.shape), ev, pr))
+        return sl.selftest(replay_root, log=lambda *_: None)
+
+    same = machine()
+    assert same["pass"] and same["verdict"] == "forecasts identical to the reference machine"
+    laptop = machine(noise=2.5, last_bits=True)  # what the owner's laptop showed: equal tables to 1e-9, not bit for bit, forecasts a few EUR/MWh apart
+    assert laptop["pass"] and "machine-dependent numbers" in laptop["verdict"] and not laptop["tables"]["bit_for_bit_identical"]
+    assert not machine(noise=2.5)["pass"]  # bit-identical tables cannot explain different forecasts
+    assert not machine(noise=15.0, last_bits=True)["pass"]  # outside the band
+    assert not machine(noise=2.5, last_bits=True, wrong_table=True)["pass"]
+    assert not machine(noise=2.5, last_bits=True, wrong_library=True)["pass"]
