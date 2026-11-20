@@ -1,0 +1,39 @@
+{
+ "note": "Output of the self-test run by the installer on the owner's laptop on 2026-11-20 at about 01:25 UTC, copied from his paste. The task was installed after it passed. Not independently reviewed.",
+ "day": "2026-10-10",
+ "hours": 24,
+ "timestamps_match": true,
+ "code_sha256": "748b61a9f72a2a4494e1290a6809d9a16b075cdcd809d4367a9220f7755a986c",
+ "code_matches_reference": true,
+ "versions": {"python": "3.13.7", "numpy": "2.5.5", "pandas": "3.1.1", "scikit_learn": "1.9.1", "scipy": "1.18.1", "lightgbm": "4.7.0"},
+ "reference_machine": {"python": "3.13.18", "numpy": "2.5.3", "pandas": "3.0.5", "scikit_learn": "1.9.1", "scipy": "1.18.1", "lightgbm": "4.7.0", "platform": "linux"},
+ "tables": {
+  "identical_to_the_reference_machine": true,
+  "bit_for_bit_identical": false,
+  "columns_not_bit_for_bit_identical": {"inputs_of_D": 20, "all_rows_to_D": 27, "target": 1},
+  "examples_not_bit_for_bit": ["de_l1", "de_load_l1", "de_load_l7", "de_residual_px", "de_solar_fc_l1", "de_solar_px", "de_solar_px_l1", "de_wind_fc_l1", "de_wind_px", "de_wind_px_l1", "price_de_lu_lag1", "price_lag1_mean"],
+  "number_of_columns_that_differ": {"inputs_of_D": 0, "all_rows_to_D": 0, "target": 0},
+  "columns_that_differ": {}
+ },
+ "lightgbm_on_identical_synthetic_data": {
+  "input_identical": true,
+  "largest_difference_from_the_reference_machine": {"frozen_settings": 0.0, "single_thread_deterministic": 0.0}
+ },
+ "forecasts": {
+  "largest_difference": {"H": 4.682356736503088, "HW": 7.814808103215082, "G": 2.2882876639827794, "GK": 6.795765570573298, "GM": 4.576328041061643, "W": 4.571349253072448},
+  "mean_absolute_difference": {"H": 2.0753582386031613, "HW": 2.2938273526300037, "G": 1.241762060198488, "GK": 2.3428178043252355, "GM": 2.1579884672329364, "W": 1.7686249695685359}
+ },
+ "evidence": {
+  "hours": 24,
+  "input_hours_missing_for_D": {},
+  "inputs_with_a_missing_hour": 0,
+  "inputs_identical_when_everything_unknown_at_the_gate_is_scrambled": {"H": true, "G": true},
+  "inputs_that_moved_under_the_scramble": {},
+  "german_proxies_present_hours": 24,
+  "yesterdays_spread_present_hours": 24
+ },
+ "numerical_band": {"mean": 8.0, "largest": 20.0, "inside": true},
+ "verdict": "the tables agree with the reference machine to one part in a billion but not bit for bit, LightGBM is identical on identical data, and the forecasts differ by an amount the models show for any change in the last bits of their inputs: same model, machine-dependent numbers",
+ "pass": true,
+ "installed": "thermo-fr spread-issue: every day at 09:00 and 09:30 on the laptop's clock (10:00 and 10:30 Paris), running code-ce32053\\scripts\\run_spread.py"
+}
