@@ -1,4 +1,4 @@
-"""The morning logger of the spread forecasts (docs/prereg/spread_w_amendment_2.md).
+"""The morning logger of the spread forecasts (docs/prereg/spread_w_amendment_2.md, changed by spread_w_amendment_4.md).
 
 Each morning it fetches what is public, forecasts the France minus Germany spread of the next delivery day with H, HW, G,
 GK, GM and W, and writes one time-stamped record that is never rewritten. It computes no error against any price, ever.
@@ -19,15 +19,18 @@ the morning runs (data/shadow/fresh) and the proxy weights (published/model).
 What "available by 10:05 Paris" means here. The forecast of delivery day D is meant to be issued at 10:05 Paris on D-1.
   - Nothing is fetched before 10:00 Paris on D-1, the deadline of the load forecast of D. A run that starts earlier writes
     nothing.
-  - Every source is fetched that morning and the time each fetch finished is written into the record, with a flag if it
-    finished after 10:05.
+  - Every source is fetched that morning, the three fetches side by side, and the time each one finished is written into the
+    record, with a flag if it finished after 10:05.
   - German prices and ENTSO-E forecasts of D or later are dropped before any feature is built, whatever the fetch returned.
   - The features of D are then built a second time from the same tables with every value that cannot be known at the gate
-    replaced by noise (spread_eval.scrambled). The record states whether the inputs of D came out identical. This tests the
-    position of every value used. It cannot test whether a value was revised between its publication and the fetch.
+    replaced by noise (spread_eval.scrambled). The record states whether the inputs of D came out the same to one part in
+    a billion, and separately whether they came out bit for bit identical. This tests the position of every value used. It
+    cannot test whether a value was revised between its publication and the fetch.
   - One record per delivery day, created atomically, written before the auction closes at 12:00 Paris or not at all.
-  - If a source fails on the first run of the morning, nothing is written and the second run tries again. The second run
-    issues with what there is, and the record says what was missing.
+  - If a source fails on the first run of the morning, or the French load forecast of D is not there yet, nothing is
+    written and the second run tries again. The second run issues with what there is, and the record says what was missing.
+  - A price of D-1 that is not on the source (yesterday's spread) does not postpone anything: the first run issues with
+    those inputs missing, and says so. Waiting could only make the fetch late.
 All time stamps are the laptop's own clock. Nothing outside the laptop witnesses them.
 """
 
@@ -80,6 +83,7 @@ SELFTEST_TOLERANCE = 1e-6
 # 12.3 at one hour. A machine whose tables agree with the reference to 1e-9 but not bit for bit therefore passes if its forecasts
 # stay inside these bands, set at about one and a half times the largest values seen.
 NUMERICAL_BAND_MEAN, NUMERICAL_BAND_MAX = 8.0, 20.0
+SCRAMBLE_TOLERANCE = 1e-9  # relative; a difference under the scramble below this is rounding, not a value from the future (amendment 4)
 ENTSOE_URL = "https://web-api.tp.entsoe.eu/api"
 DE_LU = "10Y1001A1001A82H"
 GERMAN_ITEMS = {"prices_DE_LU": {"documentType": "A44", "in_Domain": DE_LU, "out_Domain": DE_LU},
@@ -446,15 +450,19 @@ def build_data(paths: Paths, day: pd.Timestamp, upto: pd.Timestamp, live: bool =
     return data, info
 
 
-def differing_columns(a: pd.DataFrame, b: pd.DataFrame) -> dict:
-    """Columns whose values differ between two tables of the same hours, by value and not by storage type: {column: detail}."""
+def differing_columns(a: pd.DataFrame, b: pd.DataFrame, tolerance: float = 0.0) -> dict:
+    """Columns whose values differ between two tables of the same hours, by value and not by storage type: {column: detail}.
+    With a tolerance, two values differ when they are further apart than tolerance * max(1, |x|, |y|); a value missing in one
+    table only always differs."""
     out = {}
     if list(a.columns) != list(b.columns) or len(a) != len(b):
         return {"<shape>": f"{a.shape} against {b.shape}"}
     for column in a.columns:
         x, y = pd.to_numeric(a[column], errors="coerce").to_numpy(float), pd.to_numeric(b[column], errors="coerce").to_numpy(float)
         both = ~(np.isnan(x) | np.isnan(y))
-        differ = (np.isnan(x) != np.isnan(y)) | (both & (x != y))
+        with np.errstate(invalid="ignore"):
+            apart = np.abs(x - y) > tolerance * np.maximum(1.0, np.maximum(np.abs(x), np.abs(y)))
+        differ = (np.isnan(x) != np.isnan(y)) | (both & apart)
         if differ.any():
             out[column] = {"hours": int(differ.sum()), "missing_in_one_only": int((np.isnan(x) != np.isnan(y)).sum()),
                            "largest_difference": float(np.max(np.abs(x[both] - y[both]))) if both.any() else None}
@@ -526,10 +534,15 @@ def forecasts(data: se.Data, day: pd.Timestamp, log=lambda *_: None) -> tuple[pd
     missing = {c: int(n) for c, n in g_rows.isna().sum().items() if n}
     scrambled = se.features(se.scrambled(data, f"{day:%Y-%m-%d}"))
     rows_s = np.asarray(scrambled["frame"]["delivery_day"] == day)
-    moved = {name: differing_columns(table, scrambled["sets"][name].loc[rows_s]) for name, table in (("H", h_rows), ("G", g_rows))}
+    pairs = [(name, table, scrambled["sets"][name].loc[rows_s]) for name, table in (("H", h_rows), ("G", g_rows))]
+    exact = {name: differing_columns(table, other) for name, table, other in pairs}
+    moved = {name: differing_columns(table, other, SCRAMBLE_TOLERANCE) for name, table, other in pairs}
     evidence = {"hours": int(rows.sum()), "input_hours_missing_for_D": missing, "inputs_with_a_missing_hour": len(missing),
+                "scramble_tolerance": SCRAMBLE_TOLERANCE,
                 "inputs_identical_when_everything_unknown_at_the_gate_is_scrambled": {name: not columns for name, columns in moved.items()},
+                "inputs_bit_identical_under_the_scramble": {name: not columns for name, columns in exact.items()},
                 "inputs_that_moved_under_the_scramble": moved["G"],
+                "inputs_that_differ_only_by_rounding_under_the_scramble": {c: d for c, d in exact["G"].items() if c not in moved["G"]},
                 "german_proxies_present_hours": int((feat["px"].loc[rows, ["wind", "solar"]].notna().all(axis=1)).sum()),
                 "yesterdays_spread_present_hours": int(feat["yesterday"][rows].notna().sum())}
     known = np.asarray(frame["delivery_day"] <= day)
@@ -582,24 +595,33 @@ def write_once(path: Path, record: dict) -> Path:
     return path
 
 
-def _with_budget(step, seconds: float):
-    """Run one fetch with a time budget. A source that hangs is given up on; its thread dies with the process."""
-    box = {}
+def run_fetches(steps: dict, clock, budgets: dict) -> dict:
+    """Run the fetches side by side, each in its own thread with its own time budget counted from the common start.
+    Returns {name: {"began", "done", and "result" or "error"}} in the order of `steps`. A source that hangs is given up on
+    when its budget ends; its thread dies with the process and can no longer change what is returned."""
+    boxes = {name: {} for name in steps}
 
-    def work():
+    def work(box, step):
+        box["began"] = clock()
         try:
             box["result"] = step()
         except Exception as exc:  # noqa: BLE001
             box["error"] = exc
+        box["done"] = clock()
 
-    thread = threading.Thread(target=work, daemon=True)
-    thread.start()
-    thread.join(seconds)
-    if thread.is_alive():
-        raise TimeoutError(f"not finished after {seconds:.0f} seconds")
-    if "error" in box:
-        raise box["error"]
-    return box["result"]
+    threads = {name: threading.Thread(target=work, args=(boxes[name], step), daemon=True) for name, step in steps.items()}
+    start, started_at = time.monotonic(), clock()
+    for thread in threads.values():
+        thread.start()
+    out = {}
+    for name, thread in threads.items():
+        seconds = budgets.get(name, 150)
+        thread.join(max(0.0, seconds - (time.monotonic() - start)))
+        box = dict(boxes[name])  # a copy: a thread that is still running writes to the original, not to this
+        if thread.is_alive() or "done" not in box:
+            box = {"began": box.get("began", started_at), "done": clock(), "error": TimeoutError(f"not finished after {seconds:.0f} seconds")}
+        out[name] = box
+    return out
 
 
 def fetch_steps(paths: Paths, day: pd.Timestamp, now: pd.Timestamp, stamp: str) -> dict:
@@ -695,21 +717,21 @@ def _issue(paths: Paths, day: pd.Timestamp, gate: dict, started: pd.Timestamp, d
         record["flags"].append("production folder not found: no production window is read")
     failed = []
     if fetch:
-        for name, step in fetch_steps(paths, day, started, stamp_of(started)).items():
-            begun = clock()
-            try:
-                result = _with_budget(step, FETCH_BUDGET_SECONDS.get(name, 150))
-            except Exception as exc:  # noqa: BLE001  a source that is down is written down
-                result = {"error": f"{exc.__class__.__name__}: {exc}"}
+        for name, box in run_fetches(fetch_steps(paths, day, started, stamp_of(started)), clock, FETCH_BUDGET_SECONDS).items():
+            begun, done = box["began"], box["done"]
+            if "error" in box:  # a source that is down is written down
+                result = {"error": f"{box['error'].__class__.__name__}: {box['error']}"}
                 failed.append(name)
                 record["flags"].append(f"{name} failed")
-            done = clock()
+            else:
+                result = box["result"]
             record["fetch"][name] = {**result, "began_utc": iso(begun), "finished_utc": iso(done), "finished_by_cutoff": bool(done <= gate["cutoff"])}
             if result.get("errors"):
                 record["flags"].append(f"{name}: {len(result['errors'])} item(s) failed")
             if result.get("absent_for_D_though_due_by_the_gate"):
                 record["flags"].append(f"{name}: not on the source for D though due by the gate: {', '.join(result['absent_for_D_though_due_by_the_gate'])}")
             log(f"{name}: finished {iso(done)}")
+        record["fetches_ran"] = "side by side"
         record["all_fetches_finished_by_cutoff"] = all(v["finished_by_cutoff"] for v in record["fetch"].values())
         if not record["all_fetches_finished_by_cutoff"]:
             record["flags"].append("a fetch finished after 10:05 Paris")
@@ -726,12 +748,15 @@ def _issue(paths: Paths, day: pd.Timestamp, gate: dict, started: pd.Timestamp, d
     curves, models, evidence = forecasts(data, day, log=log)
     record["fingerprint"] = evidence.pop("fingerprint")
     record["training"], record["evidence"] = models, evidence
-    not_there_yet = [what for what, absent in (("the French load forecast of D", "load_fc_mw" in evidence["input_hours_missing_for_D"]),
-                                               ("yesterday's spread (a French or German price of D-1)", evidence["yesterdays_spread_present_hours"] < evidence["hours"])) if absent]
+    # Only a missing load forecast of D postpones: it is due at 10:00 and a few minutes can bring it. A missing price of D-1 was
+    # due the day before, so waiting half an hour gains nothing and makes every fetch late (amendment 4).
+    not_there_yet = ["the French load forecast of D"] if "load_fc_mw" in evidence["input_hours_missing_for_D"] else []
     if not_there_yet and not dry_run and clock() < gate["last_chance"]:
         return out("postponed", reason=f"not on the sources yet: {'; '.join(not_there_yet)}; nothing written, the next trigger tries again", fetch=record["fetch"])
     if not all(evidence["inputs_identical_when_everything_unknown_at_the_gate_is_scrambled"].values()):
         record["flags"].append("an input of D depends on a value not known at the gate")
+    elif not all(evidence["inputs_bit_identical_under_the_scramble"].values()):
+        record["flags"].append("an input of D differs by rounding only (under one part in a billion) when everything unknown at the gate is scrambled")
     if evidence["inputs_with_a_missing_hour"]:
         record["flags"].append(f"{evidence['inputs_with_a_missing_hour']} input(s) missing for part of D and left missing")
     if evidence["yesterdays_spread_present_hours"] < evidence["hours"]:

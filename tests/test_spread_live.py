@@ -6,7 +6,9 @@ import io
 import json
 import os
 import shutil
+import time
 import urllib.error
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -332,3 +334,69 @@ def test_the_selftest_verdict_on_another_machine(replay_root, monkeypatch):
     assert not machine(noise=15.0, last_bits=True)["pass"]  # outside the band
     assert not machine(noise=2.5, last_bits=True, wrong_table=True)["pass"]
     assert not machine(noise=2.5, last_bits=True, wrong_library=True)["pass"]
+
+
+def test_the_fetches_run_side_by_side_and_a_hung_source_does_not_hold_the_others():
+    _, clock = ticking("2026-10-09T08:00:00Z", step=1)
+
+    def slow(value):
+        def step():
+            time.sleep(0.4)
+            return {"value": value}
+        return step
+
+    def fails():
+        raise RuntimeError("source down")
+
+    began = time.monotonic()
+    out = sl.run_fetches({"a": slow(1), "b": slow(2), "c": fails, "d": lambda: time.sleep(30)}, clock, {"a": 5, "b": 5, "c": 5, "d": 1})
+    assert time.monotonic() - began < 2.5  # not 0.4 + 0.4 + 30: side by side, and the hung one is given up on after its second
+    assert list(out) == ["a", "b", "c", "d"] and out["a"]["result"] == {"value": 1} and out["b"]["result"] == {"value": 2}
+    assert isinstance(out["c"]["error"], RuntimeError) and isinstance(out["d"]["error"], TimeoutError) and "result" not in out["d"]
+    assert all(box["began"] <= box["done"] for box in out.values())
+
+
+def test_a_rounding_difference_is_told_apart_from_a_value_that_moved():
+    a = pd.DataFrame({"x": [100.0, 2.0, np.nan], "y": [1.0, 2.0, 3.0]})
+    b = pd.DataFrame({"x": [100.0 + 1.5e-14, 2.0, np.nan], "y": [1.0, 2.0, 3.0]})
+    assert list(sl.differing_columns(a, b)) == ["x"] and sl.differing_columns(a, b, sl.SCRAMBLE_TOLERANCE) == {}
+    moved = pd.DataFrame({"x": [100.0, 2.0, np.nan], "y": [1.0, 2.0 + 1e-6, 3.0]})
+    assert list(sl.differing_columns(a, moved, sl.SCRAMBLE_TOLERANCE)) == ["y"]
+    gone = pd.DataFrame({"x": [100.0, np.nan, np.nan], "y": [1.0, 2.0, 3.0]})  # missing in one only always counts
+    assert sl.differing_columns(a, gone, sl.SCRAMBLE_TOLERANCE)["x"]["missing_in_one_only"] == 1
+
+
+@needs_data
+def test_a_missing_price_of_yesterday_is_issued_at_once_and_a_missing_load_forecast_waits(replay_root, monkeypatch):
+    quiet = lambda *_: None  # noqa: E731
+    monkeypatch.setattr(sl, "fetch_steps", lambda *a: {})
+    real = sl.build_data
+    day = pd.Timestamp("2026-10-10")
+
+    def without(what):
+        def build(paths, d, upto, live=True):
+            data, info = real(paths, d, upto=upto, live=live)
+            if what == "german price of yesterday":
+                de = data.de.copy()
+                de[np.asarray(sl.delivery_days(de.index) == day - pd.Timedelta(days=1))] = np.nan
+                return replace(data, de=de), info
+            french = data.french.copy()
+            french.loc[np.asarray(sl.delivery_days(french.index) == day), "load_fc_mw"] = np.nan
+            return replace(data, french=french), info
+        return build
+
+    # 10:02 Paris, the load forecast of D is not there yet: nothing is written, the next trigger tries again
+    monkeypatch.setattr(sl, "build_data", without("load forecast"))
+    _, clock = ticking("2026-10-09T08:02:00Z", step=1)
+    waited = sl.issue(replay_root, clock=clock, log=quiet)
+    assert waited["status"] == "postponed" and "load forecast" in waited["reason"] and not sl.record_path(replay_root, "2026-10-10").exists()
+    # 10:02 Paris, yesterday's German price is not on the source: issued at once, inputs left missing, and the record says so
+    monkeypatch.setattr(sl, "build_data", without("german price of yesterday"))
+    _, clock = ticking("2026-10-09T08:02:00Z", step=1)
+    out = sl.issue(replay_root, clock=clock, log=quiet)
+    assert out["status"] == "issued" and any(flag.startswith("yesterday's spread is missing") for flag in out["flags"])
+    record = json.loads(Path(out["record"]).read_text())
+    assert record["issued_by_cutoff"] and record["evidence"]["yesterdays_spread_present_hours"] == 0
+    assert record["evidence"]["input_hours_missing_for_D"]["s_l1"] == 24 and record["evidence"]["input_hours_missing_for_D"]["de_l1"] == 24
+    assert all(len(record["forecasts"][m]) == 24 and np.isfinite(record["forecasts"][m]).all() for m in sl.MODELS)
+    assert all(record["evidence"]["inputs_identical_when_everything_unknown_at_the_gate_is_scrambled"].values())
