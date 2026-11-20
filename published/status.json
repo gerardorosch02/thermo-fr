@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-11-20T09:08:28Z",
+  "written_at_utc": "2026-11-20T09:33:11Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -11,7 +11,7 @@
   "window_days": 90,
   "from_day": "2026-08-22",
   "tomorrow": "2026-11-21",
-  "forecast_versions": 69,
+  "forecast_versions": 70,
   "actual_days": 45,
   "scored_versions": 68,
   "live_record": {
@@ -159,8 +159,8 @@
     "command": "morning-run",
     "kind": "scheduled",
     "delivery_day": "2026-11-21",
-    "started_at_utc": "2026-11-20T09:05:41Z",
-    "finished_at_utc": "2026-11-20T09:08:26Z",
+    "started_at_utc": "2026-11-20T09:30:42Z",
+    "finished_at_utc": "2026-11-20T09:33:10Z",
     "status": "partial",
     "message": "model: honest_v2.txt needs price_nl_lag1, price_it_north_lag1, spread_nl_lag1, spread_i"
   },
