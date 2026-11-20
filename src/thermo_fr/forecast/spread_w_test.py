@@ -13,6 +13,11 @@ yesterday, H, HW, G, GK, GM, W, C, and provenance, one of
   rebuilt               rebuilt afterwards from the refetch
 (docs/prereg/spread_w_refetch_spec.md). C is never attainable at 10:05 and is rebuilt on every day.
 
+report() also takes the schedule: one row per hour of the 100 registered days, scored or not, with delivery_day, provenance,
+issued (every comparator has a forecast for the hour) and inputs_missing (how many inputs of G were unavailable for the hour and
+stayed missing). With it the result shows, for each provenance class, the scheduled, issued and scored hours beside the error
+on the common scored hours, and says whether a later revision could have been used (amendment 2).
+
 The seal is a guard, not a lock: read() refuses before READ_FROM, but report() and decide() are plain functions. The seal
 that matters is that the frame of the window is not assembled before the read date.
 """
@@ -27,6 +32,7 @@ import pandas as pd
 
 from . import spread_eval as se
 from .shape import block_bootstrap_mean
+from .timing import delivery_days
 
 FIRST, LAST = "2026-10-11", "2027-01-18"
 READ_FROM = "2027-01-19"
@@ -42,6 +48,75 @@ MODELS = ("yesterday", "H", "HW", "G", "GK", "GM", "W", "C")
 PROVENANCE = ("saved", "rebuilt_french_saved", "rebuilt")
 REQUIRED = ("delivery_day", "hour", "dow", "holiday", "de_holiday", "wind_px", "solar_px", "spread", "provenance", *MODELS)
 TEST_NAME = "spread_w"
+AS_OF = {  # what each class means for the vintage of the inputs
+    "saved": "inputs as fetched that morning; an input that was unavailable stayed missing; no later revision is used",
+    "rebuilt_french_saved": "French inputs as saved before 10:05 Paris on the eve; German inputs from the archive replay, where ENTSO-E's forecasts are the latest "
+                            "published version and may have been revised after the gate",
+    "rebuilt": "every input from the archive replay; ENTSO-E's French load forecast and nuclear output and its German forecasts are the latest published version "
+               "and may have been revised after the gate; an input absent from the archive stayed missing",
+}
+SCHEDULE_COLUMNS = ("delivery_day", "provenance", "issued", "inputs_missing", "unscored_reason")
+
+
+def availability(frame: pd.DataFrame, schedule: pd.DataFrame) -> dict:
+    """Scheduled, issued and scored hours by provenance class, beside the error on the common scored hours."""
+    missing = [c for c in SCHEDULE_COLUMNS if c not in schedule.columns]
+    if missing:
+        raise ValueError(f"schedule columns missing: {missing}")
+    if schedule[list(SCHEDULE_COLUMNS)].isna().any().any():
+        raise ValueError("the schedule must have no missing value")
+    _stamps(schedule, "schedule")
+    registered = pd.date_range(FIRST, LAST, freq="D")
+    if len(schedule) != EXPECTED_HOURS or not np.array_equal(np.sort(schedule["delivery_day"].unique()), registered.to_numpy()):
+        raise ValueError(f"the schedule must hold the {EXPECTED_HOURS} hours of the {EXPECTED_DAYS} registered days")
+    if schedule["issued"].dtype != bool:
+        raise ValueError("`issued` must be true or false")
+    if not schedule["provenance"].isin(PROVENANCE).all() or (schedule.groupby("delivery_day")["provenance"].nunique() != 1).any():
+        raise ValueError("the schedule's provenance must be one of saved, rebuilt_french_saved, rebuilt, and the same for every hour of a day")
+    if not frame.index.isin(schedule.index).all():
+        raise ValueError("a scored hour is not in the schedule")
+    if not schedule.loc[frame.index, "issued"].all() or (schedule.loc[frame.index, "provenance"].to_numpy() != frame["provenance"].to_numpy()).any():
+        raise ValueError("a scored hour has no issued forecast, or its provenance differs from the schedule")
+    unscored = schedule[~schedule.index.isin(frame.index)]
+    if (schedule.loc[frame.index, "unscored_reason"] != "").any():
+        raise ValueError("a scored hour carries a reason for not being scored")
+    unexplained = unscored[unscored["issued"] & ~unscored["unscored_reason"].isin(UNSCORED_REASONS)]
+    if len(unexplained):
+        raise ValueError(f"{len(unexplained)} issued hour(s) are left out of scoring without one of the registered reasons: {list(UNSCORED_REASONS)}")
+    scored = schedule.index.isin(frame.index)
+    out = {}
+    for name in (*PROVENANCE, "all"):
+        rows = np.ones(len(schedule), bool) if name == "all" else (schedule["provenance"] == name).to_numpy()
+        part = frame if name == "all" else frame[frame["provenance"] == name]
+        out[name] = {"days": int(schedule.loc[rows, "delivery_day"].nunique()), "scheduled_hours": int(rows.sum()), "issued_hours": int((rows & schedule["issued"].astype(bool).to_numpy()).sum()),
+                     "scored_hours": int((rows & scored).sum()),
+                     "issued_but_not_scored": {reason: int((rows & ~scored & (schedule["unscored_reason"] == reason).to_numpy()).sum()) for reason in UNSCORED_REASONS},
+                     "hours_with_an_input_left_missing": int((rows & (schedule["inputs_missing"].to_numpy() > 0)).sum()),
+                     "mae_on_common_scored_hours": {m: float((part[m] - part["spread"]).abs().mean()) for m in MODELS} if len(part) else None,
+                     "as_of": AS_OF.get(name, "all classes together")}
+    saved_days = schedule.loc[schedule["provenance"] == "saved", "delivery_day"]
+    if len(saved_days):
+        since = schedule[schedule["delivery_day"] >= saved_days.min()]
+        out["since_the_first_saved_day"] = {"first_saved_day": f"{saved_days.min():%Y-%m-%d}", "days": int(since["delivery_day"].nunique()), "days_saved_before_the_auction": int(saved_days.nunique()),
+                                            "share_of_days_saved": float(saved_days.nunique() / since["delivery_day"].nunique())}
+    else:
+        out["since_the_first_saved_day"] = {"first_saved_day": None, "days": 0, "days_saved_before_the_auction": 0, "share_of_days_saved": None}
+    return out
+
+
+REPEATED_HOUR = (pd.Timestamp("2026-10-25"), 2)  # the clocks go back: 02:00 Paris happens twice on this day and on no other in the window
+UNSCORED_REASONS = ("no realised spread", "no spread of the previous day at that hour", "no German proxy")  # the scored-hour rule of the first test
+
+
+def _stamps(table: pd.DataFrame, what: str) -> pd.DatetimeIndex:
+    index = table.index
+    if not isinstance(index, pd.DatetimeIndex) or index.tz is None:
+        raise ValueError(f"the {what} must be indexed by time stamps with a time zone")
+    if not index.is_unique:
+        raise ValueError(f"an hour appears more than once in the {what}")
+    if (np.asarray(delivery_days(index)) != table["delivery_day"].to_numpy()).any():
+        raise ValueError(f"a delivery day in the {what} is not the Paris day of its time stamp")
+    return index
 
 
 def validate(frame: pd.DataFrame) -> None:
@@ -52,24 +127,17 @@ def validate(frame: pd.DataFrame) -> None:
     holes = frame[list(REQUIRED)].isna().sum()
     if holes.any():
         raise ValueError(f"missing values, so the models would be scored on different hours: {holes[holes > 0].to_dict()}")
-    if not frame.index.is_unique or frame.duplicated(["delivery_day", "hour"]).any() and not _repeated_hour_only(frame):
+    _stamps(frame, "frame")
+    twice = frame[frame.duplicated(["delivery_day", "hour"], keep=False)]
+    if len(twice) and not (len(twice) == 2 and (twice["delivery_day"].iloc[0], int(twice["hour"].iloc[0])) == REPEATED_HOUR):
         raise ValueError("an hour appears more than once")
     if frame["delivery_day"].min() < pd.Timestamp(FIRST) or frame["delivery_day"].max() > pd.Timestamp(LAST):
         raise ValueError("the frame holds days outside the registered window")
     days, hours = frame["delivery_day"].nunique(), len(frame)
     if days != EXPECTED_DAYS or not EXPECTED_HOURS - 24 <= hours <= EXPECTED_HOURS:
         raise ValueError(f"{days} days and {hours} hours, expected {EXPECTED_DAYS} days and {EXPECTED_HOURS - 24} to {EXPECTED_HOURS} hours")
-    per_day = frame.groupby("delivery_day").size()
-    if per_day.max() > 25 or per_day.min() < 1:
-        raise ValueError("a day holds more than 25 hours")
     if not frame["provenance"].isin(PROVENANCE).all() or (frame.groupby("delivery_day")["provenance"].nunique() != 1).any():
         raise ValueError("provenance must be one of saved, rebuilt_french_saved, rebuilt, and the same for every hour of a day")
-
-
-def _repeated_hour_only(frame: pd.DataFrame) -> bool:
-    """The only clock hour that may repeat is the extra hour of the 25-hour day, and the time stamps must differ."""
-    twice = frame[frame.duplicated(["delivery_day", "hour"], keep=False)]
-    return bool(len(twice) == 2 and twice["delivery_day"].nunique() == 1 and twice.index.is_unique and len(frame[frame["delivery_day"] == twice["delivery_day"].iloc[0]]) == 25)
 
 
 def daily_error(frame: pd.DataFrame, name: str) -> pd.Series:
@@ -110,9 +178,10 @@ def decide(frame: pd.DataFrame, candidate: str, base: str) -> dict:
             "second_reading_small_slices_set_aside": verdict([v for v in sl.values() if v["days"] >= SMALL_SLICE_DAYS])}
 
 
-def report(frame: pd.DataFrame) -> dict:
+def report(frame: pd.DataFrame, schedule: pd.DataFrame) -> dict:
     """Everything the plan says is reported. The decisions are in `decisions`; the rest is never part of them."""
     validate(frame)
+    hours = availability(frame, schedule)
     base = frame.groupby("delivery_day")[["spread", *MODELS]].mean()
     move = base["spread"] - base["yesterday"]
     big = move.abs() > se.MOVE
@@ -129,6 +198,7 @@ def report(frame: pd.DataFrame) -> dict:
                            "errors": {k: errors(frame[frame["provenance"] == k]) for k in PROVENANCE},
                            "primary_comparison_by_class": {k: paired(frame[frame["provenance"] == k], "W", "HW") for k in PROVENANCE if (days == k).sum() >= 14},
                            "note": "The classes are different calendar periods: rebuilt days come first, saved days last. A difference between them is not the effect of provenance alone."},
+            "availability": hours,
             "not_attainable": ["C"],
             "base_spread_mae": {m: float((base[m] - base["spread"]).abs().mean()) for m in MODELS},
             "direction_right": {m: float((np.sign(base.loc[big, m] - base.loc[big, "yesterday"]) == np.sign(move[big])).mean()) if big.any() else None for m in MODELS if m != "yesterday"},
@@ -141,7 +211,7 @@ def _today() -> pd.Timestamp:
     return pd.Timestamp.now(tz="Europe/Paris").tz_localize(None).normalize()
 
 
-def read(frame_path: Path, stop_checks: Path) -> dict:
+def read(frame_path: Path, schedule_path: Path, stop_checks: Path) -> dict:
     """The one read. Refuses before READ_FROM (Paris date of the machine's clock), without the passed stop conditions of this
     test and window, or on forecasts other than the checked ones."""
     if _today() < pd.Timestamp(READ_FROM):
@@ -151,7 +221,9 @@ def read(frame_path: Path, stop_checks: Path) -> dict:
         raise SystemExit("the stop-condition record is not that of this test and window")
     if not checks.get("all_pass"):
         raise SystemExit("a stop condition failed or was not run: nothing is scored")
-    if se.sha256(frame_path) != checks.get("test_predictions_sha256"):
+    if se.sha256(frame_path) != checks.get("test_predictions_sha256") or se.sha256(schedule_path) != checks.get("schedule_sha256"):
         raise SystemExit("the forecasts on disk are not the ones the stop conditions were run on")
     frame = pd.read_csv(frame_path, index_col=0, parse_dates=["delivery_day"])
-    return report(frame)
+    schedule = pd.read_csv(schedule_path, index_col=0, parse_dates=["delivery_day"], keep_default_na=False)
+    frame.index, schedule.index = pd.to_datetime(frame.index, utc=True), pd.to_datetime(schedule.index, utc=True)
+    return report(frame, schedule)
