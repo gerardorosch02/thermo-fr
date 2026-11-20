@@ -27,10 +27,11 @@ What "available by 10:05 Paris" means here. The forecast of delivery day D is me
     a billion, and separately whether they came out bit for bit identical. This tests the position of every value used. It
     cannot test whether a value was revised between its publication and the fetch.
   - One record per delivery day, created atomically, written before the auction closes at 12:00 Paris or not at all.
-  - If a source fails on the first run of the morning, or the French load forecast of D is not there yet, nothing is
-    written and the second run tries again. The second run issues with what there is, and the record says what was missing.
-  - A price of D-1 that is not on the source (yesterday's spread) does not postpone anything: the first run issues with
-    those inputs missing, and says so. Waiting could only make the fetch late.
+  - If a source fails on the first run of the morning, or the French load forecast of D is not there yet, or a price
+    request failed and left yesterday's spread missing, nothing is written and the second run tries again. The second run
+    issues with what there is, and the record says what was missing.
+  - A price of D-1 that the source answered for but does not hold (yesterday's spread) does not postpone anything: the first
+    run issues with those inputs missing, and says so. Waiting could only make the fetch late.
 All time stamps are the laptop's own clock. Nothing outside the laptop witnesses them.
 """
 
@@ -190,6 +191,14 @@ class _Statuses:
         self.items[item] = {"status": status, "hours": int(hours or 0), "revision": revision, "message": message}
 
 
+def write_whole(path: Path, content: bytes) -> None:
+    """Write under a temporary name, then rename: a file the logger later reads is either whole or not there. A fetch that
+    is cut short (the process ends, a thread is given up on) cannot leave half a file under a name that is read."""
+    part = path.with_name(path.name + ".part")
+    part.write_bytes(content)
+    os.replace(part, path)
+
+
 def fetch_french_window(day: pd.Timestamp, paths: Paths, now: pd.Timestamp | None = None) -> dict:
     """The production fetch of the French inputs around `day` (jobs.fetch_fresh), saved as a window file of the logger's own.
     The file is stamped with the moment it is written. If the files already held end more than one window back (the laptop was
@@ -209,7 +218,7 @@ def fetch_french_window(day: pd.Timestamp, paths: Paths, now: pd.Timestamp | Non
         statuses = _Statuses()
         fresh = fetch_fresh(f"{target:%Y-%m-%d}", paths.live / "cache", statuses, 0, wind_weights=weights / "wind_proxy.json", solar_weights=weights / "solar_proxy.json")
         path = folder / f"{target:%Y-%m-%d}_spread_{stamp_of(utc_now())}.csv"
-        fresh.to_csv(path)
+        write_whole(path, fresh.to_csv().encode("utf-8"))
         out["files"][path.name] = {"sha256": fq.sha256_file(path), "rows": int(len(fresh))}
         if target == pd.Timestamp(day):
             out["items"] = statuses.items
@@ -311,7 +320,7 @@ def fetch_german_raw(first: pd.Timestamp, last: pd.Timestamp, folder: Path, key:
                 content = _entsoe_get({**params, "periodStart": start, "periodEnd": end}, key, opener=opener)
                 if key.encode() in content:
                     raise RuntimeError("the answer contains the key; not written")
-                (folder / name).write_bytes(content)
+                write_whole(folder / name, content)
                 files[name] = {"sha256": hashlib.sha256(content).hexdigest(), "bytes": len(content), "no_data": b"<code>999</code>" in content}
             except Exception as exc:  # noqa: BLE001  one item that fails must not stop the others
                 errors[name] = f"{exc.__class__.__name__}: {exc}"
@@ -402,7 +411,7 @@ def fetch_german_points(first: pd.Timestamp, last: pd.Timestamp, folder: Path, s
         path = folder / f"{stamp}_{kind}.csv.gz"
         buffer = io.StringIO()
         frame.sort_index().to_csv(buffer, lineterminator="\n")
-        path.write_bytes(gzip.compress(buffer.getvalue().encode(), mtime=0))
+        write_whole(path, gzip.compress(buffer.getvalue().encode(), mtime=0))
         out[kind] = {"file": path.name, "sha256": fq.sha256_file(path), "hours": int(len(frame)), "hours_all_points_present": int(frame.notna().all(axis=1).sum())}
     return out
 
@@ -461,11 +470,13 @@ def differing_columns(a: pd.DataFrame, b: pd.DataFrame, tolerance: float = 0.0) 
         x, y = pd.to_numeric(a[column], errors="coerce").to_numpy(float), pd.to_numeric(b[column], errors="coerce").to_numpy(float)
         both = ~(np.isnan(x) | np.isnan(y))
         with np.errstate(invalid="ignore"):
-            apart = np.abs(x - y) > tolerance * np.maximum(1.0, np.maximum(np.abs(x), np.abs(y)))
-        differ = (np.isnan(x) != np.isnan(y)) | (both & apart)
+            close = np.isfinite(x) & np.isfinite(y) & (np.abs(x - y) <= tolerance * np.maximum(1.0, np.maximum(np.abs(x), np.abs(y))))
+        differ = (np.isnan(x) != np.isnan(y)) | (both & (x != y) & ~close)
         if differ.any():
+            with np.errstate(invalid="ignore"):
+                gaps = x[both] - y[both]  # an infinite value on one side gives no finite gap
             out[column] = {"hours": int(differ.sum()), "missing_in_one_only": int((np.isnan(x) != np.isnan(y)).sum()),
-                           "largest_difference": float(np.max(np.abs(x[both] - y[both]))) if both.any() else None}
+                           "largest_difference": float(np.max(np.abs(gaps[np.isfinite(gaps)]))) if np.isfinite(gaps).any() else None}
     return out
 
 
@@ -596,18 +607,25 @@ def write_once(path: Path, record: dict) -> Path:
 
 
 def run_fetches(steps: dict, clock, budgets: dict) -> dict:
-    """Run the fetches side by side, each in its own thread with its own time budget counted from the common start.
-    Returns {name: {"began", "done", and "result" or "error"}} in the order of `steps`. A source that hangs is given up on
-    when its budget ends; its thread dies with the process and can no longer change what is returned."""
+    """Run the fetches side by side, each in its own thread. Returns {name: {"began", "done", and "result" or "error"}} in
+    the order of `steps`. A budget is the least time a fetch is waited for, counted from the common start: the fetches are
+    looked at in order, so one listed after a slower one is waited for until that one is done, and the whole never waits
+    longer than the largest budget. A fetch still running when it is looked at after its budget is given up on. Its thread
+    dies with the process and can no longer change what is returned here; a file it finishes later is written whole
+    (write_whole) and is named in no record."""
     boxes = {name: {} for name in steps}
 
     def work(box, step):
-        box["began"] = clock()
         try:
+            box["began"] = clock()
             box["result"] = step()
-        except Exception as exc:  # noqa: BLE001
+        except BaseException as exc:  # noqa: BLE001  whatever ends a fetch is written down, not lost with the thread
             box["error"] = exc
-        box["done"] = clock()
+        try:
+            box["done"] = clock()
+        except BaseException as exc:  # noqa: BLE001
+            box.setdefault("error", exc)
+            box["done"] = None
 
     threads = {name: threading.Thread(target=work, args=(boxes[name], step), daemon=True) for name, step in steps.items()}
     start, started_at = time.monotonic(), clock()
@@ -618,8 +636,10 @@ def run_fetches(steps: dict, clock, budgets: dict) -> dict:
         seconds = budgets.get(name, 150)
         thread.join(max(0.0, seconds - (time.monotonic() - start)))
         box = dict(boxes[name])  # a copy: a thread that is still running writes to the original, not to this
-        if thread.is_alive() or "done" not in box:
+        if thread.is_alive():
             box = {"began": box.get("began", started_at), "done": clock(), "error": TimeoutError(f"not finished after {seconds:.0f} seconds")}
+        elif "error" in box:
+            box = {"began": box.get("began", started_at), "done": box.get("done") or clock(), "error": box["error"]}
         out[name] = box
     return out
 
@@ -631,6 +651,7 @@ def fetch_steps(paths: Paths, day: pd.Timestamp, now: pd.Timestamp, stamp: str) 
         latest = held["de"].dropna().index.max()
         first = min(day - pd.Timedelta(days=GERMAN_REFRESH_DAYS), latest.tz_localize(None).normalize() - pd.Timedelta(days=1))
         result = fetch_german_raw(max(first, pd.Timestamp(GERMAN_LIVE_FROM)), day + pd.Timedelta(days=1), paths.live / "german_raw" / stamp)
+        result["request_errors"] = sorted(result["errors"])  # requests that failed, as distinct from an answer of "no data"
         for name, meta in result["files"].items():
             if meta["no_data"]:
                 result["errors"][name] = "ENTSO-E answered that it has no data"
@@ -750,7 +771,14 @@ def _issue(paths: Paths, day: pd.Timestamp, gate: dict, started: pd.Timestamp, d
     record["training"], record["evidence"] = models, evidence
     # Only a missing load forecast of D postpones: it is due at 10:00 and a few minutes can bring it. A missing price of D-1 was
     # due the day before, so waiting half an hour gains nothing and makes every fetch late (amendment 4).
+    # A price request that failed this morning is a different case from a price the source does not hold: trying again can
+    # bring it, so it postpones as a failed source does.
     not_there_yet = ["the French load forecast of D"] if "load_fc_mw" in evidence["input_hours_missing_for_D"] else []
+    price_requests_failed = [what for what, failed_request in (
+        ("the French price request failed", "prices" in (record["fetch"].get("french_window", {}).get("errors") or {})),
+        ("the German price request failed", any(n.startswith("prices_DE_LU") for n in record["fetch"].get("german_raw", {}).get("request_errors") or []))) if failed_request]
+    if price_requests_failed and evidence["yesterdays_spread_present_hours"] < evidence["hours"]:
+        not_there_yet.append(f"yesterday's spread ({' and '.join(price_requests_failed)})")
     if not_there_yet and not dry_run and clock() < gate["last_chance"]:
         return out("postponed", reason=f"not on the sources yet: {'; '.join(not_there_yet)}; nothing written, the next trigger tries again", fetch=record["fetch"])
     if not all(evidence["inputs_identical_when_everything_unknown_at_the_gate_is_scrambled"].values()):
@@ -759,6 +787,8 @@ def _issue(paths: Paths, day: pd.Timestamp, gate: dict, started: pd.Timestamp, d
         record["flags"].append("an input of D differs by rounding only (under one part in a billion) when everything unknown at the gate is scrambled")
     if evidence["inputs_with_a_missing_hour"]:
         record["flags"].append(f"{evidence['inputs_with_a_missing_hour']} input(s) missing for part of D and left missing")
+    if "load_fc_mw" in evidence["input_hours_missing_for_D"]:
+        record["flags"].append("the French load forecast of D is missing for part of D: issued without it after the last chance to wait")
     if evidence["yesterdays_spread_present_hours"] < evidence["hours"]:
         record["flags"].append("yesterday's spread is missing for part of D: its lags are missing, and decoupled_share_l1 reads 0 (frozen feature code)")
     if evidence["german_proxies_present_hours"] < evidence["hours"]:

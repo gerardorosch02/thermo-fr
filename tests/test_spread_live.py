@@ -355,6 +355,20 @@ def test_the_fetches_run_side_by_side_and_a_hung_source_does_not_hold_the_others
     assert isinstance(out["c"]["error"], RuntimeError) and isinstance(out["d"]["error"], TimeoutError) and "result" not in out["d"]
     assert all(box["began"] <= box["done"] for box in out.values())
 
+    def exits():
+        raise SystemExit(3)
+
+    ended = sl.run_fetches({"e": exits}, clock, {"e": 5})["e"]  # whatever ends a fetch is written down, and is not called a timeout
+    assert isinstance(ended["error"], SystemExit) and ended["done"] is not None
+
+
+def test_a_fetched_file_is_whole_or_not_there(tmp_path):
+    path = tmp_path / "20261120T090012Z_wind.csv.gz"
+    sl.write_whole(path, b"abc")
+    assert path.read_bytes() == b"abc" and [f.name for f in tmp_path.iterdir()] == [path.name]
+    (tmp_path / "20261121T090012Z_wind.csv.gz.part").write_bytes(b"half")  # what a fetch cut short leaves behind
+    assert [f.name for f in sorted(tmp_path.glob("*.csv.gz"))] == [path.name]  # the name the logger reads does not match it
+
 
 def test_a_rounding_difference_is_told_apart_from_a_value_that_moved():
     a = pd.DataFrame({"x": [100.0, 2.0, np.nan], "y": [1.0, 2.0, 3.0]})
@@ -364,6 +378,9 @@ def test_a_rounding_difference_is_told_apart_from_a_value_that_moved():
     assert list(sl.differing_columns(a, moved, sl.SCRAMBLE_TOLERANCE)) == ["y"]
     gone = pd.DataFrame({"x": [100.0, np.nan, np.nan], "y": [1.0, 2.0, 3.0]})  # missing in one only always counts
     assert sl.differing_columns(a, gone, sl.SCRAMBLE_TOLERANCE)["x"]["missing_in_one_only"] == 1
+    wild = pd.DataFrame({"x": [np.inf, 2.0, np.nan], "y": [1.0, 2.0, -np.inf]})  # an infinite value is never the same as a finite one
+    for tolerance in (0.0, sl.SCRAMBLE_TOLERANCE):
+        assert set(sl.differing_columns(a, wild, tolerance)) == {"x", "y"} and sl.differing_columns(wild, wild, tolerance) == {}
 
 
 @needs_data
@@ -400,3 +417,74 @@ def test_a_missing_price_of_yesterday_is_issued_at_once_and_a_missing_load_forec
     assert record["evidence"]["input_hours_missing_for_D"]["s_l1"] == 24 and record["evidence"]["input_hours_missing_for_D"]["de_l1"] == 24
     assert all(len(record["forecasts"][m]) == 24 and np.isfinite(record["forecasts"][m]).all() for m in sl.MODELS)
     assert all(record["evidence"]["inputs_identical_when_everything_unknown_at_the_gate_is_scrambled"].values())
+
+
+@needs_data
+def test_each_fetch_is_timed_by_its_own_finish_and_a_failed_price_request_waits(replay_root, monkeypatch):
+    quiet = lambda *_: None  # noqa: E731
+    now = {"t": pd.Timestamp("2026-10-09T08:02:00Z")}  # 10:02 Paris; this clock moves only when a step moves it
+    real = sl.build_data
+    day = pd.Timestamp("2026-10-10")
+
+    def without_yesterdays_german_price(paths, d, upto, live=True):
+        data, info = real(paths, d, upto=upto, live=live)
+        de = data.de.copy()
+        de[np.asarray(sl.delivery_days(de.index) == day - pd.Timedelta(days=1))] = np.nan
+        return replace(data, de=de), info
+
+    def steps(request_errors):
+        def german():
+            time.sleep(0.5)  # still running when the French fetch is done
+            now["t"] = pd.Timestamp("2026-10-09T08:06:00Z")  # and finished a minute after the gate
+            return {"folder": "x", "files": {}, "errors": {n: "URLError" for n in request_errors}, "request_errors": request_errors}
+        return lambda *a: {"french_window": lambda: {"files": {}, "items": {}, "errors": {}}, "german_raw": german, "german_points": lambda: {"errors": {}}}
+
+    monkeypatch.setattr(sl, "build_data", without_yesterdays_german_price)
+    # the German price request failed and yesterday's spread is missing: trying again can bring it, so nothing is written
+    monkeypatch.setattr(sl, "fetch_steps", steps(["prices_DE_LU_202610010000_202610110000.xml"]))
+    waited = sl.issue(replay_root, clock=lambda: now["t"], log=quiet)
+    assert waited["status"] == "postponed" and "the German price request failed" in waited["reason"]
+    assert waited["fetch"]["french_window"]["finished_by_cutoff"] and not waited["fetch"]["german_raw"]["finished_by_cutoff"]
+    assert waited["fetch"]["french_window"]["finished_utc"] == "2026-10-09T08:02:00Z" and waited["fetch"]["german_raw"]["finished_utc"] == "2026-10-09T08:06:00Z"
+    # the same morning with every request answered: the price is simply not on the source, and the record is written at once
+    now["t"] = pd.Timestamp("2026-10-09T08:02:00Z")
+    monkeypatch.setattr(sl, "fetch_steps", steps([]))
+    out = sl.issue(replay_root, clock=lambda: now["t"], log=quiet)
+    assert out["status"] == "issued" and "a fetch finished after 10:05 Paris" in out["flags"]
+    record = json.loads(Path(out["record"]).read_text())
+    assert record["fetches_ran"] == "side by side" and not record["all_fetches_finished_by_cutoff"]
+    assert [record["fetch"][n]["finished_by_cutoff"] for n in ("french_window", "german_raw", "german_points")] == [True, False, True]
+
+
+@needs_data
+def test_a_rounding_difference_under_the_scramble_is_reported_and_not_called_a_leak_and_a_late_load_forecast_is_named(replay_root, monkeypatch):
+    monkeypatch.setattr(sl, "fetch_steps", lambda *a: {})
+    real_scrambled, real_build = sl.se.scrambled, sl.build_data
+    day = pd.Timestamp("2026-10-10")
+
+    def one_unit_in_the_last_place(data, first):
+        out = real_scrambled(data, first)
+        de = out.de.copy()
+        rows = np.asarray(sl.delivery_days(de.index) == day - pd.Timedelta(days=1))
+        de[rows] = np.nextafter(de[rows].to_numpy(float), np.inf)
+        return replace(out, de=de)
+
+    def without_the_load_forecast(paths, d, upto, live=True):
+        data, info = real_build(paths, d, upto=upto, live=live)
+        french = data.french.copy()
+        french.loc[np.asarray(sl.delivery_days(french.index) == day), "load_fc_mw"] = np.nan
+        return replace(data, french=french), info
+
+    monkeypatch.setattr(sl.se, "scrambled", one_unit_in_the_last_place)
+    monkeypatch.setattr(sl, "build_data", without_the_load_forecast)
+    _, clock = ticking("2026-10-09T08:31:00Z", step=1)  # 10:31 Paris: past the last chance to wait for the load forecast
+    out = sl.issue(replay_root, clock=clock, log=lambda *_: None)
+    assert out["status"] == "issued"
+    assert any(flag.startswith("the French load forecast of D is missing") for flag in out["flags"])
+    assert any(flag.startswith("an input of D differs by rounding only") for flag in out["flags"])
+    assert "an input of D depends on a value not known at the gate" not in out["flags"]
+    evidence = json.loads(Path(out["record"]).read_text())["evidence"]
+    assert all(evidence["inputs_identical_when_everything_unknown_at_the_gate_is_scrambled"].values()) and evidence["scramble_tolerance"] == 1e-9
+    assert not any(evidence["inputs_bit_identical_under_the_scramble"].values()) and evidence["inputs_that_moved_under_the_scramble"] == {}
+    rounding = evidence["inputs_that_differ_only_by_rounding_under_the_scramble"]
+    assert "de_l1" in rounding and all(detail["largest_difference"] < 1e-9 for detail in rounding.values())

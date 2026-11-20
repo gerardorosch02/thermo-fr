@@ -11,7 +11,8 @@ order.
 | `spread_w_refetch_spec.md` | Input by input: what can be recovered as of 10:05 Paris, how missing and revised values are handled | All of it | Nothing. Amendment 2 adds how the January report shows it |
 | `spread_w_amendment_2.md` | The morning logger, the January availability report, corrected wording, what has been reviewed and what has not | All of that | The logger's code hash and its self-test criterion (amendment 3) |
 | `spread_w_amendment_3.md` | Forecasts are machine-dependent at about 2 EUR/MWh an hour; what that means for saved and rebuilt days and for reading any result near a threshold | All of that | The logger's code hash (amendment 4). The sentence that the price of D-1 was present in all 41 production windows saved by 10:05: those windows blend both German auctions, so it did not show that the coupled price was there (amendment 4) |
-| `spread_w_amendment_4.md` | After the first unattended morning: the three fetches run side by side, a missing price of D-1 no longer postpones the record, the scramble check has a tolerance of 1e-9 | Current | |
+| `spread_w_amendment_4.md` | After the first unattended morning: the three fetches run side by side, a missing price of D-1 no longer postpones the record, the scramble check has a tolerance of 1e-9 | The three changes | Five sentences and the code hash, listed in the review document. It also supersedes, without naming them, amendment 3's sentences that the self-test requires identical inputs under the scramble and that a missing spread of yesterday postpones the record |
+| `spread_w_amendment_4_review.md` | The independent review of amendment 4, the fixes it led to, and the sentences it supersedes | Current | |
 
 Project notes outside the repository: the note "Spread forecast: what the failed test showed, the new model W, and how it
 will be judged" has had three versions. Only the latest is current. An earlier version said the cause was found, that there
