@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-11-20T09:33:11Z",
+  "written_at_utc": "2026-11-20T21:05:34Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -156,13 +156,13 @@
   },
   "last_run": {
     "run_id": 1,
-    "command": "morning-run",
+    "command": "settle",
     "kind": "scheduled",
-    "delivery_day": "2026-11-21",
-    "started_at_utc": "2026-11-20T09:30:42Z",
-    "finished_at_utc": "2026-11-20T09:33:10Z",
-    "status": "partial",
-    "message": "model: honest_v2.txt needs price_nl_lag1, price_it_north_lag1, spread_nl_lag1, spread_i"
+    "delivery_day": null,
+    "started_at_utc": "2026-11-20T21:04:19Z",
+    "finished_at_utc": "2026-11-20T21:05:32Z",
+    "status": "ok",
+    "message": ""
   },
   "market": {
     "source": "EEX French Day-Ahead Base and Peak futures traded before the auction, collected locally; traded prices are not republished.",
@@ -172,7 +172,7 @@
     "benchmark": "the only benchmark of the level forecast: the window VWAP of the traded future, scored at the auction result",
     "counts": "windows (one per delivery day and product, base or peak) of settled delivery days whose published pre-market version of the default set (the version shown on the public site, read from published/forecasts.csv on main) was issued before the market window (11:15 Paris on the trade date), scored against the auction result; days whose published versions were all issued later, days with only a local version on the collecting machine, and days without a traded price are not counted; the backfilled walk-forward record in the README (42 windows) is a separate, out-of-sample reissue, not part of this count",
     "versions": "published pre-market versions (the public site's)",
-    "computed_at_utc": "2026-11-19T13:30:07Z",
+    "computed_at_utc": "2026-11-20T16:46:49Z",
     "hit_rate": 0.545,
     "mean_pnl_per_mwh": 0.32,
     "model_mae": 20.45,
