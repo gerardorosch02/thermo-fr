@@ -196,7 +196,14 @@ def write_whole(path: Path, content: bytes) -> None:
     is cut short (the process ends, a thread is given up on) cannot leave half a file under a name that is read."""
     part = path.with_name(path.name + ".part")
     part.write_bytes(content)
-    os.replace(part, path)
+    for attempt in range(10):  # on Windows a scanner can hold the new file for a moment, and the rename is then refused
+        try:
+            os.replace(part, path)
+            return
+        except PermissionError:
+            if attempt == 9:
+                raise
+            time.sleep(0.1)
 
 
 def fetch_french_window(day: pd.Timestamp, paths: Paths, now: pd.Timestamp | None = None) -> dict:
@@ -473,8 +480,8 @@ def differing_columns(a: pd.DataFrame, b: pd.DataFrame, tolerance: float = 0.0) 
             close = np.isfinite(x) & np.isfinite(y) & (np.abs(x - y) <= tolerance * np.maximum(1.0, np.maximum(np.abs(x), np.abs(y))))
         differ = (np.isnan(x) != np.isnan(y)) | (both & (x != y) & ~close)
         if differ.any():
-            with np.errstate(invalid="ignore"):
-                gaps = x[both] - y[both]  # an infinite value on one side gives no finite gap
+            with np.errstate(invalid="ignore", over="ignore"):
+                gaps = (x - y)[differ & both]  # the hours that differ; an infinite value on one side gives no finite gap
             out[column] = {"hours": int(differ.sum()), "missing_in_one_only": int((np.isnan(x) != np.isnan(y)).sum()),
                            "largest_difference": float(np.max(np.abs(gaps[np.isfinite(gaps)]))) if np.isfinite(gaps).any() else None}
     return out
@@ -635,11 +642,14 @@ def run_fetches(steps: dict, clock, budgets: dict) -> dict:
     for name, thread in threads.items():
         seconds = budgets.get(name, 150)
         thread.join(max(0.0, seconds - (time.monotonic() - start)))
+        alive = thread.is_alive()  # read before the copy: a thread seen as ended has written everything it will write
         box = dict(boxes[name])  # a copy: a thread that is still running writes to the original, not to this
-        if thread.is_alive():
+        if alive:
             box = {"began": box.get("began", started_at), "done": clock(), "error": TimeoutError(f"not finished after {seconds:.0f} seconds")}
-        elif "error" in box:
-            box = {"began": box.get("began", started_at), "done": box.get("done") or clock(), "error": box["error"]}
+        elif "error" in box or "result" not in box:
+            box = {"began": box.get("began", started_at), "done": box.get("done") or clock(), "error": box.get("error", RuntimeError("ended without a result"))}
+        elif box.get("done") is None:
+            box["done"] = clock()
         out[name] = box
     return out
 
@@ -788,7 +798,7 @@ def _issue(paths: Paths, day: pd.Timestamp, gate: dict, started: pd.Timestamp, d
     if evidence["inputs_with_a_missing_hour"]:
         record["flags"].append(f"{evidence['inputs_with_a_missing_hour']} input(s) missing for part of D and left missing")
     if "load_fc_mw" in evidence["input_hours_missing_for_D"]:
-        record["flags"].append("the French load forecast of D is missing for part of D: issued without it after the last chance to wait")
+        record["flags"].append("the French load forecast of D is missing for part of D: issued without it")
     if evidence["yesterdays_spread_present_hours"] < evidence["hours"]:
         record["flags"].append("yesterday's spread is missing for part of D: its lags are missing, and decoupled_share_l1 reads 0 (frozen feature code)")
     if evidence["german_proxies_present_hours"] < evidence["hours"]:

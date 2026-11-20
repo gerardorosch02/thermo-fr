@@ -366,6 +366,11 @@ def test_a_fetched_file_is_whole_or_not_there(tmp_path):
     path = tmp_path / "20261120T090012Z_wind.csv.gz"
     sl.write_whole(path, b"abc")
     assert path.read_bytes() == b"abc" and [f.name for f in tmp_path.iterdir()] == [path.name]
+    frame = pd.DataFrame({"a": [1.5, np.nan]}, index=pd.to_datetime(["2026-11-20T00:00Z", "2026-11-20T01:00Z"]))
+    frame.to_csv(tmp_path / "direct.csv")
+    sl.write_whole(tmp_path / "whole.csv", frame.to_csv().encode("utf-8"))  # how the French window is written
+    assert (tmp_path / "whole.csv").read_bytes() == (tmp_path / "direct.csv").read_bytes()
+    (tmp_path / "whole.csv").unlink(), (tmp_path / "direct.csv").unlink()
     (tmp_path / "20261121T090012Z_wind.csv.gz.part").write_bytes(b"half")  # what a fetch cut short leaves behind
     assert [f.name for f in sorted(tmp_path.glob("*.csv.gz"))] == [path.name]  # the name the logger reads does not match it
 
@@ -381,6 +386,7 @@ def test_a_rounding_difference_is_told_apart_from_a_value_that_moved():
     wild = pd.DataFrame({"x": [np.inf, 2.0, np.nan], "y": [1.0, 2.0, -np.inf]})  # an infinite value is never the same as a finite one
     for tolerance in (0.0, sl.SCRAMBLE_TOLERANCE):
         assert set(sl.differing_columns(a, wild, tolerance)) == {"x", "y"} and sl.differing_columns(wild, wild, tolerance) == {}
+    assert sl.differing_columns(a, wild)["x"] == {"hours": 1, "missing_in_one_only": 0, "largest_difference": None}  # no finite gap to report
 
 
 @needs_data
