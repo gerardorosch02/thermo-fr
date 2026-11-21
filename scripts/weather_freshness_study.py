@@ -123,7 +123,7 @@ def stage_fit(arm: str, curve: str) -> None:
         se.power_curve = fleet_curve
     feat = se.features(data)
     out = pd.DataFrame({"delivery_day": feat["frame"]["delivery_day"], "spread": feat["y"]})
-    out[["onshore_px", "offshore_px", "wind_px"]] = feat["px"][["onshore", "offshore", "wind"]].reindex(out.index).to_numpy()
+    out["wind_px"] = feat["px"]["wind"].reindex(out.index).to_numpy()
     out["G"] = se.fit_months(feat, se.months_of(se.DEV_FIRST, se.DEV_LAST), models=("G",))["G"]
     print(arm, curve, "G fitted", round(time.time() - started), "s", flush=True)
     out["W"] = sw.fit_w(feat, se.DEV_FIRST, se.DEV_LAST)
