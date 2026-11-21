@@ -1,4 +1,5 @@
-"""The morning logger of the spread forecasts (docs/prereg/spread_w_amendment_2.md, changed by spread_w_amendment_4.md).
+"""The morning logger of the spread forecasts (docs/prereg/spread_w_amendment_2.md, changed by spread_w_amendment_4.md and
+spread_w_amendment_5.md).
 
 Each morning it fetches what is public, forecasts the France minus Germany spread of the next delivery day with H, HW, G,
 GK, GM and W, and writes one time-stamped record that is never rewritten. It computes no error against any price, ever.
@@ -11,15 +12,15 @@ GK, GM and W, and writes one time-stamped record that is never rewritten. It com
 Folder layout under --root:
   static/   inputs.csv, neighbour_fundamentals.csv, neighbour_sequences.csv.gz, raw_first_test/*.xml,
             german_wind_points.csv.gz, german_solar_points.csv.gz, reference.json          never changed after installation
-  live/     french_windows/, german_raw/<stamp>/, german_points/, records/issued/, records/manifest.jsonl,
-            records/attempts.jsonl, cache/, dry_run/                                       written by the logger
+  live/     french_windows/, german_raw/<stamp>/, german_price_second_source/, german_points/, records/issued/,
+            records/manifest.jsonl, records/attempts.jsonl, cache/, dry_run/               written by the logger
 --production is the production folder of the public forecast. The logger only reads there: the French input windows saved by
 the morning runs (data/shadow/fresh) and the proxy weights (published/model).
 
 What "available by 10:05 Paris" means here. The forecast of delivery day D is meant to be issued at 10:05 Paris on D-1.
   - Nothing is fetched before 10:00 Paris on D-1, the deadline of the load forecast of D. A run that starts earlier writes
     nothing.
-  - Every source is fetched that morning, the three fetches side by side, and the time each one finished is written into the
+  - Every source is fetched that morning, the four fetches side by side, and the time each one finished is written into the
     record, with a flag if it finished after 10:05.
   - German prices and ENTSO-E forecasts of D or later are dropped before any feature is built, whatever the fetch returned.
   - The features of D are then built a second time from the same tables with every value that cannot be known at the gate
@@ -32,6 +33,10 @@ What "available by 10:05 Paris" means here. The forecast of delivery day D is me
     issues with what there is, and the record says what was missing.
   - A price of D-1 that the source answered for but does not hold (yesterday's spread) does not postpone anything: the first
     run issues with those inputs missing, and says so. Waiting could only make the fetch late.
+  - The coupled German price has a second source, energy-charts.info (amendment 5). ENTSO-E comes first. An hour of D-1 or
+    earlier for which ENTSO-E holds no coupled price is taken from the second source, and only on a morning when the two
+    agree on every hour both hold over the ten days before D, with at least 24 such hours. The record counts the hours taken
+    and says so in a flag. Nothing of D or later is ever taken from it. The French price has no second source.
 All time stamps are the laptop's own clock. Nothing outside the laptop witnesses them.
 """
 
@@ -70,7 +75,7 @@ LAST_CHANCE_HOUR, LAST_CHANCE_MINUTE = 10, 25  # before this a run with a failed
 AUCTION_HOUR = 12
 WAIT_IF_EARLY_BY = pd.Timedelta(minutes=5)  # a task that fires a little before 10:00 waits for it
 RUNNING_STALE_AFTER = pd.Timedelta(minutes=30)
-FETCH_BUDGET_SECONDS = {"french_window": 300, "german_raw": 150, "german_points": 150}
+FETCH_BUDGET_SECONDS = {"french_window": 300, "german_raw": 150, "german_price_second_source": 150, "german_points": 150}
 FRENCH_WINDOW_SPAN_DAYS = 11  # one production fetch covers D-10 to D+1
 MAX_FRENCH_BACKFILL_WINDOWS = 8
 MODELS = ("H", "HW", "G", "GK", "GM", "W")
@@ -90,6 +95,11 @@ DE_LU = "10Y1001A1001A82H"
 GERMAN_ITEMS = {"prices_DE_LU": {"documentType": "A44", "in_Domain": DE_LU, "out_Domain": DE_LU},
                 "load_forecast_DE_LU": {"documentType": "A65", "processType": "A01", "outBiddingZone_Domain": DE_LU},
                 "wind_solar_forecast_DE_LU": {"documentType": "A69", "processType": "A01", "in_Domain": DE_LU}}
+SECOND_SOURCE = "german_price_second_source"  # the name of the fetch, of its folder under live/ and of its entry in the record
+SECOND_SOURCE_URL = "https://api.energy-charts.info/price"
+SECOND_SOURCE_NAME = "energy-charts.info (Fraunhofer ISE), day-ahead price of bidding zone DE-LU, CC BY 4.0"
+SECOND_SOURCE_AGREE = 0.005  # EUR/MWh: two hourly prices this close are the same price
+SECOND_SOURCE_MIN_HOURS_IN_COMMON = 24  # fewer hours held by both over the ten days before D, and the second source is not used
 POINTS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 KMH_TO_MS = 1000.0 / 3600.0
 DUE_BY_THE_GATE = ("load_forecast", "weather_issued", "wind_points", "solar_points", "wind_proxy", "solar_proxy")  # French items that should exist for D at 10:00 Paris
@@ -100,6 +110,7 @@ KNOWN_BY = {  # the timing rule of every input group, written into each record
     "French nuclear output": "within about an hour of each period; used to 08:00 Paris on D-1",
     "French weather and points of D": "Open-Meteo run of 18 UTC on D-2 at the latest (forecast as issued two days ahead)",
     "German coupled price of D-1": "about 13:00 Paris on D-2",
+    "German coupled price of D-1 from the second source": "the same auction result, about 13:00 Paris on D-2; used only where ENTSO-E holds none",
     "German load forecast of D-1 and D-7": "10:00 Paris on D-2 and D-8",
     "German wind and solar forecasts of D-1": "18:00 Paris on D-2",
     "German wind and solar points of D": "Open-Meteo run of 18 UTC on D-2 at the latest (forecast as issued two days ahead)",
@@ -373,6 +384,110 @@ def german_refetched(paths: Paths, upto: pd.Timestamp, live: bool = True) -> tup
     return new, used
 
 
+# ---- the second source of the coupled German price (amendment 5) --------------------------------------------------------------
+
+def _second_source_get(first: pd.Timestamp, last: pd.Timestamp, opener=urllib.request.urlopen, tries: int = 4, wait: float = 10.0) -> bytes:
+    url = SECOND_SOURCE_URL + "?" + urllib.parse.urlencode({"bzn": "DE-LU", "start": f"{first:%Y-%m-%d}", "end": f"{last:%Y-%m-%d}"})
+    for attempt in range(1, tries + 1):
+        try:
+            with opener(urllib.request.Request(url, headers={"User-Agent": "thermo-fr spread logger (research, one request a morning)"}), timeout=60) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code in (429, 500, 502, 503, 504) and attempt < tries:
+                time.sleep(wait); wait *= 2; continue
+            raise RuntimeError(f"HTTP {exc.code} from energy-charts.info") from None
+        except (urllib.error.URLError, TimeoutError) as exc:
+            if attempt < tries:
+                time.sleep(wait); wait *= 2; continue
+            raise RuntimeError(f"could not reach energy-charts.info: {exc}") from None
+    raise RuntimeError("unreachable")
+
+
+def parse_second_source(content: bytes) -> pd.Series:
+    """Hourly UTC prices from one saved answer: the mean of the four quarter hours of an hour, and only of an hour for which
+    all four are held. Anything else in the answer (a missing value, a stamp off the quarter-hour grid, a unit other than
+    EUR per MWh) is not read as a price."""
+    answer = json.loads(content)
+    if str(answer.get("unit", "")).replace(" ", "") != "EUR/MWh":
+        raise ValueError(f"unexpected unit {answer.get('unit')!r}")
+    stamps, prices = answer["unix_seconds"], answer["price"]
+    if len(stamps) != len(prices):
+        raise ValueError("stamps and prices differ in number")
+    raw = pd.Series(pd.to_numeric(pd.Series(prices, dtype=object), errors="coerce").to_numpy(dtype=float), index=pd.to_datetime(stamps, unit="s", utc=True)).dropna()
+    raw = raw[np.isfinite(raw.to_numpy())]
+    raw = raw[(raw.index.minute % 15 == 0) & (raw.index.second == 0)]
+    raw = raw[~raw.index.duplicated(keep="first")].sort_index()
+    if raw.empty:
+        return pd.Series(dtype=float, index=pd.DatetimeIndex([], tz="UTC"))
+    hourly = raw.resample("1h")  # the same mean of quarter hours as the ENTSO-E path (dataset.to_hourly_utc)
+    return hourly.mean()[hourly.count() == 4]
+
+
+def fetch_second_source(first: pd.Timestamp, last: pd.Timestamp, folder: Path, stamp: str, opener=urllib.request.urlopen) -> dict:
+    """One request: the day-ahead price of DE-LU for the delivery days `first` to `last`, saved untouched. An answer that
+    cannot be read is saved and reported as a failure."""
+    content = _second_source_get(first, last, opener=opener)
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{stamp}.json"
+    write_whole(folder / name, content)
+    held = parse_second_source(content)
+    try:
+        licence = str(json.loads(content).get("license_info", ""))[:200]
+    except ValueError:
+        licence = ""
+    return {"source": SECOND_SOURCE_NAME, "file": name, "sha256": hashlib.sha256(content).hexdigest(), "bytes": len(content), "asked_for_delivery_days": [f"{first:%Y-%m-%d}", f"{last:%Y-%m-%d}"],
+            "complete_hours_held": int(len(held)), "licence_stated_in_the_answer": licence, "errors": {}}
+
+
+def second_source_held(paths: Paths, upto: pd.Timestamp, live: bool = True) -> tuple[pd.Series, list[str]]:
+    """Every answer of the second source the logger saved up to `upto`, later fetch winning. A file that cannot be read holds nothing."""
+    held, used = pd.Series(dtype=float, index=pd.DatetimeIndex([], tz="UTC")), []
+    folder = paths.live / SECOND_SOURCE
+    for file in sorted(folder.glob("*.json")) if live and folder.exists() else []:
+        try:
+            fetched = pd.Timestamp(file.stem)
+            fetched = fetched.tz_localize("UTC") if fetched.tzinfo is None else fetched.tz_convert("UTC")
+        except ValueError:
+            continue
+        if fetched > upto:
+            continue
+        try:
+            later = parse_second_source(file.read_bytes())
+        except Exception:  # noqa: BLE001  a broken answer holds no price
+            continue
+        held = later.combine_first(held)
+        used.append(file.name)
+    return held, used
+
+
+def with_second_source(de: pd.Series, second: pd.Series, day: pd.Timestamp) -> tuple[pd.Series, dict]:
+    """The German price with the hours ENTSO-E lacks taken from the second source, and what was done.
+
+    Only delivery days from LIVE_DATA_FROM to D-1 can be filled. The second source is trusted on a morning only if, over the
+    ten delivery days before D, it agrees with ENTSO-E to half a cent on every hour both hold and both hold at least 24
+    hours. Otherwise nothing is taken from it. An hour ENTSO-E holds is never replaced."""
+    days = delivery_days(second.index) if len(second) else pd.DatetimeIndex([])
+    later = int((np.asarray(days >= day)).sum()) if len(second) else 0
+    second = second[np.asarray((days >= pd.Timestamp(LIVE_DATA_FROM)) & (days < day))] if len(second) else second
+    mine = de.dropna()
+    recent = second[np.asarray(delivery_days(second.index) >= day - pd.Timedelta(days=GERMAN_REFRESH_DAYS))] if len(second) else second
+    common = recent.index.intersection(mine.index)
+    gaps = (recent.reindex(common) - mine.reindex(common)).abs()
+    agree = int((gaps <= SECOND_SOURCE_AGREE).sum())
+    trusted = bool(len(common) >= SECOND_SOURCE_MIN_HOURS_IN_COMMON and agree == len(common))
+    lacking = second[~second.index.isin(mine.index)]
+    info = {"source": SECOND_SOURCE_NAME, "hours_both_hold_over_the_ten_days_before_D": int(len(common)), "of_which_agree_to_half_a_cent": agree,
+            "largest_difference_eur_mwh": float(gaps.max()) if len(common) else None, "trusted_this_morning": trusted,
+            "hours_it_holds_that_entsoe_lacks": int(len(lacking)), "hours_taken_from_it": 0, "hours_taken_from_it_by_delivery_day": {},
+            "hours_of_D_or_later_in_its_answers_never_read": later}
+    if not trusted or lacking.empty:
+        return de, info
+    by_day = pd.Series(1, index=lacking.index).groupby(np.asarray(delivery_days(lacking.index))).sum()
+    info["hours_taken_from_it"] = int(len(lacking))
+    info["hours_taken_from_it_by_delivery_day"] = {f"{d:%Y-%m-%d}": int(n) for d, n in by_day.items()}
+    return de.combine_first(lacking).sort_index(), info
+
+
 # ---- German weather points -------------------------------------------------------------------------------------------------------
 
 def _points_get(lat, lon, variable, first, last, opener=urllib.request.urlopen, tries: int = 4) -> bytes:
@@ -450,6 +565,9 @@ def build_data(paths: Paths, day: pd.Timestamp, upto: pd.Timestamp, live: bool =
                             paths.static / "german_wind_points.csv.gz", paths.static / "german_solar_points.csv.gz")
     new, raw_used = german_refetched(paths, upto, live=live)
     data = se.extend(stored, new, last=f"{day:%Y-%m-%d}")
+    second, second_used = second_source_held(paths, upto, live=live)
+    filled, second_info = with_second_source(data.de, second, day)  # before the cut below, so nothing of D or later can pass
+    data = replace(data, de=filled)
     before = lambda obj: obj[np.asarray(delivery_days(obj.index) < day)]  # noqa: E731
     dropped = {"german_price_hours_of_D_or_later": int((delivery_days(data.de.index) >= day).sum()), "entsoe_forecast_hours_of_D_or_later": int((delivery_days(data.tso.index) >= day).sum())}
     # The frozen feature code adds onshore and offshore with a missing value read as 0 MW. On the days only the logger holds, a row
@@ -461,6 +579,7 @@ def build_data(paths: Paths, day: pd.Timestamp, upto: pd.Timestamp, live: bool =
     wind, solar, points_used = points_tables(paths, stored, upto, live=live)
     data = replace(data, french=french, de=before(data.de), tso=before(data.tso), wind_pts=wind, solar_pts=solar, last=f"{day:%Y-%m-%d}")
     info = {"french": french_info, "german_raw_folders_used": raw_used, "german_point_files_used": points_used, "dropped": dropped,
+            SECOND_SOURCE: {**second_info, "files_used": second_used},
             "latest_german_price_hour_utc": iso(data.de.dropna().index.max()), "latest_entsoe_forecast_hour_utc": iso(data.tso.dropna(how="all").index.max()),
             "latest_french_price_hour_utc": iso(french["price_eur_mwh"].dropna().index.max())}
     return data, info
@@ -562,7 +681,9 @@ def forecasts(data: se.Data, day: pd.Timestamp, log=lambda *_: None) -> tuple[pd
                 "inputs_that_moved_under_the_scramble": moved["G"],
                 "inputs_that_differ_only_by_rounding_under_the_scramble": {c: d for c, d in exact["G"].items() if c not in moved["G"]},
                 "german_proxies_present_hours": int((feat["px"].loc[rows, ["wind", "solar"]].notna().all(axis=1)).sum()),
-                "yesterdays_spread_present_hours": int(feat["yesterday"][rows].notna().sum())}
+                "yesterdays_spread_present_hours": int(feat["yesterday"][rows].notna().sum()),
+                "german_price_hours_missing_on_the_eve": max(0, int((frame["delivery_day"] == day - pd.Timedelta(days=1)).sum())
+                                                                 - int(data.de[np.asarray(delivery_days(data.de.index) == day - pd.Timedelta(days=1))].notna().sum()))}
     known = np.asarray(frame["delivery_day"] <= day)
     evidence["fingerprint"] = {"inputs_of_D": fingerprint(g_rows), "all_rows_to_D": fingerprint(feat["sets"]["G"].loc[known]),
                                "target": fingerprint(feat["y"][known].to_frame("spread")), "W_weights_sum": float(sw.weights(labelled[labelled < week], week).sum())}
@@ -655,7 +776,7 @@ def run_fetches(steps: dict, clock, budgets: dict) -> dict:
 
 
 def fetch_steps(paths: Paths, day: pd.Timestamp, now: pd.Timestamp, stamp: str) -> dict:
-    """The three fetches of a morning. Each range starts where the files already held end, so a missed stretch leaves no hole."""
+    """The four fetches of a morning. Each range starts where the files already held end, so a missed stretch leaves no hole."""
     def german():
         held, _ = german_refetched(paths, now)
         latest = held["de"].dropna().index.max()
@@ -676,7 +797,10 @@ def fetch_steps(paths: Paths, day: pd.Timestamp, now: pd.Timestamp, stamp: str) 
         first = min(day - pd.Timedelta(days=POINT_REFRESH_DAYS), latest.tz_localize(None).normalize() - pd.Timedelta(days=1))
         return fetch_german_points(first, day, paths.live / "german_points", stamp, columns)
 
-    return {"french_window": lambda: fetch_french_window(day, paths), "german_raw": german, "german_points": points}
+    def second():  # the ten delivery days before D, never D itself
+        return fetch_second_source(max(day - pd.Timedelta(days=GERMAN_REFRESH_DAYS), pd.Timestamp(LIVE_DATA_FROM)), day - pd.Timedelta(days=1), paths.live / SECOND_SOURCE, stamp)
+
+    return {"french_window": lambda: fetch_french_window(day, paths), "german_raw": german, SECOND_SOURCE: second, "german_points": points}
 
 
 def _utc(frame: pd.DataFrame) -> pd.DataFrame:
@@ -752,7 +876,8 @@ def _issue(paths: Paths, day: pd.Timestamp, gate: dict, started: pd.Timestamp, d
             begun, done = box["began"], box["done"]
             if "error" in box:  # a source that is down is written down
                 result = {"error": f"{box['error'].__class__.__name__}: {box['error']}"}
-                failed.append(name)
+                if name != SECOND_SOURCE:  # the second source failing postpones only if the German price of the eve is then missing (below)
+                    failed.append(name)
                 record["flags"].append(f"{name} failed")
             else:
                 result = box["result"]
@@ -786,9 +911,12 @@ def _issue(paths: Paths, day: pd.Timestamp, gate: dict, started: pd.Timestamp, d
     not_there_yet = ["the French load forecast of D"] if "load_fc_mw" in evidence["input_hours_missing_for_D"] else []
     price_requests_failed = [what for what, failed_request in (
         ("the French price request failed", "prices" in (record["fetch"].get("french_window", {}).get("errors") or {})),
-        ("the German price request failed", any(n.startswith("prices_DE_LU") for n in record["fetch"].get("german_raw", {}).get("request_errors") or []))) if failed_request]
+        ("the German price request failed", bool(evidence["german_price_hours_missing_on_the_eve"])  # with the second source in, a failed ENTSO-E request can leave nothing missing
+         and any(n.startswith("prices_DE_LU") for n in record["fetch"].get("german_raw", {}).get("request_errors") or []))) if failed_request]
     if price_requests_failed and evidence["yesterdays_spread_present_hours"] < evidence["hours"]:
         not_there_yet.append(f"yesterday's spread ({' and '.join(price_requests_failed)})")
+    elif "error" in record["fetch"].get(SECOND_SOURCE, {}) and evidence["german_price_hours_missing_on_the_eve"]:
+        not_there_yet.append("the German price of the eve (ENTSO-E holds none and the request to the second source failed)")
     if not_there_yet and not dry_run and clock() < gate["last_chance"]:
         return out("postponed", reason=f"not on the sources yet: {'; '.join(not_there_yet)}; nothing written, the next trigger tries again", fetch=record["fetch"])
     if not all(evidence["inputs_identical_when_everything_unknown_at_the_gate_is_scrambled"].values()):
@@ -803,6 +931,13 @@ def _issue(paths: Paths, day: pd.Timestamp, gate: dict, started: pd.Timestamp, d
         record["flags"].append("yesterday's spread is missing for part of D: its lags are missing, and decoupled_share_l1 reads 0 (frozen feature code)")
     if evidence["german_proxies_present_hours"] < evidence["hours"]:
         record["flags"].append("a German proxy is missing for part of D")
+    second = info.get(SECOND_SOURCE) or {}
+    if second.get("hours_taken_from_it"):
+        record["flags"].append(f"the coupled German price of {second['hours_taken_from_it']} hour(s) before D came from the second source (energy-charts.info) because ENTSO-E held none")
+    elif second.get("hours_it_holds_that_entsoe_lacks") and not second.get("trusted_this_morning"):
+        record["flags"].append("the second source holds German prices that ENTSO-E lacks but was not used: "
+                               + (f"it disagrees with ENTSO-E on {second['hours_both_hold_over_the_ten_days_before_D'] - second['of_which_agree_to_half_a_cent']} of {second['hours_both_hold_over_the_ten_days_before_D']} hours both hold"
+                                  if second["hours_both_hold_over_the_ten_days_before_D"] >= SECOND_SOURCE_MIN_HOURS_IN_COMMON else f"only {second['hours_both_hold_over_the_ten_days_before_D']} hour(s) held by both over the ten days before D"))
     if curves.isna().any().any():
         record["flags"].append("a forecast is missing")
     record["timestamps_utc"] = [iso(t) for t in curves.index]

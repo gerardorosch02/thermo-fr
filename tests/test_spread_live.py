@@ -494,3 +494,171 @@ def test_a_rounding_difference_under_the_scramble_is_reported_and_not_called_a_l
     assert not any(evidence["inputs_bit_identical_under_the_scramble"].values()) and evidence["inputs_that_moved_under_the_scramble"] == {}
     rounding = evidence["inputs_that_differ_only_by_rounding_under_the_scramble"]
     assert "de_l1" in rounding and all(detail["largest_difference"] < 1e-9 for detail in rounding.values())
+
+
+# ---- the second source of the coupled German price (amendment 5) --------------------------------------------------------------
+
+def answer_of(hourly: pd.Series, unit: str = "EUR / MWh", leave_out=()) -> bytes:
+    """An energy-charts answer holding each hourly value as four equal quarter hours, except the quarter hours named."""
+    stamps, prices = [], []
+    for hour, value in hourly.items():
+        for quarter in range(4):
+            t = hour + pd.Timedelta(minutes=15 * quarter)
+            if t not in leave_out:
+                stamps.append(int(t.timestamp()))
+                prices.append(None if pd.isna(value) else float(value))
+    return json.dumps({"license_info": "CC BY 4.0", "unix_seconds": stamps, "price": prices, "unit": unit, "deprecated": False}).encode()
+
+
+def test_the_second_source_is_read_as_complete_hours_in_eur_per_mwh_and_nothing_else():
+    hours = pd.date_range("2026-11-19T23:00Z", periods=4, freq="h")
+    answer = json.loads(answer_of(pd.Series([10.0, 20.0, np.nan, 40.0], index=hours), leave_out={hours[3] + pd.Timedelta(minutes=45)}))
+    answer["unix_seconds"] += [int(hours[1].timestamp()) + 60]  # a stamp off the quarter-hour grid is not a price of the auction
+    answer["price"] += [999.0]
+    answer["price"][1] = 14.0  # the quarter hours of the first hour are 10, 14, 10, 10
+    held = sl.parse_second_source(json.dumps(answer).encode())
+    assert list(held.index) == [hours[0], hours[1]] and held.iloc[0] == 11.0 and held.iloc[1] == 20.0  # an hour with a missing or absent quarter hour is not held
+    with pytest.raises(ValueError):
+        sl.parse_second_source(answer_of(pd.Series([10.0], index=hours[:1]), unit="ct / kWh"))
+    with pytest.raises(ValueError):
+        sl.parse_second_source(b"Too Many Requests")
+
+
+def test_the_second_source_fetch_asks_once_for_days_before_D_waits_when_told_to_and_saves_the_answer_untouched(tmp_path, monkeypatch):
+    monkeypatch.setattr(sl.time, "sleep", lambda seconds: None)
+    hours = pd.date_range("2026-11-10T23:00Z", "2026-11-21T22:00Z", freq="h")
+    body, calls = answer_of(pd.Series(50.0, index=hours)), []
+
+    def opener(request, timeout=None):
+        calls.append(request.full_url)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(request.full_url, 429, "Too Many Requests", None, io.BytesIO(b"Too Many Requests"))
+        return FakeResponse(body)
+
+    result = sl.fetch_second_source(pd.Timestamp("2026-11-11"), pd.Timestamp("2026-11-21"), tmp_path / "second", "20261121T090000Z", opener=opener)
+    assert len(calls) == 2 and calls[1].endswith("bzn=DE-LU&start=2026-11-11&end=2026-11-21")
+    assert (tmp_path / "second" / "20261121T090000Z.json").read_bytes() == body and result["bytes"] == len(body) and result["complete_hours_held"] == len(hours)
+    # an answer that cannot be read is kept on disk and reported as a failure of the fetch
+    with pytest.raises(ValueError):
+        sl.fetch_second_source(pd.Timestamp("2026-11-11"), pd.Timestamp("2026-11-21"), tmp_path / "second", "20261121T093000Z", opener=lambda request, timeout=None: FakeResponse(b"<html>"))
+    assert (tmp_path / "second" / "20261121T093000Z.json").read_bytes() == b"<html>"
+    # saved answers are read up to the time asked, the later fetch winning, and a broken one holds nothing
+    (tmp_path / "live" / sl.SECOND_SOURCE).mkdir(parents=True)
+    for stamp, content in (("20261120T090000Z", answer_of(pd.Series(1.0, index=hours[:48]))), ("20261121T090000Z", answer_of(pd.Series(2.0, index=hours[24:72]))),
+                           ("20261121T093000Z", b"<html>"), ("20261122T090000Z", answer_of(pd.Series(3.0, index=hours)))):
+        (tmp_path / "live" / sl.SECOND_SOURCE / f"{stamp}.json").write_bytes(content)
+    held, used = sl.second_source_held(sl.Paths(tmp_path), pd.Timestamp("2026-11-21T12:00Z"))
+    assert used == ["20261120T090000Z.json", "20261121T090000Z.json"] and list(held.iloc[[0, 23, 24, 71]]) == [1.0, 1.0, 2.0, 2.0] and len(held) == 72
+
+
+def test_an_hour_entsoe_lacks_is_taken_from_the_second_source_only_when_the_two_agree_and_never_for_D():
+    day = pd.Timestamp("2026-11-22")
+    hours = pd.date_range("2026-11-09T23:00Z", "2026-11-22T22:00Z", freq="h")  # delivery days 10 to 22 November
+    truth = pd.Series(np.round(np.random.default_rng(0).uniform(20, 120, len(hours)), 2), index=hours)
+    days = sl.delivery_days(hours)
+    hole = np.asarray((days == pd.Timestamp("2026-11-20")) | (days == pd.Timestamp("2026-11-21")))
+    entsoe = truth[np.asarray(days < day)].copy()
+    entsoe[hole[: len(entsoe)]] = np.nan  # ENTSO-E answers with nothing for the 20th and the 21st
+    # the two agree on every hour both hold: the 48 hours are taken, counted by day, and no hour ENTSO-E holds is touched
+    filled, info = sl.with_second_source(entsoe, truth, day)
+    assert info["trusted_this_morning"] and info["hours_taken_from_it"] == 48 and info["hours_taken_from_it_by_delivery_day"] == {"2026-11-20": 24, "2026-11-21": 24}
+    assert info["hours_of_D_or_later_in_its_answers_never_read"] == 24 and filled.index.max() == pd.Timestamp("2026-11-21T22:00Z")
+    assert filled.notna().all() and (filled[hole[: len(filled)]] == truth[hole]).all() and (filled[~hole[: len(filled)]] == entsoe.dropna()).all()
+    assert info["hours_both_hold_over_the_ten_days_before_D"] == 8 * 24 and info["largest_difference_eur_mwh"] == 0.0
+    # one hour of the last ten days differs by two cents: the second source may be another auction, so nothing is taken
+    other = truth.copy()
+    other.iloc[100] += 0.02
+    same, info = sl.with_second_source(entsoe, other, day)
+    assert same is entsoe and not info["trusted_this_morning"] and info["hours_taken_from_it"] == 0 and info["hours_it_holds_that_entsoe_lacks"] == 48
+    assert info["of_which_agree_to_half_a_cent"] == info["hours_both_hold_over_the_ten_days_before_D"] - 1
+    # fewer than 24 hours held by both over the ten days: there is nothing to check it against, so nothing is taken
+    thin = entsoe.copy()
+    thin[np.asarray(sl.delivery_days(thin.index) >= pd.Timestamp("2026-11-12"))] = np.nan
+    thin.iloc[-3:] = truth[thin.index[-3:]]
+    same, info = sl.with_second_source(thin, truth, day)
+    assert same is thin and not info["trusted_this_morning"] and info["hours_both_hold_over_the_ten_days_before_D"] == 3
+    # a difference older than ten days does not count against it, and the second source holding nothing changes nothing
+    old = truth.copy()
+    old.iloc[5] += 5.0
+    assert sl.with_second_source(entsoe, old, day)[1]["trusted_this_morning"]
+    same, info = sl.with_second_source(entsoe, truth.iloc[:0], day)
+    assert same is entsoe and info["hours_taken_from_it"] == 0 and not info["trusted_this_morning"]
+    # delivery days the stored files hold are never filled, whatever the second source holds
+    early = pd.date_range("2026-09-30T22:00Z", "2026-10-12T21:00Z", freq="h")
+    stored = pd.Series(30.0, index=early)
+    stored.iloc[:48] = np.nan
+    filled, info = sl.with_second_source(stored, pd.Series(30.0, index=early), pd.Timestamp("2026-10-13"))
+    assert info["hours_taken_from_it"] == 0 and filled.iloc[:48].isna().all()
+
+
+@needs_data
+def test_a_morning_on_which_entsoe_lacks_the_german_price_of_the_eve(replay_root, monkeypatch):
+    quiet = lambda *_: None  # noqa: E731
+    monkeypatch.setattr(sl, "LIVE_DATA_FROM", "2026-09-25")  # the replay day lies before the live stretch; this lets its eve be filled
+    reference = json.loads((replay_root.static / "reference.json").read_text())
+    day = pd.Timestamp("2026-10-10")
+    real = sl.german_refetched
+    whole = real(replay_root, pd.Timestamp("2026-10-09T08:00Z"))[0]["de"]
+
+    def entsoe_without_the_eve(paths, upto, live=True):
+        new, used = real(paths, upto, live=live)
+        return {**new, "de": new["de"][np.asarray(sl.delivery_days(new["de"].index) != day - pd.Timedelta(days=1))]}, used
+
+    def steps(second):
+        return lambda paths, d, started, stamp: {"french_window": lambda: {"files": {}, "items": {}, "errors": {}}, "german_raw": lambda: {"folder": "x", "files": {}, "errors": {}, "request_errors": []},
+                                                 sl.SECOND_SOURCE: lambda: second(paths, stamp), "german_points": lambda: {"errors": {}}}
+
+    def answers(series):
+        return lambda paths, stamp: sl.fetch_second_source(day - pd.Timedelta(days=10), day - pd.Timedelta(days=1), paths.live / sl.SECOND_SOURCE, stamp,
+                                                           opener=lambda request, timeout=None: FakeResponse(answer_of(series)))
+
+    def down(paths, stamp):
+        raise RuntimeError("HTTP 429 from energy-charts.info")
+
+    recent = whole[np.asarray(sl.delivery_days(whole.index) >= day - pd.Timedelta(days=10))]
+    monkeypatch.setattr(sl, "german_refetched", entsoe_without_the_eve)
+    # 10:02 Paris: the second source cannot be reached and the German price of the eve is missing, so the run leaves it to the next
+    monkeypatch.setattr(sl, "fetch_steps", steps(down))
+    _, clock = ticking("2026-10-09T08:02:00Z", step=1)
+    waited = sl.issue(replay_root, clock=clock, log=quiet)
+    assert waited["status"] == "postponed" and "second source failed" in waited["reason"] and not sl.record_path(replay_root, "2026-10-10").exists()
+    # 10:02 Paris, the second source answers with another auction's prices: nothing is taken, the record is written at once and says why
+    wrong = recent + 3.0
+    monkeypatch.setattr(sl, "fetch_steps", steps(answers(wrong)))
+    dry = sl.issue(replay_root, dry_run=True, clock=clock, log=quiet)
+    assert dry["status"] == "dry run written" and any(flag.startswith("the second source holds German prices that ENTSO-E lacks but was not used: it disagrees") for flag in dry["flags"])
+    assert any(flag.startswith("yesterday's spread is missing") for flag in dry["flags"])
+    # 10:02 Paris, the second source answers with the coupled prices: the 24 hours of the eve are taken from it and the inputs are whole
+    monkeypatch.setattr(sl, "fetch_steps", steps(answers(recent)))
+    _, clock = ticking("2026-10-09T08:02:00Z", step=1)
+    out = sl.issue(replay_root, clock=clock, log=quiet)
+    assert out["status"] == "issued" and not any(flag.startswith("yesterday's spread is missing") for flag in out["flags"])
+    assert "the coupled German price of 24 hour(s) before D came from the second source (energy-charts.info) because ENTSO-E held none" in out["flags"]
+    record = json.loads(Path(out["record"]).read_text())
+    second = record["inputs"][sl.SECOND_SOURCE]
+    assert second["trusted_this_morning"] and second["hours_taken_from_it_by_delivery_day"] == {"2026-10-09": 24} and len(second["files_used"]) == 1
+    # the answer of this test also holds the prices of D and of the day after, as the stored raw files do: they are counted and never read
+    assert second["hours_both_hold_over_the_ten_days_before_D"] == 9 * 24 and second["hours_of_D_or_later_in_its_answers_never_read"] == 48
+    assert record["inputs"]["latest_german_price_hour_utc"] < "2026-10-09T22:00:00Z"
+    assert record["fetch"][sl.SECOND_SOURCE]["sha256"] and record["fetch"][sl.SECOND_SOURCE]["finished_by_cutoff"] and record["all_fetches_finished_by_cutoff"]
+    assert record["evidence"]["yesterdays_spread_present_hours"] == 24 and record["evidence"]["german_price_hours_missing_on_the_eve"] == 0
+    assert not sl.compare_fingerprints(record["fingerprint"]["inputs_of_D"], reference["fingerprint"]["inputs_of_D"])  # the inputs of D are those of the whole ENTSO-E series
+    assert all(record["evidence"]["inputs_identical_when_everything_unknown_at_the_gate_is_scrambled"].values())
+    assert all(len(record["forecasts"][m]) == 24 and np.isfinite(record["forecasts"][m]).all() for m in sl.MODELS)
+
+
+@needs_data
+def test_a_second_source_that_is_down_does_not_hold_up_a_morning_on_which_entsoe_has_the_price(replay_root, monkeypatch):
+    def down():
+        raise RuntimeError("HTTP 429 from energy-charts.info")
+
+    monkeypatch.setattr(sl, "fetch_steps", lambda *a: {"french_window": lambda: {"files": {}, "items": {}, "errors": {}}, "german_raw": lambda: {"folder": "x", "files": {}, "errors": {}, "request_errors": []},
+                                                       sl.SECOND_SOURCE: down, "german_points": lambda: {"errors": {}}})
+    reference = json.loads((replay_root.static / "reference.json").read_text())
+    _, clock = ticking("2026-10-09T08:02:00Z", step=1)
+    out = sl.issue(replay_root, clock=clock, log=lambda *_: None)
+    assert out["status"] == "issued" and f"{sl.SECOND_SOURCE} failed" in out["flags"]
+    record = json.loads(Path(out["record"]).read_text())
+    assert record["inputs"][sl.SECOND_SOURCE]["hours_taken_from_it"] == 0 and record["inputs"][sl.SECOND_SOURCE]["files_used"] == []
+    for model in sl.MODELS:  # with nothing taken from the second source the forecasts are the frozen ones
+        assert np.max(np.abs(np.asarray(record["forecasts"][model]) - np.asarray(reference["forecasts"][model]))) < 1e-9
