@@ -4,6 +4,9 @@ test of W: it reads nothing of theirs and writes only under its own folder (the 
     python weather_collect.py collect [--dry-run]     one morning snapshot of what each source offers right now
     python weather_collect.py history --product gfs   forecasts of past runs, resumable (also: --product gefs)
     python weather_collect.py pack --product gfs      one compact table from the saved history answers
+    python weather_collect.py history-ecmwf           the 00 UTC runs of ECMWF IFS from Open-Meteo's archive of single runs, resumable,
+                                                      at most 300 runs a call so that the morning tasks keep their share of the daily allowance
+    python weather_collect.py pack-ecmwf
     python weather_collect.py selftest                 parsing and planning checks, no network
     python weather_collect.py status
 
@@ -345,6 +348,71 @@ def pack(root: Path, product: str, zone: str, log=print) -> Path:
     return out
 
 
+# ---- ECMWF IFS single runs from Open-Meteo ---------------------------------------------------------------------------------
+
+def history_ecmwf(root: Path, zone: str, first: dt.date, last: dt.date, fetch=call, log=print, limit: int = 300) -> dict:
+    """The 00 UTC run of every day, 100 m wind at the zone's points, one request a run. Open-Meteo counts each point of a
+    request against a daily allowance shared with the morning tasks, hence the limit on runs per call."""
+    points = [(f"{zone}_{name}", lat, lon) for name, lat, lon in POINTS[zone]]
+    folder = root / "history" / "ecmwf_ifs" / zone
+    asked = saved = failed = 0
+    day = first
+    while day <= last:
+        path = folder / f"{day.year}" / f"{day.isoformat()}T00.json.gz"
+        if path.exists():
+            saved += 1
+        elif asked < limit:
+            url = "https://single-runs-api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode({
+                "latitude": ",".join(str(lat) for _, lat, _ in points), "longitude": ",".join(str(lon) for _, _, lon in points), "hourly": "wind_speed_100m",
+                "wind_speed_unit": "ms", "timezone": "GMT", "models": "ecmwf_ifs", "run": f"{day.isoformat()}T00:00"}, safe=",:")
+            answer = fetch(url, pause=1.0)
+            asked += 1
+            places = None
+            if answer["status"] == 200:
+                places = json.loads(answer["body"])
+                places = places if isinstance(places, list) else [places]
+            present = [sum(v is not None for v in p.get("hourly", {}).get("wind_speed_100m", [])[:72]) for p in places] if places else []
+            if not places or len(places) != len(points) or min(present) < 72:
+                failed += 1
+                write_whole(path.with_suffix(".error.txt"), json.dumps({"status": answer["status"], "error": answer["error"], "asked_utc": answer["asked_utc"], "hours_present": present}).encode() + b"\n" + answer["body"][:2000])
+                log(f"  {day}: {answer['error'] or answer['status']}, hours present {present[:3]} (left for the next call)")
+                if answer["status"] == 429 or failed >= 12:
+                    log("Stopping: the allowance is used up or twelve requests failed. Run the same command again tomorrow; it continues where it stopped.")
+                    return {"asked": asked, "saved": saved, "failed": failed, "stopped": True}
+            else:
+                envelope = {"model": "ecmwf_ifs", "run_utc": f"{day.isoformat()}T00:00:00Z", "points": [name for name, _, _ in points], "asked_utc": answer["asked_utc"], "answered_utc": answer["answered_utc"],
+                            "url": url, "answer_sha256": sha(answer["body"]), "answer": places}
+                write_whole(path, gzip.compress(json.dumps(envelope).encode(), mtime=0))
+                saved += 1
+            if asked % 50 == 0:
+                log(f"ecmwf {zone}: to {day}, {saved} saved, {failed} failed, {asked} of at most {limit} asked in this call")
+        day += dt.timedelta(days=1)
+    total = (last - first).days + 1
+    log(f"ecmwf {zone}: {saved} of {total} runs saved" + ("" if saved + failed >= total else f"; {total - saved} left for later calls"))
+    return {"asked": asked, "saved": saved, "failed": failed, "left": total - saved, "stopped": False}
+
+
+def pack_ecmwf(root: Path, zone: str, log=print) -> Path:
+    """One compact table: a row per run, lead (0 to 71 hours) and point."""
+    folder = root / "history" / "ecmwf_ifs" / zone
+    out = root / "history" / f"ecmwf_ifs_{zone}_wind100m.csv.gz"
+    rows = 0
+    with gzip.open(out.with_name(out.name + ".part"), "wt", encoding="utf-8", newline="\n") as handle:
+        handle.write("init_utc,lead_h,point,speed_ms\n")
+        for path in sorted(folder.rglob("*.json.gz")):
+            envelope = json.loads(gzip.decompress(path.read_bytes()))
+            run = dt.datetime.strptime(envelope["run_utc"], "%Y-%m-%dT%H:%M:%SZ")
+            for name, place in zip(envelope["points"], envelope["answer"]):
+                hourly = place["hourly"]
+                for stamp, value in zip(hourly["time"][:72], hourly["wind_speed_100m"][:72]):
+                    lead = int((dt.datetime.strptime(stamp, "%Y-%m-%dT%H:%M") - run).total_seconds() // 3600)
+                    handle.write(f"{envelope['run_utc']},{lead},{name},{'' if value is None else f'{value:.2f}'}\n")
+                    rows += 1
+    os.replace(out.with_name(out.name + ".part"), out)
+    log(f"{out} written: {rows} rows, sha256 {sha(out.read_bytes())}")
+    return out
+
+
 # ---- checks without a network ----------------------------------------------------------------------------------------------
 
 def selftest() -> dict:
@@ -374,12 +442,12 @@ def selftest() -> dict:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("command", choices=("collect", "history", "pack", "selftest", "status"))
+    parser.add_argument("command", choices=("collect", "history", "pack", "history-ecmwf", "pack-ecmwf", "selftest", "status"))
     parser.add_argument("--root", default=str(Path(__file__).resolve().parents[2]))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--product", choices=("gfs", "gefs"), default="gfs")
     parser.add_argument("--zone", choices=("de", "fr"), default="de")
-    parser.add_argument("--first", default="2021-05-01")
+    parser.add_argument("--first", default=None)
     parser.add_argument("--last", default="2026-06-30")
     parser.add_argument("--limit", type=int, default=None, help="history: stop after this many requests")
     args = parser.parse_args(argv)
@@ -406,11 +474,21 @@ def main(argv=None) -> int:
         if args.last > "2026-06-30":
             print("The history fetch stops at 2026-06-30: later days are outside the development window.")
             return 2
-        result = history(root, args.product, args.zone, dt.date.fromisoformat(args.first), dt.date.fromisoformat(args.last), limit=args.limit)
+        result = history(root, args.product, args.zone, dt.date.fromisoformat(args.first or "2021-05-01"), dt.date.fromisoformat(args.last), limit=args.limit)
         print(json.dumps(result))
         return 0 if not result["failed"] else 1
     if args.command == "pack":
         pack(root, args.product, args.zone)
+        return 0
+    if args.command == "history-ecmwf":
+        if args.last > "2026-06-30":
+            print("The history fetch stops at 2026-06-30: later days are outside the development window.")
+            return 2
+        result = history_ecmwf(root, args.zone, dt.date.fromisoformat(args.first or "2024-03-15"), dt.date.fromisoformat(args.last), limit=args.limit or 300)
+        print(json.dumps(result))
+        return 0 if not result["failed"] else 1
+    if args.command == "pack-ecmwf":
+        pack_ecmwf(root, args.zone)
         return 0
     live = root / "live"
     records = sorted(p for p in live.glob("20*/*.json")) if live.exists() else []

@@ -46,6 +46,12 @@ def source(runs_listed, calls, fail=()):
             return ok({"results": results})
         if "meta.json" in url:
             return ok({"last_run_initialisation_time": 1795262400, "last_run_availability_time": 1795284000})
+        if "single-runs" in url and "ecmwf_ifs&run=2024" in url:
+            run = dt.datetime.strptime(url.split("run=")[1][:16], "%Y-%m-%dT%H:%M")
+            if run.day == 3:
+                return ok([{"hourly": {"time": ["t"] * 80, "wind_speed_100m": [None] * 80}}] * 17)  # a run the archive does not hold
+            times = [(run + dt.timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M") for h in range(168)]
+            return ok([{"hourly": {"time": times, "wind_speed_100m": [float(h % 7) for h in range(168)]}}] * 17)
         if "single-runs" in url:
             return ok([{"hourly": {"time": ["t"] * 3, "wind_speed_100m": [5.0, 6.0, None]}}] * 34)
         return ok(b"<Key>x/gfs.t00z.pgrb2.0p25.f010</Key><LastModified>2026-11-21T03:40:00.000Z</LastModified>")
@@ -92,3 +98,16 @@ def test_history_is_resumable_and_packs_to_one_table(tmp_path):
     wc.history(tmp_path, "gefs", "de", dt.date(2021, 5, 1), dt.date(2021, 5, 10), fetch=fetch, log=lambda *_: None)
     ens = gzip.open(wc.pack(tmp_path, "gefs", "de", log=lambda *_: None), "rt").read().splitlines()
     assert ens[0].split(",")[:4] == ["init_utc", "lead_h", "point", "m00"] and len(ens[0].split(",")) == 34 and len(ens) - 1 == 10 * 25 * 17
+
+
+def test_the_ecmwf_runs_are_fetched_a_few_a_day_and_an_empty_run_is_not_counted_as_saved(tmp_path):
+    calls = []
+    fetch = source([], calls)
+    first = wc.history_ecmwf(tmp_path, "de", dt.date(2024, 4, 1), dt.date(2024, 4, 6), fetch=fetch, log=lambda *_: None, limit=4)
+    assert first == {"asked": 4, "saved": 3, "failed": 1, "left": 3, "stopped": False}  # 3 April is empty in the stand-in archive
+    second = wc.history_ecmwf(tmp_path, "de", dt.date(2024, 4, 1), dt.date(2024, 4, 6), fetch=fetch, log=lambda *_: None, limit=4)
+    assert (second["asked"], second["saved"], second["failed"]) == (3, 5, 1) and len(calls) == 7  # the empty run is asked again, the saved ones are not
+    assert all("models=ecmwf_ifs" in u and "wind_speed_unit=ms" in u and u.count(",") == 32 for u, _ in calls)
+    table = gzip.open(wc.pack_ecmwf(tmp_path, "de", log=lambda *_: None), "rt").read().splitlines()
+    assert table[0] == "init_utc,lead_h,point,speed_ms" and len(table) - 1 == 5 * 72 * 17
+    assert "2024-04-01T00:00:00Z,0,de_NordseeKueste,0.00" in table and "2024-04-06T00:00:00Z,71,de_OffOstsee,1.00" in table
