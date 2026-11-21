@@ -118,7 +118,9 @@ def stage_fit(arm: str, curve: str) -> None:
         table = pd.read_csv(WORK / f"table_{arm}.csv.gz")
         table.index = pd.to_datetime(table.pop("timestamp_utc"), utc=True)
         assert list(table.columns) == list(data.wind_pts.columns), "the arm's table must be labelled as the stored one"
-        data = replace(data, wind_pts=table.asfreq("h"))
+        # every arm has a value exactly where the stored table has one, so the proxies begin in the same month in every arm (registration)
+        table = table.asfreq("h").where(data.wind_pts.reindex(table.asfreq("h").index).notna())
+        data = replace(data, wind_pts=table)
     if curve == "fleet":
         se.power_curve = fleet_curve
     feat = se.features(data)
@@ -129,6 +131,7 @@ def stage_fit(arm: str, curve: str) -> None:
     out["W"] = sw.fit_w(feat, se.DEV_FIRST, se.DEV_LAST)
     out = out[(out["delivery_day"] >= pd.Timestamp(se.DEV_FIRST)) & (out["delivery_day"] <= pd.Timestamp(se.DEV_LAST))]
     out.reset_index(names="timestamp_utc").to_csv(WORK / f"pred_{arm}_{curve}.csv.gz", index=False)
+    assert feat["first_month"] == pd.Timestamp(se.DEV_FIRST), "the proxies must begin in the month the stored arm's do"
     print(arm, curve, "done", round(time.time() - started), "s, first proxy month", feat["first_month"].date(), flush=True)
 
 
