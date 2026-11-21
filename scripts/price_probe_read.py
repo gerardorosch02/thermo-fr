@@ -1,7 +1,7 @@
 r"""Read the saved answers of price_probe.py and say how far the sources agree. Prints counts and differences only, never a price.
 
 For each pair of sources and each delivery day (Paris): the number of quarter hours (or hours) both hold, how many agree to
-0.005 EUR/MWh, and the largest difference. A difference between two published prices is not a forecast error.
+0.005 EUR/MWh (a tie at exactly half a cent counts as agreeing), and the largest difference. A difference between two published prices is not a forecast error.
 
     python price_probe_read.py <folder written by price_probe.py>
 """
@@ -76,7 +76,7 @@ def compare(name: str, a: dict, b: dict) -> None:
     by_day = defaultdict(list)
     for t in sorted(set(a) & set(b)):
         by_day[day(t)].append(abs(a[t] - b[t]))
-    cells = [f"{d}: {len(v):>2} both, {sum(1 for x in v if x <= 0.005):>2} agree, largest {max(v):6.2f}" for d, v in sorted(by_day.items()) if "11-16" <= d <= "11-22"]
+    cells = [f"{d}: {len(v):>2} both, {sum(1 for x in v if x <= 0.005 + 1e-9):>2} agree, largest {max(v):6.2f}" for d, v in sorted(by_day.items()) if "11-16" <= d <= "11-22"]
     print(f"{name}\n   " + "\n   ".join(cells or ["no value in common"]), flush=True)
 
 

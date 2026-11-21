@@ -522,6 +522,10 @@ def test_the_second_source_is_read_as_complete_hours_in_eur_per_mwh_and_nothing_
         sl.parse_second_source(answer_of(pd.Series([10.0], index=hours[:1]), unit="ct / kWh"))
     with pytest.raises(ValueError):
         sl.parse_second_source(b"Too Many Requests")
+    # a truth value, a text and a number no auction could give are not prices, and the hour they belong to is not held
+    odd = json.loads(answer_of(pd.Series([10.0, 20.0, 30.0, 40.0], index=hours)))
+    odd["price"][0], odd["price"][4], odd["price"][8] = True, "20.0", 1e6
+    assert list(sl.parse_second_source(json.dumps(odd).encode()).index) == [hours[3]]
 
 
 def test_the_second_source_fetch_asks_once_for_days_before_D_waits_when_told_to_and_saves_the_answer_untouched(tmp_path, monkeypatch):
@@ -539,7 +543,7 @@ def test_the_second_source_fetch_asks_once_for_days_before_D_waits_when_told_to_
     assert len(calls) == 2 and calls[1].endswith("bzn=DE-LU&start=2026-11-11&end=2026-11-21")
     assert (tmp_path / "second" / "20261121T090000Z.json").read_bytes() == body and result["bytes"] == len(body) and result["complete_hours_held"] == len(hours)
     # an answer that cannot be read is kept on disk and reported as a failure of the fetch
-    with pytest.raises(ValueError):
+    with pytest.raises(RuntimeError, match="saved as 20261121T093000Z.json, sha256 [0-9a-f]{64}, 6 bytes"):
         sl.fetch_second_source(pd.Timestamp("2026-11-11"), pd.Timestamp("2026-11-21"), tmp_path / "second", "20261121T093000Z", opener=lambda request, timeout=None: FakeResponse(b"<html>"))
     assert (tmp_path / "second" / "20261121T093000Z.json").read_bytes() == b"<html>"
     # saved answers are read up to the time asked, the later fetch winning, and a broken one holds nothing
@@ -548,7 +552,12 @@ def test_the_second_source_fetch_asks_once_for_days_before_D_waits_when_told_to_
                            ("20261121T093000Z", b"<html>"), ("20261122T090000Z", answer_of(pd.Series(3.0, index=hours)))):
         (tmp_path / "live" / sl.SECOND_SOURCE / f"{stamp}.json").write_bytes(content)
     held, used = sl.second_source_held(sl.Paths(tmp_path), pd.Timestamp("2026-11-21T12:00Z"))
-    assert used == ["20261120T090000Z.json", "20261121T090000Z.json"] and list(held.iloc[[0, 23, 24, 71]]) == [1.0, 1.0, 2.0, 2.0] and len(held) == 72
+    assert [u["file"] for u in used] == ["20261120T090000Z.json", "20261121T090000Z.json"] and list(held.iloc[[0, 23, 24, 71]]) == [1.0, 1.0, 2.0, 2.0] and len(held) == 72
+    assert all(len(u["sha256"]) == 64 for u in used)  # every file read is named with its hash, also one a given-up fetch finished later
+    # an hour a later answer no longer holds is still read from the earlier one
+    (tmp_path / "live" / sl.SECOND_SOURCE / "20261121T100000Z.json").write_bytes(answer_of(pd.Series(np.nan, index=hours[:24])))
+    again, used = sl.second_source_held(sl.Paths(tmp_path), pd.Timestamp("2026-11-21T12:00Z"))
+    assert len(used) == 3 and again.equals(held)
 
 
 def test_an_hour_entsoe_lacks_is_taken_from_the_second_source_only_when_the_two_agree_and_never_for_D():
@@ -565,18 +574,26 @@ def test_an_hour_entsoe_lacks_is_taken_from_the_second_source_only_when_the_two_
     assert info["hours_of_D_or_later_in_its_answers_never_read"] == 24 and filled.index.max() == pd.Timestamp("2026-11-21T22:00Z")
     assert filled.notna().all() and (filled[hole[: len(filled)]] == truth[hole]).all() and (filled[~hole[: len(filled)]] == entsoe.dropna()).all()
     assert info["hours_both_hold_over_the_ten_days_before_D"] == 8 * 24 and info["largest_difference_eur_mwh"] == 0.0
-    # one hour of the last ten days differs by two cents: the second source may be another auction, so nothing is taken
+    # one quarter hour of the last ten days differs by a single cent, a quarter of a cent on the hour: the second source may be
+    # another auction, so nothing is taken
     other = truth.copy()
-    other.iloc[100] += 0.02
+    other.iloc[100] += 0.0025
     same, info = sl.with_second_source(entsoe, other, day)
     assert same is entsoe and not info["trusted_this_morning"] and info["hours_taken_from_it"] == 0 and info["hours_it_holds_that_entsoe_lacks"] == 48
-    assert info["of_which_agree_to_half_a_cent"] == info["hours_both_hold_over_the_ten_days_before_D"] - 1
+    assert info["of_which_agree"] == info["hours_both_hold_over_the_ten_days_before_D"] - 1 and info["agreement_tolerance_eur_mwh"] == 0.001
+    rounding = truth + 1e-12  # a difference in the last places of the mean is no disagreement
+    assert sl.with_second_source(entsoe, rounding, day)[1]["trusted_this_morning"]
     # fewer than 24 hours held by both over the ten days: there is nothing to check it against, so nothing is taken
     thin = entsoe.copy()
     thin[np.asarray(sl.delivery_days(thin.index) >= pd.Timestamp("2026-11-12"))] = np.nan
     thin.iloc[-3:] = truth[thin.index[-3:]]
     same, info = sl.with_second_source(thin, truth, day)
     assert same is thin and not info["trusted_this_morning"] and info["hours_both_hold_over_the_ten_days_before_D"] == 3
+    thin.iloc[-23:] = truth[thin.index[-23:]]  # 23 hours in common are not enough, 24 are
+    assert not sl.with_second_source(thin, truth, day)[1]["trusted_this_morning"]
+    thin.iloc[-24:] = truth[thin.index[-24:]]
+    filled, info = sl.with_second_source(thin, truth, day)
+    assert info["trusted_this_morning"] and info["hours_both_hold_over_the_ten_days_before_D"] == 24 and info["hours_taken_from_it"] == 9 * 24
     # a difference older than ten days does not count against it, and the second source holding nothing changes nothing
     old = truth.copy()
     old.iloc[5] += 5.0
@@ -604,8 +621,9 @@ def test_a_morning_on_which_entsoe_lacks_the_german_price_of_the_eve(replay_root
         new, used = real(paths, upto, live=live)
         return {**new, "de": new["de"][np.asarray(sl.delivery_days(new["de"].index) != day - pd.Timedelta(days=1))]}, used
 
-    def steps(second):
-        return lambda paths, d, started, stamp: {"french_window": lambda: {"files": {}, "items": {}, "errors": {}}, "german_raw": lambda: {"folder": "x", "files": {}, "errors": {}, "request_errors": []},
+    def steps(second, request_errors=()):
+        german = {"folder": "x", "files": {}, "errors": {n: "URLError" for n in request_errors}, "request_errors": list(request_errors)}
+        return lambda paths, d, started, stamp: {"french_window": lambda: {"files": {}, "items": {}, "errors": {}}, "german_raw": lambda: german,
                                                  sl.SECOND_SOURCE: lambda: second(paths, stamp), "german_points": lambda: {"errors": {}}}
 
     def answers(series):
@@ -626,14 +644,16 @@ def test_a_morning_on_which_entsoe_lacks_the_german_price_of_the_eve(replay_root
     wrong = recent + 3.0
     monkeypatch.setattr(sl, "fetch_steps", steps(answers(wrong)))
     dry = sl.issue(replay_root, dry_run=True, clock=clock, log=quiet)
-    assert dry["status"] == "dry run written" and any(flag.startswith("the second source holds German prices that ENTSO-E lacks but was not used: it disagrees") for flag in dry["flags"])
+    assert dry["status"] == "dry run written" and any(flag.startswith("the second source holds German prices that the files fetched from ENTSO-E lack but was not used: it disagrees with ENTSO-E on 216 of 216") for flag in dry["flags"])
     assert any(flag.startswith("yesterday's spread is missing") for flag in dry["flags"])
-    # 10:02 Paris, the second source answers with the coupled prices: the 24 hours of the eve are taken from it and the inputs are whole
-    monkeypatch.setattr(sl, "fetch_steps", steps(answers(recent)))
+    # 10:02 Paris, the second source answers with the coupled prices: the 24 hours of the eve are taken from it and the inputs are whole.
+    # The price request to ENTSO-E failed as well that morning; with the German side whole there is nothing to wait for
+    monkeypatch.setattr(sl, "fetch_steps", steps(answers(recent), request_errors=["prices_DE_LU_202609290000_202610110000.xml"]))
     _, clock = ticking("2026-10-09T08:02:00Z", step=1)
     out = sl.issue(replay_root, clock=clock, log=quiet)
     assert out["status"] == "issued" and not any(flag.startswith("yesterday's spread is missing") for flag in out["flags"])
-    assert "the coupled German price of 24 hour(s) before D came from the second source (energy-charts.info) because ENTSO-E held none" in out["flags"]
+    assert "the coupled German price of 24 hour(s) before D came from the second source (energy-charts.info) because the files fetched from ENTSO-E held none" in out["flags"]
+    assert "german_raw: 1 item(s) failed" in out["flags"]
     record = json.loads(Path(out["record"]).read_text())
     second = record["inputs"][sl.SECOND_SOURCE]
     assert second["trusted_this_morning"] and second["hours_taken_from_it_by_delivery_day"] == {"2026-10-09": 24} and len(second["files_used"]) == 1
@@ -641,6 +661,7 @@ def test_a_morning_on_which_entsoe_lacks_the_german_price_of_the_eve(replay_root
     assert second["hours_both_hold_over_the_ten_days_before_D"] == 9 * 24 and second["hours_of_D_or_later_in_its_answers_never_read"] == 48
     assert record["inputs"]["latest_german_price_hour_utc"] < "2026-10-09T22:00:00Z"
     assert record["fetch"][sl.SECOND_SOURCE]["sha256"] and record["fetch"][sl.SECOND_SOURCE]["finished_by_cutoff"] and record["all_fetches_finished_by_cutoff"]
+    assert [u["sha256"] for u in second["files_used"]] == [record["fetch"][sl.SECOND_SOURCE]["sha256"]] and second["of_which_agree"] == 9 * 24
     assert record["evidence"]["yesterdays_spread_present_hours"] == 24 and record["evidence"]["german_price_hours_missing_on_the_eve"] == 0
     assert not sl.compare_fingerprints(record["fingerprint"]["inputs_of_D"], reference["fingerprint"]["inputs_of_D"])  # the inputs of D are those of the whole ENTSO-E series
     assert all(record["evidence"]["inputs_identical_when_everything_unknown_at_the_gate_is_scrambled"].values())
@@ -662,3 +683,61 @@ def test_a_second_source_that_is_down_does_not_hold_up_a_morning_on_which_entsoe
     assert record["inputs"][sl.SECOND_SOURCE]["hours_taken_from_it"] == 0 and record["inputs"][sl.SECOND_SOURCE]["files_used"] == []
     for model in sl.MODELS:  # with nothing taken from the second source the forecasts are the frozen ones
         assert np.max(np.abs(np.asarray(record["forecasts"][model]) - np.asarray(reference["forecasts"][model]))) < 1e-9
+
+
+@needs_data
+def test_the_last_run_of_a_morning_issues_without_the_german_price_when_the_second_source_answers_nonsense(replay_root, monkeypatch):
+    monkeypatch.setattr(sl, "LIVE_DATA_FROM", "2026-09-25")
+    day = pd.Timestamp("2026-10-10")
+    real = sl.german_refetched
+
+    def entsoe_without_the_eve(paths, upto, live=True):
+        new, used = real(paths, upto, live=live)
+        return {**new, "de": new["de"][np.asarray(sl.delivery_days(new["de"].index) != day - pd.Timedelta(days=1))]}, used
+
+    def nonsense(paths, stamp):
+        return sl.fetch_second_source(day - pd.Timedelta(days=10), day - pd.Timedelta(days=1), paths.live / sl.SECOND_SOURCE, stamp, opener=lambda request, timeout=None: FakeResponse(b"<html>busy</html>"))
+
+    monkeypatch.setattr(sl, "german_refetched", entsoe_without_the_eve)
+    monkeypatch.setattr(sl, "fetch_steps", lambda paths, d, started, stamp: {"french_window": lambda: {"files": {}, "items": {}, "errors": {}}, "german_raw": lambda: {"folder": "x", "files": {}, "errors": {}, "request_errors": []},
+                                                                           sl.SECOND_SOURCE: lambda: nonsense(paths, stamp), "german_points": lambda: {"errors": {}}})
+    _, clock = ticking("2026-10-09T08:31:00Z", step=1)  # 10:31 Paris: past the last chance
+    out = sl.issue(replay_root, clock=clock, log=lambda *_: None)
+    assert out["status"] == "issued" and f"{sl.SECOND_SOURCE} failed" in out["flags"] and any(flag.startswith("yesterday's spread is missing") for flag in out["flags"])
+    assert not any("came from the second source" in flag for flag in out["flags"])
+    record = json.loads(Path(out["record"]).read_text())
+    error = record["fetch"][sl.SECOND_SOURCE]["error"]
+    saved = list((replay_root.live / sl.SECOND_SOURCE).glob("*.json"))
+    assert len(saved) == 1 and saved[0].read_bytes() == b"<html>busy</html>"  # the answer is kept, and the record names it with its hash
+    assert saved[0].name in error and sl.hashlib.sha256(b"<html>busy</html>").hexdigest() in error
+    assert record["inputs"][sl.SECOND_SOURCE]["files_used"] == [] and record["inputs"][sl.SECOND_SOURCE]["hours_taken_from_it"] == 0
+    assert record["evidence"]["german_price_hours_missing_on_the_eve"] == 24 and record["evidence"]["yesterdays_spread_present_hours"] == 0
+
+
+def test_the_morning_asks_the_second_source_for_the_ten_days_before_D_and_never_for_D(tmp_path, monkeypatch):
+    asked = []
+    monkeypatch.setattr(sl, "fetch_second_source", lambda first, last, folder, stamp: asked.append((first, last, folder, stamp)) or {"errors": {}})
+    day = pd.Timestamp("2026-11-23")
+    steps = sl.fetch_steps(sl.Paths(tmp_path), day, pd.Timestamp("2026-11-22T09:00:10Z"), "20261122T090010Z")
+    assert list(steps) == ["french_window", "german_raw", sl.SECOND_SOURCE, "german_points"] and set(sl.FETCH_BUDGET_SECONDS) == set(steps)
+    steps[sl.SECOND_SOURCE]()
+    assert asked == [(pd.Timestamp("2026-11-13"), pd.Timestamp("2026-11-22"), tmp_path / "live" / sl.SECOND_SOURCE, "20261122T090010Z")]
+    asked.clear()  # in the first days of the live stretch the request starts where the stored files end
+    sl.fetch_steps(sl.Paths(tmp_path), pd.Timestamp("2026-10-15"), pd.Timestamp("2026-10-14T08:00:10Z"), "x")[sl.SECOND_SOURCE]()
+    assert asked[0][:2] == (pd.Timestamp("2026-10-11"), pd.Timestamp("2026-10-14"))
+
+
+def test_saved_answers_that_cannot_be_combined_stop_no_record(tmp_path, monkeypatch):
+    def broken(*a, **k):
+        raise NotImplementedError("a stamp beyond what the calendar holds")
+
+    one = pd.DatetimeIndex(["2026-11-21T10:00Z"])
+    de, tso = pd.Series([50.0], index=one), pd.DataFrame(1.0, index=one, columns=list(sl.se.TSO_COLUMNS))
+    monkeypatch.setattr(sl, "with_second_source", broken)
+    monkeypatch.setattr(sl.se, "load_stored", lambda *a: sl.se.Data(french=None, de=de.iloc[:0], tso=tso.iloc[:0], wind_pts=None, solar_pts=None, last=""))
+    monkeypatch.setattr(sl, "german_refetched", lambda *a, **k: ({"de": de, "tso": tso}, []))
+    monkeypatch.setattr(sl, "french_history", lambda *a, **k: (pd.DataFrame({"price_eur_mwh": de}), {"last_window_issued_utc": None}))
+    monkeypatch.setattr(sl, "points_tables", lambda *a, **k: (None, None, []))
+    data, info = sl.build_data(sl.Paths(tmp_path), pd.Timestamp("2026-11-23"), upto=pd.Timestamp("2026-11-22T09:00Z"))
+    assert info[sl.SECOND_SOURCE]["could_not_be_read"].startswith("NotImplementedError") and info[sl.SECOND_SOURCE]["hours_taken_from_it"] == 0
+    assert info[sl.SECOND_SOURCE]["files_used"] == [] and data.de.equals(de)  # the ENTSO-E series goes on untouched

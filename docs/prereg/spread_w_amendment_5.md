@@ -35,10 +35,9 @@ af5362952e56e3cd2b9732186856f64e1b0d88318182fef6d5be90d9256d280b).
   ENTSO-E's sequence 1 on 480 of 480 quarter hours, to the cent. It equals sequence 2, the early Austrian auction, on 0 of
   672, and the two auctions differ by tens of EUR/MWh at the largest on every day.
 - **On the two days ENTSO-E lacks, a third route agrees with it.** The hourly means of energy-charts equal aWATTar's hourly
-  prices to one cent on 48 of 48 hours of 20 and 21 November, and on 43 of them to half a cent. ENTSO-E's own sequence 1
-  shows the same pattern against aWATTar on the days it holds (113 of 120 hours to half a cent, all to one cent), which is
-  what a rounded hourly figure gives. Against the early auction the same hours differ by more than 10 EUR/MWh at the
-  largest on each day.
+  prices to half a cent on 48 of 48 hours of 20 and 21 November. ENTSO-E's own sequence 1 does the same against aWATTar
+  on the days it holds (120 of 120 hours). Half a cent is what rounding an hourly mean to the cent gives. Against the
+  early auction the same hours differ by more than 10 EUR/MWh at the largest on each day.
 - **SMARD is not a second source.** It had the same gaps as ENTSO-E in both countries and equals ENTSO-E on every quarter
   hour both hold (480 of 480 for Germany, 576 of 576 for France).
 - **No candidate held the French price of 21 November.** energy-charts.info's French series equals ENTSO-E's on 576 of 576
@@ -56,34 +55,57 @@ What is not established.
 
 ## The change
 
-ENTSO-E stays the first source. energy-charts.info is asked once each run, alongside the other fetches, for the ten
-delivery days before D. Its answer is saved untouched under `live/german_price_second_source/<stamp>.json` and its hash,
-size and fetch times are written into the record.
+ENTSO-E stays the first source. energy-charts.info gets one request each run, alongside the other fetches, for the ten
+delivery days before D. A refused request is tried again up to three times within the fetch's time budget. The answer is
+saved untouched under `live/german_price_second_source/<stamp>.json` and its hash, size and fetch times are written into
+the record. An answer that cannot be read is kept too, and the record's error names the file, its hash and its size.
 
 An hour of the German coupled price is taken from the second source only if all of the following hold.
 
-1. **ENTSO-E holds no value for that hour**, in the stored files and in every fetch saved up to that moment. An hour
-   ENTSO-E holds is never replaced.
+1. **The files fetched from ENTSO-E hold no value for that hour**, in the stored files and in every fetch saved up to that
+   moment. An hour they hold is never replaced. On a morning when the price request to ENTSO-E failed, this means the
+   files of earlier mornings, and the record carries the failed request among its flags.
 2. **The hour belongs to a delivery day before D** and not before 2026-10-11, the first day the stored files do not hold.
    Whatever the answer contains for D or later is counted in the record and never read. The request itself ends at D-1.
-3. **All four quarter hours of the hour are in the answer**, in EUR per MWh. The hourly value is their mean, the rule the
-   ENTSO-E path already uses.
-4. **The two sources agree that morning.** Over the ten delivery days before D, every hour both hold must agree to half a
-   cent, and there must be at least 24 such hours. One hour of disagreement and nothing is taken from the second source
-   that morning. Fewer than 24 hours in common and nothing is taken either, because there is nothing to check it against.
+3. **All four quarter hours of the hour are in the answer**, in EUR per MWh, each a number between -1000 and 10000. The
+   hourly value is their mean, the rule the ENTSO-E path already uses.
+4. **The two sources agree that morning.** Over the ten delivery days before D, every hour both hold must agree to a tenth
+   of a cent on the hourly mean, and there must be at least 24 such hours. A single quarter hour apart by one cent moves
+   the mean by a quarter of a cent and fails. One hour of disagreement and nothing is taken from the second source that
+   morning. Fewer than 24 hours in common and nothing is taken either, because there is nothing to check it against.
+
+What condition 4 can and cannot show. It guards against the second source serving another zone or another auction. It
+cannot vouch for the hours actually taken. On the hours both hold, energy-charts.info, SMARD and ENTSO-E are one and the
+same data. The hours taken are by definition those ENTSO-E lacks, and for those energy-charts.info draws on a feed that
+has not been identified. The only evidence about that feed is the 48 hours compared with aWATTar above.
+
+The decision is made afresh each morning, from every answer saved so far. Three things follow.
+
+- **An hour stays filled only while the conditions hold.** An hour taken on Monday is taken again on Tuesday only if the
+  sources still agree on Tuesday. If they disagree on one hour of the last ten days, nothing is taken that morning, and
+  the lags and training rows built from earlier fills are missing again for that morning.
+- **After ten days without any ENTSO-E price, nothing is taken.** With no hour in common over the ten days before D there
+  is nothing to check against, so every fill is dropped at once. In a hole that long the French price is likely missing
+  too.
+- **Earlier answers are read as well as the latest.** A later answer wins where it holds a value. An hour a later answer
+  no longer holds is still read from an earlier one. The record lists every file read with its hash, including a file a
+  given-up fetch finished writing after its run had moved on.
 
 The record states, under `inputs.german_price_second_source`: the files used, how many hours both sources hold over the
 ten days, how many of those agree, the largest difference, whether the source was trusted that morning, how many hours it
 holds that ENTSO-E lacks, how many were taken and for which delivery days, and how many hours of D or later were in its
 answers. A record with hours taken carries the flag "the coupled German price of N hour(s) before D came from the second
-source (energy-charts.info) because ENTSO-E held none". A morning on which the second source holds hours ENTSO-E lacks but
-fails the agreement rule carries a flag saying so and why.
+source (energy-charts.info) because the files fetched from ENTSO-E held none". A morning on which the second source holds
+hours ENTSO-E lacks but fails the agreement rule carries a flag saying so and why. Saved answers that cannot be combined
+stop no record: nothing is taken and a flag says so.
 
 Two rules of amendment 4 are narrowed.
 
 - **A failed request to the second source postpones the first run only when it matters**, that is when the German price
-  of the eve is missing after ENTSO-E has answered. Otherwise the run issues and the record carries the flag
-  "german_price_second_source failed".
+  of the eve is missing in the files fetched from ENTSO-E. Otherwise the run issues and the record carries the flag
+  "german_price_second_source failed". It postpones in that case even when the French price of the eve is missing too
+  and yesterday's spread cannot be built, because the German price of the eve is an input in its own right. The cost is
+  a record written by the run of 10:30.
 - **A failed German price request to ENTSO-E postpones only if the German price of the eve is then missing.** Before, it
   postponed whenever yesterday's spread was missing for any reason. With the second source in, the German side can be whole
   though the ENTSO-E request failed.
@@ -112,12 +134,14 @@ finished after 10:05.
 
 ## What this means for the test
 
-- **All six models read the same inputs**, so a filled hour reaches H, HW, G, GK, GM and W alike. It does not favour one
-  side of any of the three decisions by construction. Whether the models gain equally from the lagged spread is not
-  examined.
-- **Saved days fall into two kinds from here on.** A record with hours from the second source says so, and the January
-  report will count those days separately, beside the days issued with yesterday's spread missing.
-- **A filled hour is also a training row.** Once the German price of a past day is in, the spread of that day becomes a
+- **All six models read the same inputs**, so a filled hour reaches the lags of H, HW, G, GK, GM and W on the same
+  morning. As a training row it reaches the models refitted weekly (W, HW, GK) at their next weekly refit and those
+  refitted monthly (H, G, GM) at the next month. That is the difference in refit the test is about, and it applies to
+  every training row. Whether the models gain equally from the lagged spread is not examined.
+- **Saved days fall into two kinds from here on.** A record with hours from the second source says so. The January
+  rebuild code is not written yet. Counting those days separately, beside the days issued with yesterday's spread missing,
+  is added to what it must do. The scoring code itself does not change.
+- **A filled hour is also a training row.** While the German price of a past day is filled, the spread of that day is a
   target the models are fitted on from the next refit. A January rebuild from ENTSO-E alone lacks those rows if the hole
   is never filled. The registered comparison of rebuilt and saved forecasts will then show a difference on the days after
   a filled hole that is larger than numerical noise. That is expected, and it is reported with the count of filled hours.
@@ -137,5 +161,8 @@ French price of D-1 was missing: 1 of 2.
 
 ## Review
 
-The independent review of this amendment and its code is recorded in `spread_w_amendment_5_review.md`. The code hash of
-the build to install is recorded there and in `docs/experiments.md`.
+An independent reviewer who had not seen the change being built went through the code, the tests and this document at
+commit e714215, and recomputed every count in the section "What was checked before choosing" with its own code. It found
+no way for a price of D or later to reach the inputs of D and no departure of the code from the four conditions. Its
+findings and what was changed in answer are in `spread_w_amendment_5_review.md`. This document is the version after those
+changes. The code hash of the build to install is recorded in the review document and in `docs/experiments.md`.
