@@ -1,0 +1,294 @@
+{
+ "stop_conditions": {
+  "reference_G_reproduces": 2.842170943040401e-14,
+  "reference_W_reproduces": 8.881784197001252e-16,
+  "reference_proxy_reproduces": 3.637978807091713e-12,
+  "tables_do_not_read_ahead": true,
+  "every_scored_hour_has_every_forecast": true,
+  "scored_hours": 18982,
+  "all_pass": true
+ },
+ "wind_proxy_against_operator_forecast_mw": {
+  "B_built": {
+   "mae": 3886,
+   "bias": -2798,
+   "corr": 0.9464,
+   "rank_corr": 0.9493,
+   "ramp_error": 1050,
+   "mae_by_delivery_hours": {
+    "00-05": 4043,
+    "06-11": 3575,
+    "12-17": 3923,
+    "18-23": 4003
+   },
+   "hours": 18980
+  },
+  "S_built": {
+   "mae": 4740,
+   "bias": -3175,
+   "corr": 0.9113,
+   "rank_corr": 0.9181,
+   "ramp_error": 1170,
+   "mae_by_delivery_hours": {
+    "00-05": 5579,
+    "06-11": 4367,
+    "12-17": 4012,
+    "18-23": 5004
+   },
+   "hours": 18980
+  },
+  "F_built": {
+   "mae": 4360,
+   "bias": -2967,
+   "corr": 0.9326,
+   "rank_corr": 0.941,
+   "ramp_error": 1029,
+   "mae_by_delivery_hours": {
+    "00-05": 4984,
+    "06-11": 3928,
+    "12-17": 3661,
+    "18-23": 4868
+   },
+   "hours": 18980
+  },
+  "S_fleet": {
+   "mae": 2796,
+   "bias": -285,
+   "corr": 0.9376,
+   "rank_corr": 0.9355,
+   "ramp_error": 884,
+   "mae_by_delivery_hours": {
+    "00-05": 2807,
+    "06-11": 2786,
+    "12-17": 2880,
+    "18-23": 2714
+   },
+   "hours": 18980
+  },
+  "F_fleet": {
+   "mae": 2393,
+   "bias": -144,
+   "corr": 0.9563,
+   "rank_corr": 0.9549,
+   "ramp_error": 761,
+   "mae_by_delivery_hours": {
+    "00-05": 2118,
+    "06-11": 2296,
+    "12-17": 2628,
+    "18-23": 2532
+   },
+   "hours": 18980
+  }
+ },
+ "spread_mae_eur_mwh": {
+  "B_built": {
+   "G": 18.473,
+   "W": 17.339
+  },
+  "S_built": {
+   "G": 18.718,
+   "W": 17.545
+  },
+  "F_built": {
+   "G": 18.498,
+   "W": 17.313
+  },
+  "S_fleet": {
+   "G": 18.585,
+   "W": 17.317
+  },
+  "F_fleet": {
+   "G": 18.369,
+   "W": 16.998
+  }
+ },
+ "contrasts_candidate_minus_base": {
+  "fresh against stale, curve as built (primary)": {
+   "W": {
+    "days": 791,
+    "candidate_mae": 17.313,
+    "base_mae": 17.545,
+    "mean": -0.232,
+    "lo": -0.391,
+    "hi": -0.079,
+    "one_sided_upper": -0.104,
+    "mirrored_lower": -0.365,
+    "share_days_better": 0.558
+   },
+   "G": {
+    "days": 791,
+    "candidate_mae": 18.498,
+    "base_mae": 18.718,
+    "mean": -0.22,
+    "lo": -0.387,
+    "hi": -0.057,
+    "one_sided_upper": -0.085,
+    "mirrored_lower": -0.362,
+    "share_days_better": 0.513
+   }
+  },
+  "fresh against stale, fleet curve": {
+   "W": {
+    "days": 791,
+    "candidate_mae": 16.998,
+    "base_mae": 17.317,
+    "mean": -0.319,
+    "lo": -0.505,
+    "hi": -0.146,
+    "one_sided_upper": -0.169,
+    "mirrored_lower": -0.479,
+    "share_days_better": 0.564
+   },
+   "G": {
+    "days": 791,
+    "candidate_mae": 18.369,
+    "base_mae": 18.585,
+    "mean": -0.217,
+    "lo": -0.395,
+    "hi": -0.046,
+    "one_sided_upper": -0.073,
+    "mirrored_lower": -0.367,
+    "share_days_better": 0.561
+   }
+  },
+  "stale GFS against the stored table": {
+   "W": {
+    "days": 791,
+    "candidate_mae": 17.545,
+    "base_mae": 17.339,
+    "mean": 0.205,
+    "lo": -0.048,
+    "hi": 0.477,
+    "one_sided_upper": 0.432,
+    "mirrored_lower": -0.006,
+    "share_days_better": 0.475
+   },
+   "G": {
+    "days": 791,
+    "candidate_mae": 18.718,
+    "base_mae": 18.473,
+    "mean": 0.244,
+    "lo": -0.025,
+    "hi": 0.541,
+    "one_sided_upper": 0.494,
+    "mirrored_lower": 0.014,
+    "share_days_better": 0.473
+   }
+  },
+  "fresh GFS against the stored table": {
+   "W": {
+    "days": 791,
+    "candidate_mae": 17.313,
+    "base_mae": 17.339,
+    "mean": -0.027,
+    "lo": -0.298,
+    "hi": 0.246,
+    "one_sided_upper": 0.204,
+    "mirrored_lower": -0.249,
+    "share_days_better": 0.499
+   },
+   "G": {
+    "days": 791,
+    "candidate_mae": 18.498,
+    "base_mae": 18.473,
+    "mean": 0.024,
+    "lo": -0.222,
+    "hi": 0.283,
+    "one_sided_upper": 0.243,
+    "mirrored_lower": -0.186,
+    "share_days_better": 0.493
+   }
+  },
+  "fresh GFS with the fleet curve against the stored table": {
+   "W": {
+    "days": 791,
+    "candidate_mae": 16.998,
+    "base_mae": 17.339,
+    "mean": -0.341,
+    "lo": -0.605,
+    "hi": -0.086,
+    "one_sided_upper": -0.125,
+    "mirrored_lower": -0.559,
+    "share_days_better": 0.545
+   },
+   "G": {
+    "days": 791,
+    "candidate_mae": 18.369,
+    "base_mae": 18.473,
+    "mean": -0.105,
+    "lo": -0.36,
+    "hi": 0.145,
+    "one_sided_upper": 0.102,
+    "mirrored_lower": -0.319,
+    "share_days_better": 0.521
+   }
+  },
+  "fleet curve against built, fresh": {
+   "W": {
+    "days": 791,
+    "candidate_mae": 16.998,
+    "base_mae": 17.313,
+    "mean": -0.315,
+    "lo": -0.534,
+    "hi": -0.122,
+    "one_sided_upper": -0.155,
+    "mirrored_lower": -0.499,
+    "share_days_better": 0.53
+   },
+   "G": {
+    "days": 791,
+    "candidate_mae": 18.369,
+    "base_mae": 18.498,
+    "mean": -0.129,
+    "lo": -0.322,
+    "hi": 0.054,
+    "one_sided_upper": 0.023,
+    "mirrored_lower": -0.294,
+    "share_days_better": 0.526
+   }
+  }
+ },
+ "stored_for_reference": {
+  "H": 22.163,
+  "G": 18.473,
+  "W": 17.339,
+  "C": 17.388
+ },
+ "tables": {
+  "S": {
+   "hours": 21886,
+   "hours_with_a_missing_point": 0,
+   "lead_min": 48,
+   "lead_max": 53,
+   "mean_lead": 50.5,
+   "hours_from_the_newest_run_used_to_the_gate_min": 14.08
+  },
+  "F": {
+   "hours": 21886,
+   "hours_with_a_missing_point": 0,
+   "lead_min": 22,
+   "lead_max": 46,
+   "mean_lead": 33.94,
+   "hours_from_the_newest_run_used_to_the_gate_min": 8.08
+  },
+  "correlation_with_the_stored_table_by_point": {
+   "S": 0.826,
+   "F": 0.835
+  }
+ },
+ "reading": {
+  "primary": {
+   "days": 791,
+   "candidate_mae": 17.313,
+   "base_mae": 17.545,
+   "mean": -0.232,
+   "lo": -0.391,
+   "hi": -0.079,
+   "one_sided_upper": -0.104,
+   "mirrored_lower": -0.365,
+   "share_days_better": 0.558
+  },
+  "rule": "a gain of at least 0.25 with the two-sided 95% interval below zero",
+  "numerical_noise": "a difference between two models carries up to about 0.25 (amendment 3 of the test of W)"
+ }
+}
