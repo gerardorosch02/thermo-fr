@@ -419,9 +419,9 @@ def parse_second_source(content: bytes) -> pd.Series:
     if len(stamps) != len(prices):
         raise ValueError("stamps and prices differ in number")
     low, high = SECOND_SOURCE_PLAUSIBLE
-    pairs = [(t, float(v)) for t, v in zip(stamps, prices)  # a number only: not a missing value, a text or a truth value, and inside the plausible range
-             if isinstance(t, (int, float)) and not isinstance(t, bool) and isinstance(v, (int, float)) and not isinstance(v, bool) and np.isfinite(v) and low <= v <= high
-             and 1_600_000_000 <= t <= 4_100_000_000]
+    pairs = [(int(t), float(v)) for t, v in zip(stamps, prices)  # a number only: not a missing value, a text or a truth value, and inside the plausible range
+             if isinstance(t, (int, float)) and not isinstance(t, bool) and isinstance(v, (int, float)) and not isinstance(v, bool) and low <= v <= high  # a missing number fails the range too
+             and 1_600_000_000 <= t <= 4_100_000_000 and t == int(t) and int(t) % 900 == 0]  # a whole second on the quarter-hour grid, 2020 to 2099
     raw = pd.Series([v for _, v in pairs], index=pd.to_datetime([t for t, _ in pairs], unit="s", utc=True), dtype=float)
     raw = raw[(raw.index.minute % 15 == 0) & (raw.index.second == 0)]
     raw = raw[~raw.index.duplicated(keep="first")].sort_index()

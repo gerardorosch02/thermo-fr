@@ -526,9 +526,18 @@ def test_the_second_source_is_read_as_complete_hours_in_eur_per_mwh_and_nothing_
     odd = json.loads(answer_of(pd.Series([10.0, 20.0, 30.0, 40.0], index=hours)))
     odd["price"][0], odd["price"][4], odd["price"][8] = True, "20.0", 1e6
     assert list(sl.parse_second_source(json.dumps(odd).encode()).index) == [hours[3]]
+    # a whole-number price such as 0, a negative price and stamps written as floats are read; a stamp half a second off the grid
+    # and a number too long to be a price are not
+    plain = json.loads(answer_of(pd.Series([0.0, -40.0, 30.0], index=hours[:3])))
+    plain["price"][:4] = [0, 0, 0, 0]
+    plain["unix_seconds"] = [float(x) for x in plain["unix_seconds"]]
+    plain["unix_seconds"][8] += 0.5
+    plain["price"][9] = 10 ** 400
+    held = sl.parse_second_source(json.dumps(plain).encode())
+    assert list(held.index) == [hours[0], hours[1]] and list(held) == [0.0, -40.0]
 
 
-def test_the_second_source_fetch_asks_once_for_days_before_D_waits_when_told_to_and_saves_the_answer_untouched(tmp_path, monkeypatch):
+def test_the_second_source_fetch_waits_when_told_to_and_saves_the_answer_untouched_and_saved_answers_are_read_in_order(tmp_path, monkeypatch):
     monkeypatch.setattr(sl.time, "sleep", lambda seconds: None)
     hours = pd.date_range("2026-11-10T23:00Z", "2026-11-21T22:00Z", freq="h")
     body, calls = answer_of(pd.Series(50.0, index=hours)), []

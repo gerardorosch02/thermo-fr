@@ -76,7 +76,7 @@ An hour of the German coupled price is taken from the second source only if all 
 
 What condition 4 can and cannot show. It guards against the second source serving another zone or another auction. It
 cannot vouch for the hours actually taken. On the hours both hold, energy-charts.info, SMARD and ENTSO-E are one and the
-same data. The hours taken are by definition those ENTSO-E lacks, and for those energy-charts.info draws on a feed that
+same data as far as the probe shows. The hours taken are by definition those ENTSO-E lacks, and for those energy-charts.info draws on a feed that
 has not been identified. The only evidence about that feed is the 48 hours compared with aWATTar above.
 
 The decision is made afresh each morning, from every answer saved so far. Three things follow.
@@ -84,8 +84,8 @@ The decision is made afresh each morning, from every answer saved so far. Three 
 - **An hour stays filled only while the conditions hold.** An hour taken on Monday is taken again on Tuesday only if the
   sources still agree on Tuesday. If they disagree on one hour of the last ten days, nothing is taken that morning, and
   the lags and training rows built from earlier fills are missing again for that morning.
-- **After ten days without any ENTSO-E price, nothing is taken.** With no hour in common over the ten days before D there
-  is nothing to check against, so every fill is dropped at once. In a hole that long the French price is likely missing
+- **After ten days with fewer than 24 hours of ENTSO-E prices, nothing is taken.** With so little in common over the ten
+  days before D there is nothing to check against, so every fill is dropped at once. In a hole that long the French price is likely missing
   too.
 - **Earlier answers are read as well as the latest.** A later answer wins where it holds a value. An hour a later answer
   no longer holds is still read from an earlier one. The record lists every file read with its hash, including a file a
@@ -163,6 +163,6 @@ French price of D-1 was missing: 1 of 2.
 
 An independent reviewer who had not seen the change being built went through the code, the tests and this document at
 commit e714215, and recomputed every count in the section "What was checked before choosing" with its own code. It found
-no way for a price of D or later to reach the inputs of D and no departure of the code from the four conditions. Its
-findings and what was changed in answer are in `spread_w_amendment_5_review.md`. This document is the version after those
-changes. The code hash of the build to install is recorded in the review document and in `docs/experiments.md`.
+no way for a price of D or later to reach the inputs of D and no departure of the code from the four conditions. It then
+looked a second time, at the changes made in answer (commit bd185f8). Its findings and what was changed are in
+`spread_w_amendment_5_review.md`. This document is the version after those changes. The code hash of the build to install is recorded in the review document and in `docs/experiments.md`.
