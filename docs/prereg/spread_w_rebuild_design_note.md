@@ -98,3 +98,20 @@ Each of these should be confirmed or changed, then registered, before the read.
 
 An independent review of this code by a reviewer who has not seen it built. The refetch commands for January, written and
 committed beforehand. The amendment for the two blocking points and the choices above.
+
+## Update, 2026-11-23
+
+On the owner's word "go for both" (10:24 London).
+
+- **Blocking point 1** is set out for his decision in `spread_w_amendment_6_draft.md`. Nothing is in force.
+- **Blocking point 2 is dealt with, subject to his acceptance.** The stored forecasts were regenerated from the logger's
+  static files with the frozen design commands. All 337 numbers in the three registered design records
+  (`spread_w_design.json`, `spread_w_comparator_design.json`, `spread_eval_stop_checks.json`) come out equal, with a largest
+  difference of 0. `test_predictions.csv.gz` equals the registered file byte for byte once the timestamp in its gzip header
+  is set back to 2026-11-19 16:41:02 UTC. The registered hashes of `w_predictions.csv.gz` (ab885a4f...) and
+  `comparator_predictions.csv.gz` (a0a5973c...) could not be reproduced by changing the timestamp alone over 18 November
+  12:00 to 22 November 00:00 UTC, and why is not known. The regenerated files therefore stand in on the strength of the
+  figures, not of the file hashes. They are kept on the laptop in `thermo-fr-spread\kept_forecasts_2026-11-23` with a
+  `HASHES.json` (uncompressed csv of the comparator file sha256 373232965338ae41...).
+- **Stop condition 4 is now tested.** A replay of the whole opened window, 1 July to 10 October 2026, through the rebuild
+  passes all six stop conditions. The seven models reproduce the stored forecasts on 21,430 hours to 9e-14.
