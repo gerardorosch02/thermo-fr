@@ -62,8 +62,7 @@ ALL_MODELS = ("H", "HW", "G", "GK", "GM", "W", "C")
 SCRAMBLE_DAYS = ("2026-10-11", "2026-10-25", "2026-11-11", "2026-12-25", "2027-01-18")  # stop condition 5
 # Stop condition 4 under the exception of 2026-11-23: the stored forecasts are the reconstructions made that day, by file hash.
 # Only the file that holds all seven models on the 21,430 hours is accepted, so that HW, GK and GM are always checked too.
-RECONSTRUCTION_FILE = "comparator_predictions.csv.gz"
-RECONSTRUCTION_SHA256 = "6d6a4de11cbb4442b0c4a9569f897144eef5d1a6131faf8658acf5d60b80ffdf"
+RECONSTRUCTION_FILE = score.RECONSTRUCTION_FILE
 EXCEPTION = score.EXCEPTION
 # The French inputs whose 10:05 version the source does not keep (refetch specification, table "Input by input"): for these
 # the window saved on the eve is used. Prices are final and weather comes from the archive, so those are refetched.
@@ -393,7 +392,7 @@ def reproduce_check(pred: pd.DataFrame, kept_folder: Path | None, machine: dict 
     path = Path(kept_folder) / RECONSTRUCTION_FILE if kept_folder is not None else None
     if path is None or not path.exists():
         return {"basis": EXCEPTION, "pass": False, "error": f"{RECONSTRUCTION_FILE} of the reconstructions of 2026-11-23 was not given"}
-    models, required = ALL_MODELS, ("H", "G", "C", "W")
+    models, required = ALL_MODELS, score.STOP_4_REQUIRED
     kept = pd.read_csv(path, index_col=0, float_precision="round_trip")
     kept.index = pd.to_datetime(kept.index, utc=True)
     absent = [m for m in models if m not in kept.columns]
@@ -406,10 +405,10 @@ def reproduce_check(pred: pd.DataFrame, kept_folder: Path | None, machine: dict 
     whole = {m: bool(len(kept) > 0 and compared[m] == len(kept)) for m in models}
     within = {m: bool(whole[m] and largest[m] <= se.TOLERANCE) for m in models}
     sha = se.sha256(path)
-    return {"basis": EXCEPTION, "file": path.name, "sha256": sha, "is_the_reconstruction_of_2026_11_23": bool(sha == RECONSTRUCTION_SHA256), "self_test_of_this_workspace": machine,
+    return {"basis": EXCEPTION, "file": path.name, "sha256": sha, "is_the_reconstruction_of_2026_11_23": bool(sha == score.RECONSTRUCTION_SHA256), "self_test_of_this_workspace": machine,
             "models": list(models), "stored_hours": int(len(kept)), "hours_compared": int(len(common)), "values_compared": compared, "largest_difference": largest, "within_tolerance": within,
             "tolerance": se.TOLERANCE, "required": list(required), "reported_not_required": [m for m in models if m not in required],
-            "pass": bool(sha == RECONSTRUCTION_SHA256 and machine.get("pass") and all(within[m] for m in required))}
+            "pass": bool(sha == score.RECONSTRUCTION_SHA256 and machine.get("pass") is True and all(within[m] for m in required))}
 
 
 def scramble_checks(data: se.Data, days, log=print) -> dict:

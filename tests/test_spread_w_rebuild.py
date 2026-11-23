@@ -217,10 +217,11 @@ def test_stop_condition_4_needs_the_reconstruction_by_hash_a_passing_self_test_a
     passed, failed = {"pass": True, "verdict": "forecasts identical to the reference machine"}, {"pass": False, "verdict": "forecasts differ"}
     found = rb.reproduce_check(pred, kept, passed)
     assert not found["pass"] and not found["is_the_reconstruction_of_2026_11_23"] and found["largest_difference"]["W"] == 0.0  # the numbers agree, but this is not the registered reconstruction
-    monkeypatch.setattr(rb, "RECONSTRUCTION_SHA256", rb.se.sha256(kept / rb.RECONSTRUCTION_FILE))
+    monkeypatch.setattr(score, "RECONSTRUCTION_SHA256", rb.se.sha256(kept / rb.RECONSTRUCTION_FILE))
     found = rb.reproduce_check(pred, kept, passed)
     assert found["pass"] and found["basis"] == "met under the exception of 2026-11-23" and found["reported_not_required"] == ["HW", "GK", "GM"] and found["values_compared"]["W"] == 24
     assert not rb.reproduce_check(pred, kept, failed)["pass"] and not rb.reproduce_check(pred, kept, None)["pass"]  # the workspace must pass the self-test
+    assert not rb.reproduce_check(pred, kept, {"pass": "False"})["pass"] and not rb.reproduce_check(pred, kept, {})["pass"]  # and say so with a plain true
     for name in ("H", "G", "C", "W"):  # each required model alone
         off = pred.copy()
         off[name] += 1e-6

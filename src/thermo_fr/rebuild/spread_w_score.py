@@ -58,6 +58,28 @@ NOT_READABLE = "not readable"
 FROZEN_SCORING_SHA256 = "998d40bf7dcc8ea3522bdd645abe489112b42c16fdcbcc3e2d481fa8772ddf3b"  # forecast/spread_w_test.py, as registered by amendment 2
 EXCEPTION = "met under the exception of 2026-11-23"  # stop condition 4 (docs/prereg/spread_w_stop_condition_4_exception.md)
 STOP_4 = "4_stored_forecasts_reproduce"
+RECONSTRUCTION_FILE = "comparator_predictions.csv.gz"  # the reconstruction of 2026-11-23 that holds all seven models on the 21,430 hours
+RECONSTRUCTION_SHA256 = "6d6a4de11cbb4442b0c4a9569f897144eef5d1a6131faf8658acf5d60b80ffdf"
+STOP_4_REQUIRED = ("H", "G", "C", "W")
+
+
+def stop_4_met(fourth: dict) -> str | None:
+    """None if the record of stop condition 4 shows it met under the exception, else what is wrong with it. The read does
+    not take `pass` on trust: it looks at what the pass rests on."""
+    if not isinstance(fourth, dict) or fourth.get("pass") is not True or fourth.get("basis") != EXCEPTION:
+        return "it is not recorded as met under the exception of 2026-11-23"
+    if fourth.get("file") != RECONSTRUCTION_FILE or fourth.get("sha256") != RECONSTRUCTION_SHA256:
+        return "the stored forecasts are not the reconstruction of 2026-11-23"
+    machine = fourth.get("self_test_of_this_workspace") or {}
+    if machine.get("pass") is not True or not machine.get("run_at_utc"):
+        return "the self-test of the workspace was not run or did not pass"
+    stored, compared, largest = fourth.get("stored_hours"), fourth.get("values_compared") or {}, fourth.get("largest_difference") or {}
+    for name in STOP_4_REQUIRED:
+        if not stored or compared.get(name) != stored:
+            return f"{name} was not compared on every stored hour"
+        if largest.get(name) is None or not largest[name] <= se.TOLERANCE:
+            return f"{name} does not reproduce to {se.TOLERANCE}"
+    return None
 
 
 def reason_text(parts) -> str:
@@ -267,11 +289,13 @@ def read(frame_path: Path, schedule_path: Path, stop_checks: Path) -> dict:
     if se.sha256(Path(swt.__file__)) != FROZEN_SCORING_SHA256:
         raise SystemExit("forecast/spread_w_test.py is not the registered file, so the decisions would not be the registered ones")
     fourth = checks.get(STOP_4) or {}
-    if not fourth.get("pass") or fourth.get("basis") != EXCEPTION:
-        raise SystemExit("stop condition 4 is not recorded as met under the exception of 2026-11-23")
+    wrong = stop_4_met(fourth)
+    if wrong:
+        raise SystemExit(f"stop condition 4 under the exception of 2026-11-23: {wrong}")
     out = report(*load(frame_path, schedule_path))
     # The exception requires this to stand beside the decisions.
     out["stop_condition_4"] = {"statement": f"Stop condition 4 is {EXCEPTION}: the stored forecasts are the reconstructions of that day, not the files of the registered hashes.",
-                               **{k: fourth.get(k) for k in ("basis", "file", "sha256", "is_the_reconstruction_of_2026_11_23", "self_test_of_this_workspace", "models", "hours_compared", "values_compared", "largest_difference",
-                                                             "tolerance", "reported_not_required")}}
+                               **{k: fourth.get(k) for k in ("basis", "file", "sha256", "is_the_reconstruction_of_2026_11_23", "self_test_of_this_workspace", "models", "stored_hours", "hours_compared", "values_compared", "largest_difference",
+                                                             "within_tolerance", "tolerance", "required", "reported_not_required")},
+                               "reported_models_that_did_not_reproduce": [m for m in fourth.get("reported_not_required") or [] if not (fourth.get("within_tolerance") or {}).get(m)]}
     return out

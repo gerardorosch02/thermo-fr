@@ -161,11 +161,32 @@ def test_a_frame_is_refused_when_a_model_is_missing_or_infinite_or_a_day_is_outs
     sc.validate(late, last="2027-01-25")  # and it is the window check that refused it
 
 
+def _fourth(**changes):
+    whole = {m: 21430 for m in ("H", "HW", "G", "GK", "GM", "W", "C")}
+    small = {m: 5.7e-14 for m in whole}
+    return {"pass": True, "basis": sc.EXCEPTION, "file": sc.RECONSTRUCTION_FILE, "sha256": sc.RECONSTRUCTION_SHA256, "stored_hours": 21430, "hours_compared": 21430, "values_compared": whole,
+            "largest_difference": small, "within_tolerance": {m: True for m in whole}, "tolerance": 1e-9, "required": ["H", "G", "C", "W"], "reported_not_required": ["HW", "GK", "GM"],
+            "self_test_of_this_workspace": {"pass": True, "verdict": "forecasts identical to the reference machine", "run_at_utc": "2027-01-19T08:00:00Z"}, **changes}
+
+
 def _checks(folder, **changes):
-    fourth = {"pass": True, "basis": sc.EXCEPTION, "file": "comparator_predictions.csv.gz", "sha256": "6d6a", "largest_difference": {"W": 5.7e-14}, "self_test_of_this_workspace": {"pass": True}}
     checks = {"test": wt.TEST_NAME, "window": [wt.FIRST, wt.LAST], "all_pass": True, "test_predictions_sha256": se.sha256(folder / "frame.csv.gz"), "schedule_sha256": se.sha256(folder / "schedule.csv"),
-              sc.STOP_4: fourth, **changes}
+              sc.STOP_4: _fourth(), **changes}
     (folder / "checks.json").write_text(json.dumps(checks))
+
+
+def test_the_record_of_stop_condition_4_is_not_taken_on_its_word():
+    assert sc.stop_4_met(_fourth()) is None
+    whole = _fourth()["values_compared"]
+    wrong = {"pass alone": {"pass": True, "basis": sc.EXCEPTION}, "not passed": _fourth(**{"pass": False}), "pass as text": _fourth(**{"pass": "true"}), "another basis": _fourth(basis="met"),
+             "another file": _fourth(sha256="0" * 64), "the four-model file": _fourth(file="w_predictions.csv.gz"), "self-test failed": _fourth(self_test_of_this_workspace={"pass": False, "run_at_utc": "x"}),
+             "self-test from nowhere": _fourth(self_test_of_this_workspace={"pass": True}), "W short of hours": _fourth(values_compared={**whole, "W": 21429}),
+             "G off": _fourth(largest_difference={**_fourth()["largest_difference"], "G": 2e-9}), "C never compared": _fourth(largest_difference={**_fourth()["largest_difference"], "C": None})}
+    for name, record in wrong.items():
+        assert sc.stop_4_met(record), name
+    assert sc.stop_4_met(None) and sc.stop_4_met({})
+    off = _fourth(values_compared={**whole, "HW": 0}, within_tolerance={**_fourth()["within_tolerance"], "HW": False})
+    assert sc.stop_4_met(off) is None  # HW is reported and not required: the read must then say so, see the next test
 
 
 def test_the_read_is_sealed_bound_to_the_checked_files_and_states_the_exception(tmp_path, monkeypatch):
@@ -182,9 +203,14 @@ def test_the_read_is_sealed_bound_to_the_checked_files_and_states_the_exception(
     out = sc.read(*args)
     assert out["floor"]["readable"] and out["excluded"]["eligible_hours_without_yesterdays_spread"] == 24
     assert out["decisions"] == sc.report(f, schedule)["decisions"]  # the file gives back the numbers to the last bit
-    assert sc.EXCEPTION in out["stop_condition_4"]["statement"] and out["stop_condition_4"]["basis"] == sc.EXCEPTION and out["stop_condition_4"]["largest_difference"] == {"W": 5.7e-14}
+    fourth = out["stop_condition_4"]
+    assert sc.EXCEPTION in fourth["statement"] and fourth["basis"] == sc.EXCEPTION and fourth["largest_difference"]["W"] == 5.7e-14
+    assert fourth["within_tolerance"]["HW"] and fourth["stored_hours"] == 21430 and fourth["required"] == ["H", "G", "C", "W"] and fourth["reported_models_that_did_not_reproduce"] == []
+    _checks(tmp_path, **{sc.STOP_4: _fourth(within_tolerance={**_fourth()["within_tolerance"], "GK": False})})
+    assert sc.read(*args)["stop_condition_4"]["reported_models_that_did_not_reproduce"] == ["GK"]  # allowed by the exception, and said outright
     for changes, message in (({"all_pass": False}, "stop condition"), ({"schedule_sha256": "0"}, "not the ones"), ({"test_predictions_sha256": "0"}, "not the ones"),
-                             ({sc.STOP_4: {"pass": True, "basis": "met"}}, "exception"), ({sc.STOP_4: {"pass": False, "basis": sc.EXCEPTION}}, "exception"), ({"window": ["2026-10-11", "2027-01-19"]}, "this test and window")):
+                             ({sc.STOP_4: {"pass": True, "basis": sc.EXCEPTION}}, "not the reconstruction"), ({sc.STOP_4: _fourth(**{"pass": False})}, "exception"),
+                             ({sc.STOP_4: _fourth(self_test_of_this_workspace={"pass": False})}, "self-test"), ({"window": ["2026-10-11", "2027-01-19"]}, "this test and window")):
         _checks(tmp_path, **changes)
         with pytest.raises(SystemExit, match=message):
             sc.read(*args)
