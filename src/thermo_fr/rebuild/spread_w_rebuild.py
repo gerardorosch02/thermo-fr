@@ -61,16 +61,16 @@ SAVED_MODELS = lsl.MODELS  # H, HW, G, GK, GM, W: what a record holds. C is rebu
 ALL_MODELS = ("H", "HW", "G", "GK", "GM", "W", "C")
 SCRAMBLE_DAYS = ("2026-10-11", "2026-10-25", "2026-11-11", "2026-12-25", "2027-01-18")  # stop condition 5
 # Stop condition 4 under the exception of 2026-11-23: the stored forecasts are the reconstructions made that day, by file hash.
-RECONSTRUCTIONS = {"comparator_predictions.csv.gz": "6d6a4de11cbb4442b0c4a9569f897144eef5d1a6131faf8658acf5d60b80ffdf",
-                   "w_predictions.csv.gz": "f82df0ad123319e2e0d55c7e684f8dcec9057f215927d0c1f01bda10fb966efb"}
-EXCEPTION = "met under the exception of 2026-11-23"
+# Only the file that holds all seven models on the 21,430 hours is accepted, so that HW, GK and GM are always checked too.
+RECONSTRUCTION_FILE = "comparator_predictions.csv.gz"
+RECONSTRUCTION_SHA256 = "6d6a4de11cbb4442b0c4a9569f897144eef5d1a6131faf8658acf5d60b80ffdf"
+EXCEPTION = score.EXCEPTION
 # The French inputs whose 10:05 version the source does not keep (refetch specification, table "Input by input"): for these
 # the window saved on the eve is used. Prices are final and weather comes from the archive, so those are refetched.
 WINDOW_COLUMNS = ("load_fc_mw", "nuclear_mw")
 WEATHER_COLUMNS = ("temp_fc_c", "wind100_fc_ms", "radiation_fc_wm2")  # compared with the saved window, never taken from it
 REVISION_SHARE, REVISION_SIZE = 0.05, 0.01  # rule 5: more than 5% of hours differing by more than 1% is stated beside the result
-NOT_ISSUED = "no forecast issued"  # reasons for an hour that has no issued forecast; the reasons for an hour that has one
-NOT_STRICT = "weather not as issued two days ahead"  # are score.NO_SPREAD and score.NO_PROXY
+NOT_ISSUED, NOT_STRICT = score.NOT_ISSUED, score.NOT_STRICT  # why an hour has no issued forecast
 EXTRA = pd.Timedelta(seconds=1)  # the rows that carry saved French inputs sit one second after the hour they belong to
 
 
@@ -279,20 +279,17 @@ def assemble(feat: dict, pred: pd.DataFrame, overrides: dict, classes: dict, sav
         missing.loc[rows] = len(gaps)
     strict = frame.loc[hours, "weather_point_in_time"].astype(bool)
     is_saved = table["provenance"] == "saved"
-    has_all = forecasts[list(SAVED_MODELS)].notna().all(axis=1)
+    has_all = forecasts[list(ALL_MODELS)].notna().all(axis=1)  # C too: an hour needs a forecast from each of the seven
     issued = has_all & (is_saved | strict)  # a rebuilt hour whose weather is not the forecast issued two days ahead was never a forecast of 10:05
-    reason = pd.Series("", index=hours)
-    reason[~issued] = np.where(has_all[~issued], NOT_STRICT, NOT_ISSUED)
     no_fr, no_de = frame.loc[hours, "fr"].isna(), frame.loc[hours, "de"].isna()  # realised prices, from ENTSO-E's refetch only
-    which = np.where(no_fr & no_de, "no French or German price", np.where(no_fr, "no French price", "no German price"))
     no_spread = table["spread"].isna()
     if (no_spread != (no_fr | no_de)).any():
         raise ValueError("the realised spread is not missing exactly where a realised price is")
-    left = issued & no_spread
-    reason[left] = [f"{score.NO_SPREAD}: {w}" for w in which[left.to_numpy()]]
-    reason[issued & (reason == "") & (table["wind_px"].isna() | table["solar_px"].isna())] = score.NO_PROXY
-    if (issued & (reason == "") & forecasts["C"].isna()).any():
-        raise ValueError("an hour that would be eligible has no forecast of C")  # yesterday's spread may be missing on an eligible hour
+    price = np.where(no_fr & no_de, score.PRICE_REASONS[2], np.where(no_fr, score.PRICE_REASONS[0], np.where(no_de, score.PRICE_REASONS[1], "")))
+    no_proxy = (table["wind_px"].isna() | table["solar_px"].isna()).to_numpy()
+    unissued = np.where(issued.to_numpy(), "", np.where(has_all.to_numpy(), NOT_STRICT, NOT_ISSUED))
+    # Every cause that applies is written, so a missing price is named even on an hour that had no forecast either.
+    reason = pd.Series([score.reason_text([part for part in (u, p, score.NO_PROXY if x else "") if part]) for u, p, x in zip(unissued, price, no_proxy)], index=hours)
     schedule = pd.DataFrame({"delivery_day": days, "provenance": table["provenance"], "issued": issued.astype(bool), "inputs_missing": missing, "unscored_reason": reason})
     scored = issued & (reason == "")
     out = pd.concat([table.loc[scored, ["delivery_day", "hour", "dow", "holiday", "spread", "de_holiday", "wind_px", "solar_px", "yesterday"]], forecasts.loc[scored, list(ALL_MODELS)],
@@ -375,42 +372,44 @@ def coverage_check(feat: dict, first: str, last: str, accepted: dict | None = No
     return {"inputs_with_a_fully_missing_day": holes, "the_same_inputs_a_year_earlier": before, "accepted_by_an_amendment": accepted, "new_holes_not_accepted": new, "pass": not new}
 
 
-def selftest_result(path: Path | None) -> dict:
-    """The outcome of the logger's self-test (`spread_live selftest`), which says whether this workspace gives the forecasts
-    of the reference machine. Its output may start with log lines; the JSON begins at the first line that is a brace."""
-    if path is None or not Path(path).exists():
-        return {"pass": False, "error": "no self-test result given"}
-    text = Path(path).read_text()
-    start = 0 if text.startswith("{") else text.find("\n{") + 1
+def run_selftest(static: Path, log=lambda *_: None) -> dict:
+    """The logger's self-test, run here and now: does this workspace give the forecasts of the reference machine? It reads
+    the static files only and involves no price of the test window. Nothing is taken on trust from a file."""
+    static = Path(static)
+    if static.name != "static":
+        return {"pass": False, "error": "the static folder must be named `static`, as the logger expects"}
     try:
-        result = json.loads(text[start:])
-    except ValueError:
-        return {"pass": False, "error": "the self-test result cannot be read"}
-    return {"pass": bool(result.get("pass")), "verdict": result.get("verdict"), "code_matches_reference": result.get("code_matches_reference"), "sha256": se.sha256(path)}
+        result = lsl.selftest(lsl.Paths(root=static.parent), log=log)
+    except Exception as exc:  # a workspace that cannot run it has not passed it
+        return {"pass": False, "error": f"{type(exc).__name__}: {exc}"[:300]}
+    return {"pass": bool(result.get("pass")), "verdict": result.get("verdict"), "code_matches_reference": result.get("code_matches_reference"), "run_at_utc": lsl.iso(lsl.utc_now())}
 
 
-def reproduce_check(pred: pd.DataFrame, kept_folder: Path | None, selftest: Path | None = None) -> dict:
+def reproduce_check(pred: pd.DataFrame, kept_folder: Path | None, machine: dict | None = None) -> dict:
     """Stop condition 4, under the exception of 2026-11-23 (docs/prereg/spread_w_stop_condition_4_exception.md): the rebuild
     reproduces the reconstructions of that day on 2024-05-01 to 2026-10-10 to 1e-9 for H, G, C and W, in a workspace that
     passes the logger's self-test on the day. HW, GK and GM are checked the same way where the file holds them."""
-    if kept_folder is None:
-        return {"pass": False, "error": "no folder of stored forecasts given"}
-    for name, models in (("comparator_predictions.csv.gz", ALL_MODELS), ("w_predictions.csv.gz", ("H", "G", "C", "W"))):
-        path = Path(kept_folder) / name
-        if path.exists():
-            break
-    else:
-        return {"pass": False, "error": f"neither comparator_predictions.csv.gz nor w_predictions.csv.gz in {kept_folder}"}
-    kept = pd.read_csv(path, index_col=0)
+    machine = machine or {"pass": False, "error": "the self-test was not run"}
+    path = Path(kept_folder) / RECONSTRUCTION_FILE if kept_folder is not None else None
+    if path is None or not path.exists():
+        return {"basis": EXCEPTION, "pass": False, "error": f"{RECONSTRUCTION_FILE} of the reconstructions of 2026-11-23 was not given"}
+    models, required = ALL_MODELS, ("H", "G", "C", "W")
+    kept = pd.read_csv(path, index_col=0, float_precision="round_trip")
     kept.index = pd.to_datetime(kept.index, utc=True)
+    absent = [m for m in models if m not in kept.columns]
+    if absent:
+        return {"basis": EXCEPTION, "pass": False, "error": f"the file of stored forecasts lacks {absent}"}
     common = kept.index.intersection(pred.index)
-    largest = {m: float((pred.loc[common, m] - kept.loc[common, m]).abs().max()) for m in models}
-    sha, machine = se.sha256(path), selftest_result(selftest)
-    required = max(largest[m] for m in ("H", "G", "C", "W"))
-    return {"basis": EXCEPTION, "file": path.name, "sha256": sha, "is_the_reconstruction_of_2026_11_23": bool(sha == RECONSTRUCTIONS[path.name]), "self_test_of_this_workspace": machine,
-            "models": list(models), "stored_hours": int(len(kept)), "hours_compared": int(len(common)), "largest_difference": largest,
-            "tolerance": se.TOLERANCE, "reported_not_required": [m for m in models if m not in ("H", "G", "C", "W")], "not_checked": [m for m in ALL_MODELS if m not in models],
-            "pass": bool(sha == RECONSTRUCTIONS[path.name] and machine["pass"] and len(common) == len(kept) and len(kept) > 0 and required <= se.TOLERANCE)}
+    mine, theirs = pred.reindex(index=common, columns=list(models)), kept.loc[common, list(models)]
+    compared = {m: int((mine[m].notna() & theirs[m].notna()).sum()) for m in models}  # a missing forecast is a failure, never a skipped hour
+    largest = {m: float((mine[m] - theirs[m]).abs().max()) if compared[m] else None for m in models}
+    whole = {m: bool(len(kept) > 0 and compared[m] == len(kept)) for m in models}
+    within = {m: bool(whole[m] and largest[m] <= se.TOLERANCE) for m in models}
+    sha = se.sha256(path)
+    return {"basis": EXCEPTION, "file": path.name, "sha256": sha, "is_the_reconstruction_of_2026_11_23": bool(sha == RECONSTRUCTION_SHA256), "self_test_of_this_workspace": machine,
+            "models": list(models), "stored_hours": int(len(kept)), "hours_compared": int(len(common)), "values_compared": compared, "largest_difference": largest, "within_tolerance": within,
+            "tolerance": se.TOLERANCE, "required": list(required), "reported_not_required": [m for m in models if m not in required],
+            "pass": bool(sha == RECONSTRUCTION_SHA256 and machine.get("pass") and all(within[m] for m in required))}
 
 
 def scramble_checks(data: se.Data, days, log=print) -> dict:
@@ -499,7 +498,7 @@ def _write(path: Path, obj) -> None:
     path.write_text(json.dumps(obj, indent=1, default=str))
 
 
-def rebuild(src: Sources, out: Path, first: str, last: str, kept: Path | None, accepted: dict | None = None, scramble_days=SCRAMBLE_DAYS, selftest: Path | None = None,
+def rebuild(src: Sources, out: Path, first: str, last: str, kept: Path | None, accepted: dict | None = None, scramble_days=SCRAMBLE_DAYS,
             reproduce_from: str = se.DEV_FIRST, log=print) -> dict:
     """Everything, in the order of the plan. Returns the stop-condition record. No error against a realised spread is computed."""
     if pd.Timestamp(last) > pd.Timestamp(STORED_LAST) and swt._today() < pd.Timestamp(swt.READ_FROM):
@@ -527,20 +526,26 @@ def rebuild(src: Sources, out: Path, first: str, last: str, kept: Path | None, a
     overrides = override_tables(data, windows, classes, log=log)
     wide = augmented(feat, overrides)
     pred = forecast_all(wide, reproduce_from, last, log=log)
-    checks["4_stored_forecasts_reproduce"] = reproduce_check(pred, kept, selftest)
+    checks[score.STOP_4] = reproduce_check(pred, kept, run_selftest(src.static))
     checks["5_scramble"] = scramble_checks(data, list(scramble_days), log=log)
     frame, schedule, extra = assemble(feat, pred, overrides, classes, saved, first, last)
     # Stop condition 6 as amendment 6 leaves it: the floor is recorded here and applied by the scoring code, which marks a
-    # read under it "not readable". What stops the run is an hour of the window that is not accounted for.
+    # read under it "not readable". What stops the run is a frame or a schedule the scoring code would refuse, found now and
+    # not on the read date. Neither check computes an error.
     scheduled = pd.date_range(first, last, freq="D")
-    whole = bool(schedule.index.is_unique and np.array_equal(np.sort(schedule["delivery_day"].unique()), scheduled.to_numpy()) and schedule.groupby("delivery_day").size().between(23, 25).all()
-                 and not (schedule.loc[~schedule.index.isin(frame.index), "unscored_reason"] == "").any())
+    try:
+        score.validate(frame, first, last)
+        score.check_schedule(frame, schedule, first, last, expected_hours=int(sum(len(fq.day_hours(day)) for day in scheduled)))
+        refused = None
+    except ValueError as exc:
+        refused = str(exc)
+    left_out = schedule.loc[~schedule.index.isin(frame.index), "unscored_reason"]
     checks["6_eligible_hours"] = {"days": int(frame["delivery_day"].nunique()), "hours": int(len(frame)), "scheduled_days": int(len(scheduled)), "scheduled_hours": int(len(schedule)),
                                   "floor": {"least_days": score.FLOOR_DAYS, "least_hours": score.FLOOR_HOURS, "met": bool(frame["delivery_day"].nunique() >= score.FLOOR_DAYS and len(frame) >= score.FLOOR_HOURS)},
                                   "days_with_no_eligible_hour": sorted(f"{d:%Y-%m-%d}" for d in set(schedule["delivery_day"]) - set(frame["delivery_day"])),
-                                  "hours_left_out_by_reason": {k: int(v) for k, v in schedule.loc[~schedule.index.isin(frame.index), "unscored_reason"].value_counts().items()},
+                                  "hours_left_out_by_reason": {k: int(v) for k, v in left_out.value_counts().sort_index().items()},
                                   "eligible_hours_without_yesterdays_spread": int(frame["yesterday"].isna().sum()),
-                                  "every_hour_of_the_window_accounted_for": whole, "pass": whole}
+                                  "refused_by_the_scoring_code": refused, "pass": refused is None}
     frame.to_csv(out / "test_predictions.csv.gz")  # working files, never published
     schedule.to_csv(out / "schedule.csv")
     checks["test_predictions_sha256"], checks["schedule_sha256"] = se.sha256(out / "test_predictions.csv.gz"), se.sha256(out / "schedule.csv")
@@ -550,7 +555,7 @@ def rebuild(src: Sources, out: Path, first: str, last: str, kept: Path | None, a
               "saved_days_with_an_input_missing_on_some_hours_only": extra["saved_days_with_an_input_missing_on_some_hours_only"],
               "note": "No error against any price is computed here. The forecasts of saved days are the saved ones; C is rebuilt on every day."}
     _write(out / "rebuild_report.json", report)
-    checks["all_pass"] = all(checks[k]["pass"] for k in ("1_german_overlap", "2_french_and_points", "3_coverage", "4_stored_forecasts_reproduce", "5_scramble", "6_eligible_hours"))
+    checks["all_pass"] = all(checks[k]["pass"] for k in ("1_german_overlap", "2_french_and_points", "3_coverage", score.STOP_4, "5_scramble", "6_eligible_hours"))
     _write(out / "stop_checks.json", checks)
     log("stop conditions: " + ("all pass" if checks["all_pass"] else "FAILED, nothing is scored"))
     return checks
@@ -569,7 +574,6 @@ def main(argv=None) -> None:
     parser.add_argument("--production-windows")
     parser.add_argument("--kept", help="folder of the stored forecasts (comparator_predictions.csv.gz or w_predictions.csv.gz)")
     parser.add_argument("--accepted-holes", help="JSON {input: [days]} of the holes an amendment has accepted")
-    parser.add_argument("--selftest", help="output of `spread_live selftest` run in this workspace on the day (stop condition 4)")
     parser.add_argument("--first")
     parser.add_argument("--last")
     args = parser.parse_args(argv)
@@ -577,11 +581,11 @@ def main(argv=None) -> None:
                   Path(args.production_windows) if args.production_windows else None)
     accepted = json.loads(Path(args.accepted_holes).read_text()) if args.accepted_holes else None
     if args.stage == "run":
-        rebuild(src, Path(args.out), swt.FIRST, swt.LAST, Path(args.kept) if args.kept else None, accepted, selftest=Path(args.selftest) if args.selftest else None)
+        rebuild(src, Path(args.out), swt.FIRST, swt.LAST, Path(args.kept) if args.kept else None, accepted)
         return
     if not args.first or not args.last or pd.Timestamp(args.last) > pd.Timestamp(STORED_LAST):
         raise SystemExit(f"a replay needs --first and --last, and ends on {STORED_LAST} at the latest")
-    rebuild(src, Path(args.out), args.first, args.last, Path(args.kept) if args.kept else None, accepted, scramble_days=(args.first, args.last), selftest=Path(args.selftest) if args.selftest else None)
+    rebuild(src, Path(args.out), args.first, args.last, Path(args.kept) if args.kept else None, accepted, scramble_days=(args.first, args.last))
 
 
 if __name__ == "__main__":

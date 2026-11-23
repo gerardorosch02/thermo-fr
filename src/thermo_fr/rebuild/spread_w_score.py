@@ -1,6 +1,7 @@
 """Scoring of the test of W under amendment 6 (docs/prereg/spread_w_amendment_6.md, in force 2026-11-23).
 
-The frozen scoring file, forecast/spread_w_test.py (sha256 98fb99817b85...), is not edited. Editing it would change the code
+The frozen scoring file, forecast/spread_w_test.py (sha256 998d40bf7dcc..., the hash amendment 2 registered; amendment 6
+cites the older 98fb9981... of amendment 1 by mistake), is not edited. Editing it would change the code
 hash of the morning logger, which covers the forecast package. This module takes its place for the one read. It reuses the
 frozen functions for everything the amendment leaves alone, and replaces only the checks and the handling of yesterday's
 spread:
@@ -23,6 +24,13 @@ The rule (amendment 6, sections 1 to 7):
   6. No realised price comes from a second source. Nothing here reads one.
   7. The read reports every hour of the window that is not eligible, with its date, hour and reason, every day with no
      eligible hour, and the count of eligible hours without yesterday's spread.
+
+A reason is one or more of six fixed texts joined by "; ". An hour with an issued forecast may carry only the price and
+proxy texts. An hour without one carries "no forecast issued" or "weather not as issued two days ahead", and the price or
+proxy text as well where that also applies, so a missing price is always named.
+
+read() also carries stop condition 4 into the result, with the words "met under the exception of 2026-11-23", as the
+exception requires, and refuses if the frozen scoring file is not the registered one.
 """
 
 from __future__ import annotations
@@ -40,19 +48,39 @@ FLOOR_DAYS, FLOOR_HOURS = 95, 2280
 COMPARED = ("H", "HW", "G", "GK", "GM", "W", "C")  # scored on the same hours, all of them
 BASELINE = "yesterday"  # scored where it exists
 COMMON = ("delivery_day", "hour", "dow", "holiday", "de_holiday", "wind_px", "solar_px", "spread", "provenance", *COMPARED)
-NO_SPREAD, NO_PROXY = "no realised spread", "no German proxy"  # why an hour with an issued forecast is not eligible
+NO_SPREAD, NO_PROXY = "no realised spread", "no German proxy"
+PRICE_REASONS = tuple(f"{NO_SPREAD}: {which}" for which in ("no French price", "no German price", "no French or German price"))
+NOT_ISSUED, NOT_STRICT = "no forecast issued", "weather not as issued two days ahead"
+ISSUED_REASONS = (*PRICE_REASONS, NO_PROXY)  # why an hour with an issued forecast is not eligible
+UNISSUED_REASONS = (NOT_ISSUED, NOT_STRICT)  # why an hour has no issued forecast
+SEPARATOR = "; "
 NOT_READABLE = "not readable"
+FROZEN_SCORING_SHA256 = "998d40bf7dcc8ea3522bdd645abe489112b42c16fdcbcc3e2d481fa8772ddf3b"  # forecast/spread_w_test.py, as registered by amendment 2
+EXCEPTION = "met under the exception of 2026-11-23"  # stop condition 4 (docs/prereg/spread_w_stop_condition_4_exception.md)
+STOP_4 = "4_stored_forecasts_reproduce"
 
 
-def _reason_ok(reason: pd.Series) -> pd.Series:
-    """A reason for leaving out an hour that has an issued forecast: no German proxy, or no realised spread, which may say
-    after a colon which country's price is missing."""
-    return (reason == NO_PROXY) | (reason == NO_SPREAD) | reason.str.startswith(NO_SPREAD + ":")
+def reason_text(parts) -> str:
+    return SEPARATOR.join(parts)
 
 
-def validate(frame: pd.DataFrame) -> None:
+def _reason_ok(reason: str, issued: bool) -> bool:
+    """One or more of the fixed texts, each at most once, at most one price text. With an issued forecast: price and proxy
+    texts only. Without one: exactly one of the two texts for that, and the price or proxy text where it also applies."""
+    parts = reason.split(SEPARATOR)
+    if len(set(parts)) != len(parts) or sum(p in PRICE_REASONS for p in parts) > 1:
+        return False
+    unissued = [p for p in parts if p in UNISSUED_REASONS]
+    return all(p in (*ISSUED_REASONS, *UNISSUED_REASONS) for p in parts) and len(unissued) == (0 if issued else 1)
+
+
+NUMERIC = ("hour", "dow", "holiday", "de_holiday", "wind_px", "solar_px", "spread", *COMPARED)
+
+
+def validate(frame: pd.DataFrame, first: str | None = None, last: str | None = None) -> None:
     """The seven models are scored on the same hours, each hour once, on days of the registered window. Yesterday's spread may
     be missing. Anything else is refused. The floor is not checked here: a frame under it is reported, marked not decisive."""
+    first, last = first or swt.FIRST, last or swt.LAST
     missing = [c for c in (*COMMON, BASELINE) if c not in frame.columns]
     if missing:
         raise ValueError(f"columns missing: {missing}")
@@ -61,11 +89,17 @@ def validate(frame: pd.DataFrame) -> None:
         raise ValueError(f"missing values, so the models would be scored on different hours: {holes[holes > 0].to_dict()}")
     if not len(frame):
         raise ValueError("the frame holds no hour")
+    for column in (*NUMERIC, BASELINE):
+        if not pd.api.types.is_numeric_dtype(frame[column]) and not pd.api.types.is_bool_dtype(frame[column]):
+            raise ValueError(f"`{column}` is not a number")
+    values = frame[list(NUMERIC)].to_numpy(dtype=float)
+    if not np.isfinite(values).all() or np.isinf(frame[BASELINE].to_numpy(dtype=float)).any():
+        raise ValueError("a value is infinite")
     swt._stamps(frame, "frame")
     twice = frame[frame.duplicated(["delivery_day", "hour"], keep=False)]
     if len(twice) and not (len(twice) == 2 and (twice["delivery_day"].iloc[0], int(twice["hour"].iloc[0])) == swt.REPEATED_HOUR):
         raise ValueError("an hour appears more than once")
-    if frame["delivery_day"].min() < pd.Timestamp(swt.FIRST) or frame["delivery_day"].max() > pd.Timestamp(swt.LAST):
+    if frame["delivery_day"].min() < pd.Timestamp(first) or frame["delivery_day"].max() > pd.Timestamp(last):
         raise ValueError("the frame holds days outside the registered window")
     if not frame["provenance"].isin(swt.PROVENANCE).all() or (frame.groupby("delivery_day")["provenance"].nunique() != 1).any():
         raise ValueError("provenance must be one of saved, rebuilt_french_saved, rebuilt, and the same for every hour of a day")
@@ -77,26 +111,35 @@ def floor(frame: pd.DataFrame) -> dict:
 
 
 def _errors(part: pd.DataFrame) -> dict:
-    """Hourly error of the seven models on the hours given, and of yesterday's spread on those of them where it exists."""
+    """Hourly error of the seven models on the hours given. Yesterday's spread is never in this table: it is scored on its
+    own hours, with the models beside it on the same hours, by _against_yesterday."""
     if not len(part):
         return {"days": 0, "hours": 0}
-    with_baseline = part[part[BASELINE].notna()]
-    return {"days": int(part["delivery_day"].nunique()), "hours": int(len(part)), **{m: float((part[m] - part["spread"]).abs().mean()) for m in COMPARED},
-            BASELINE: float((with_baseline[BASELINE] - with_baseline["spread"]).abs().mean()) if len(with_baseline) else None, "hours_with_yesterdays_spread": int(len(with_baseline))}
+    return {"days": int(part["delivery_day"].nunique()), "hours": int(len(part)), **{m: float((part[m] - part["spread"]).abs().mean()) for m in COMPARED}}
 
 
-def check_schedule(frame: pd.DataFrame, schedule: pd.DataFrame) -> None:
+def _against_yesterday(part: pd.DataFrame) -> dict:
+    """Hourly error of yesterday's spread and of the seven models, both on the hours of `part` where yesterday's spread exists."""
+    sub = part[part[BASELINE].notna()]
+    if not len(sub):
+        return {"days": 0, "hours": 0}
+    return {"days": int(sub["delivery_day"].nunique()), "hours": int(len(sub)), **{m: float((sub[m] - sub["spread"]).abs().mean()) for m in (BASELINE, *COMPARED)}}
+
+
+def check_schedule(frame: pd.DataFrame, schedule: pd.DataFrame, first: str | None = None, last: str | None = None, expected_hours: int | None = None) -> None:
     """The schedule holds every hour of the 100 registered days, the frame holds exactly its eligible hours, and every hour
-    with an issued forecast that is not eligible carries one of the reasons of the amendment."""
+    that is not eligible carries a reason of the amendment that fits whether it had an issued forecast."""
+    first, last = first or swt.FIRST, last or swt.LAST
+    expected_hours = swt.EXPECTED_HOURS if expected_hours is None else expected_hours
     missing = [c for c in swt.SCHEDULE_COLUMNS if c not in schedule.columns]
     if missing:
         raise ValueError(f"schedule columns missing: {missing}")
     if schedule[list(swt.SCHEDULE_COLUMNS)].isna().any().any():
         raise ValueError("the schedule must have no missing value")
     swt._stamps(schedule, "schedule")
-    registered = pd.date_range(swt.FIRST, swt.LAST, freq="D")
-    if len(schedule) != swt.EXPECTED_HOURS or not np.array_equal(np.sort(schedule["delivery_day"].unique()), registered.to_numpy()):
-        raise ValueError(f"the schedule must hold the {swt.EXPECTED_HOURS} hours of the {swt.EXPECTED_DAYS} registered days")
+    registered = pd.date_range(first, last, freq="D")
+    if len(schedule) != expected_hours or not np.array_equal(np.sort(schedule["delivery_day"].unique()), registered.to_numpy()):
+        raise ValueError(f"the schedule must hold the {expected_hours} hours of the {len(registered)} registered days")
     if schedule["issued"].dtype != bool:
         raise ValueError("`issued` must be true or false")
     if not schedule["provenance"].isin(swt.PROVENANCE).all() or (schedule.groupby("delivery_day")["provenance"].nunique() != 1).any():
@@ -110,9 +153,9 @@ def check_schedule(frame: pd.DataFrame, schedule: pd.DataFrame) -> None:
     left_out = schedule[~schedule.index.isin(frame.index)]
     if (left_out["unscored_reason"] == "").any():
         raise ValueError("an hour is left out without a reason")
-    unexplained = left_out[left_out["issued"] & ~_reason_ok(left_out["unscored_reason"])]
-    if len(unexplained):
-        raise ValueError(f"{len(unexplained)} hour(s) with an issued forecast are left out for a reason the amendment does not allow: {sorted(unexplained['unscored_reason'].unique())}")
+    fits = np.array([_reason_ok(str(reason), bool(issued)) for reason, issued in zip(left_out["unscored_reason"], left_out["issued"])], dtype=bool)
+    if not fits.all():
+        raise ValueError(f"{int((~fits).sum())} hour(s) are left out for a reason the amendment does not allow: {sorted(left_out.loc[~fits, 'unscored_reason'].unique())}")
 
 
 def availability(frame: pd.DataFrame, schedule: pd.DataFrame) -> dict:
@@ -127,7 +170,8 @@ def availability(frame: pd.DataFrame, schedule: pd.DataFrame) -> dict:
                      "eligible_hours": int((rows & eligible).sum()),
                      "left_out_by_reason": {str(k): int(v) for k, v in schedule.loc[rows & ~eligible, "unscored_reason"].value_counts().sort_index().items()},
                      "hours_with_an_input_left_missing": int((rows & (schedule["inputs_missing"].to_numpy() > 0)).sum()),
-                     "mae_on_eligible_hours": _errors(part) if len(part) else None, "as_of": swt.AS_OF.get(name, "all classes together")}
+                     "mae_on_eligible_hours": _errors(part) if len(part) else None, "mae_on_hours_with_yesterdays_spread": _against_yesterday(part) if len(part) else None,
+                     "as_of": swt.AS_OF.get(name, "all classes together")}
     saved_days = schedule.loc[schedule["provenance"] == "saved", "delivery_day"]
     if len(saved_days):
         since = schedule[schedule["delivery_day"] >= saved_days.min()]
@@ -145,7 +189,9 @@ def excluded(frame: pd.DataFrame, schedule: pd.DataFrame) -> dict:
     for (day, reason), part in left_out.groupby(["delivery_day", "unscored_reason"]):
         by_day.setdefault(f"{day:%Y-%m-%d}", {})[str(reason)] = [t.strftime("%Y-%m-%dT%H:%MZ") for t in part.index.sort_values()]
     whole = sorted(set(schedule["delivery_day"]) - set(frame["delivery_day"]))
+    parts = left_out["unscored_reason"].str.split(SEPARATOR).explode()
     return {"hours_left_out": int(len(left_out)), "by_reason": {str(k): int(v) for k, v in left_out["unscored_reason"].value_counts().sort_index().items()},
+            "hours_by_single_reason": {str(k): int(v) for k, v in parts.value_counts().sort_index().items()},
             "days_with_no_eligible_hour": {f"{d:%Y-%m-%d}": sorted(by_day[f"{d:%Y-%m-%d}"]) for d in whole}, "hours_by_day_and_reason_utc": by_day,
             "eligible_hours_without_yesterdays_spread": int(frame[BASELINE].isna().sum()),
             "days_with_an_eligible_hour_without_yesterdays_spread": sorted(f"{d:%Y-%m-%d}" for d in frame.loc[frame[BASELINE].isna(), "delivery_day"].unique())}
@@ -161,8 +207,10 @@ def report(frame: pd.DataFrame, schedule: pd.DataFrame) -> dict:
     for candidate, base, question in swt.DECISIONS:
         d = {"question": question, **swt.decide(common, candidate, base)}
         d["outcome"] = d["rule"]["verdict"] if state["readable"] else NOT_READABLE
-        if not state["readable"]:
-            d["rule"]["verdict"] = d["second_reading_small_slices_set_aside"]["verdict"] = NOT_READABLE
+        d["decisive"] = state["readable"]
+        if not state["readable"]:  # under the floor nothing is decided: the figures stay, the verdicts and the three conditions do not
+            for reading in (d["rule"], d["second_reading_small_slices_set_aside"]):
+                reading["verdict"], reading["conditions"] = NOT_READABLE, None
         decisions.append(d)
     month = frame["delivery_day"].dt.strftime("%Y-%m")
     days = frame.groupby("delivery_day")["provenance"].first()
@@ -173,7 +221,8 @@ def report(frame: pd.DataFrame, schedule: pd.DataFrame) -> dict:
     big = move.abs() > se.MOVE
     against_yesterday = {
         "hours": int(len(with_baseline)), "days": int(with_baseline["delivery_day"].nunique()),
-        "mae": {m: float((with_baseline[m] - with_baseline["spread"]).abs().mean()) for m in (BASELINE, *COMPARED)} if len(with_baseline) else None,
+        "mae": _against_yesterday(frame), "by_month": {m: _against_yesterday(part) for m, part in frame.groupby(month)},
+        "by_class": {k: _against_yesterday(frame[frame["provenance"] == k]) for k in swt.PROVENANCE},
         "base_spread_mae": {m: float((base[m] - base["spread"]).abs().mean()) for m in (BASELINE, *COMPARED)} if len(base) else None,
         "direction_right": {m: float((np.sign(base.loc[big, m] - base.loc[big, BASELINE]) == np.sign(move[big])).mean()) if big.any() else None for m in COMPARED},
         "days_with_move_above_5": int(big.sum()),
@@ -197,7 +246,7 @@ def report(frame: pd.DataFrame, schedule: pd.DataFrame) -> dict:
 
 
 def load(frame_path: Path, schedule_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    frame = pd.read_csv(frame_path, index_col=0, parse_dates=["delivery_day"])
+    frame = pd.read_csv(frame_path, index_col=0, parse_dates=["delivery_day"], float_precision="round_trip")  # the numbers as written, to the last bit
     schedule = pd.read_csv(schedule_path, index_col=0, parse_dates=["delivery_day"], keep_default_na=False)
     frame.index, schedule.index = pd.to_datetime(frame.index, utc=True), pd.to_datetime(schedule.index, utc=True)
     return frame, schedule
@@ -215,4 +264,14 @@ def read(frame_path: Path, schedule_path: Path, stop_checks: Path) -> dict:
         raise SystemExit("a stop condition failed or was not run: nothing is scored")
     if se.sha256(frame_path) != checks.get("test_predictions_sha256") or se.sha256(schedule_path) != checks.get("schedule_sha256"):
         raise SystemExit("the forecasts on disk are not the ones the stop conditions were run on")
-    return report(*load(frame_path, schedule_path))
+    if se.sha256(Path(swt.__file__)) != FROZEN_SCORING_SHA256:
+        raise SystemExit("forecast/spread_w_test.py is not the registered file, so the decisions would not be the registered ones")
+    fourth = checks.get(STOP_4) or {}
+    if not fourth.get("pass") or fourth.get("basis") != EXCEPTION:
+        raise SystemExit("stop condition 4 is not recorded as met under the exception of 2026-11-23")
+    out = report(*load(frame_path, schedule_path))
+    # The exception requires this to stand beside the decisions.
+    out["stop_condition_4"] = {"statement": f"Stop condition 4 is {EXCEPTION}: the stored forecasts are the reconstructions of that day, not the files of the registered hashes.",
+                               **{k: fourth.get(k) for k in ("basis", "file", "sha256", "is_the_reconstruction_of_2026_11_23", "self_test_of_this_workspace", "models", "hours_compared", "values_compared", "largest_difference",
+                                                             "tolerance", "reported_not_required")}}
+    return out

@@ -139,7 +139,7 @@ def test_the_files_written_are_what_the_scoring_code_reads(plain, monkeypatch):
     hours = score.availability(frame, schedule)
     assert hours["all"]["scheduled_hours"] == hours["all"]["issued_hours"] == hours["all"]["eligible_hours"] == 168 and hours["rebuilt"]["days"] == 7
     six = checks["6_eligible_hours"]
-    assert six["pass"] and six["every_hour_of_the_window_accounted_for"] and not six["floor"]["met"] and six["floor"]["least_days"] == 95  # seven days are under the floor, which does not stop the run
+    assert six["pass"] and six["refused_by_the_scoring_code"] is None and not six["floor"]["met"] and six["floor"]["least_days"] == 95  # seven days are under the floor, which does not stop the run
 
 
 @needs_data
@@ -208,19 +208,94 @@ def test_a_day_without_a_realised_price_is_left_out_with_its_reason_and_the_day_
     assert out[list(score.COMMON)].notna().all().all() and (schedule.loc[out.index, "unscored_reason"] == "").all()
 
 
-def test_stop_condition_4_needs_the_reconstruction_by_hash_and_a_passing_self_test(tmp_path, monkeypatch):
+def test_stop_condition_4_needs_the_reconstruction_by_hash_a_passing_self_test_and_every_forecast(tmp_path, monkeypatch):
     hours = pd.date_range("2026-10-09T22:00Z", periods=24, freq="h")
     pred = pd.DataFrame({m: np.arange(24.0) for m in rb.ALL_MODELS}, index=hours)
     kept = tmp_path / "kept"
     kept.mkdir()
-    pred.to_csv(kept / "comparator_predictions.csv.gz")
-    good, bad = tmp_path / "selftest.json", tmp_path / "failed.json"
-    good.write_text('HW done\n{"pass": true, "verdict": "forecasts identical to the reference machine", "code_matches_reference": true}')
-    bad.write_text('{"pass": false, "verdict": "forecasts differ"}')
-    found = rb.reproduce_check(pred, kept, good)
+    pred.to_csv(kept / rb.RECONSTRUCTION_FILE)
+    passed, failed = {"pass": True, "verdict": "forecasts identical to the reference machine"}, {"pass": False, "verdict": "forecasts differ"}
+    found = rb.reproduce_check(pred, kept, passed)
     assert not found["pass"] and not found["is_the_reconstruction_of_2026_11_23"] and found["largest_difference"]["W"] == 0.0  # the numbers agree, but this is not the registered reconstruction
-    monkeypatch.setitem(rb.RECONSTRUCTIONS, "comparator_predictions.csv.gz", rb.se.sha256(kept / "comparator_predictions.csv.gz"))
-    found = rb.reproduce_check(pred, kept, good)
-    assert found["pass"] and found["basis"] == "met under the exception of 2026-11-23" and found["reported_not_required"] == ["HW", "GK", "GM"]
-    assert not rb.reproduce_check(pred, kept, bad)["pass"] and not rb.reproduce_check(pred, kept, None)["pass"]  # the workspace must pass the self-test on the day
-    assert not rb.reproduce_check(pred + 1e-6, kept, good)["pass"]
+    monkeypatch.setattr(rb, "RECONSTRUCTION_SHA256", rb.se.sha256(kept / rb.RECONSTRUCTION_FILE))
+    found = rb.reproduce_check(pred, kept, passed)
+    assert found["pass"] and found["basis"] == "met under the exception of 2026-11-23" and found["reported_not_required"] == ["HW", "GK", "GM"] and found["values_compared"]["W"] == 24
+    assert not rb.reproduce_check(pred, kept, failed)["pass"] and not rb.reproduce_check(pred, kept, None)["pass"]  # the workspace must pass the self-test
+    for name in ("H", "G", "C", "W"):  # each required model alone
+        off = pred.copy()
+        off[name] += 1e-6
+        assert not rb.reproduce_check(off, kept, passed)["pass"]
+    off = pred.copy()
+    off["HW"] += 1.0  # reported, not required
+    found = rb.reproduce_check(off, kept, passed)
+    assert found["pass"] and not found["within_tolerance"]["HW"] and found["largest_difference"]["HW"] == 1.0
+    gaps = pred.copy()
+    gaps.iloc[:20] = np.nan  # forecasts missing on most hours must not pass as "no difference"
+    found = rb.reproduce_check(gaps, kept, passed)
+    assert not found["pass"] and found["values_compared"]["W"] == 4
+    assert not rb.reproduce_check(pred.iloc[:12], kept, passed)["pass"]  # stored hours the rebuild does not cover
+    (kept / rb.RECONSTRUCTION_FILE).rename(kept / "w_predictions.csv.gz")  # the file without HW, GK and GM is not accepted in its place
+    assert "error" in rb.reproduce_check(pred, kept, passed)
+
+
+def test_the_self_test_is_run_here_and_a_workspace_that_cannot_run_it_has_not_passed(tmp_path):
+    assert not rb.run_selftest(tmp_path)["pass"]  # not a folder named static
+    (tmp_path / "static").mkdir()
+    found = rb.run_selftest(tmp_path / "static")  # no files in it
+    assert not found["pass"] and "error" in found
+
+
+def _toy(tmp_path=None):
+    """A tiny feature table over three days, one of them 25 hours long, with every model forecast present."""
+    hours = pd.date_range("2026-10-23T22:00Z", "2026-10-26T23:00Z", freq="h", inclusive="left")
+    local = hours.tz_convert("Europe/Paris")
+    day = pd.DatetimeIndex(local.tz_localize(None).normalize())
+    frame = pd.DataFrame({"delivery_day": day, "hour": local.hour, "dow": day.dayofweek, "holiday": 0, "fr": 50.0, "de": 40.0, "spread": 10.0, "weather_point_in_time": True}, index=hours)
+    feat = {"frame": frame, "y": frame["spread"], "yesterday": pd.Series(9.0, index=hours), "px": pd.DataFrame({"wind": 1.0, "solar": 1.0}, index=hours),
+            "sets": {"G": pd.DataFrame({"de_holiday": 0.0, "x": 1.0}, index=hours)}}
+    pred = pd.DataFrame({m: 8.0 for m in rb.ALL_MODELS}, index=hours)
+    classes = {d: "rebuilt" for d in pd.date_range("2026-10-24", "2026-10-26")}
+    return feat, pred, classes, day
+
+
+def test_every_cause_is_written_for_an_hour_left_out_and_the_25_hour_day_keeps_its_hours():
+    feat, pred, classes, day = _toy()
+    frame = feat["frame"]
+    first, second, third = (np.asarray(day == pd.Timestamp(d)) for d in ("2026-10-24", "2026-10-25", "2026-10-26"))
+    assert second.sum() == 25
+    hour = lambda mask, n: np.flatnonzero(mask)[n]  # noqa: E731
+    frame.iloc[hour(first, 0), frame.columns.get_loc("de")] = np.nan  # no German price
+    frame.iloc[hour(first, 1), [frame.columns.get_loc("fr"), frame.columns.get_loc("de")]] = np.nan  # neither price
+    frame.iloc[hour(first, 2), frame.columns.get_loc("fr")] = np.nan  # no French price, and the weather was not as issued either
+    frame.iloc[hour(first, 2), frame.columns.get_loc("weather_point_in_time")] = False
+    frame["spread"] = frame["fr"] - frame["de"]
+    feat["y"] = frame["spread"]
+    feat["px"].iloc[hour(first, 3), 0] = np.nan  # no proxy
+    pred.iloc[hour(first, 4), pred.columns.get_loc("C")] = np.nan  # C missing: the hour has no forecast from each of the seven
+    frame.iloc[hour(first, 5), frame.columns.get_loc("weather_point_in_time")] = False
+    feat["yesterday"].iloc[np.flatnonzero(third)] = np.nan  # the whole third day has no spread of the previous day
+    out, schedule, _ = rb.assemble(feat, pred, {}, classes, {}, "2026-10-24", "2026-10-26")
+    reasons = schedule.loc[schedule["delivery_day"] == pd.Timestamp("2026-10-24"), "unscored_reason"].tolist()[:7]
+    assert reasons == [score.PRICE_REASONS[1], score.PRICE_REASONS[2], f"{score.NOT_STRICT}; {score.PRICE_REASONS[0]}", score.NO_PROXY, score.NOT_ISSUED, score.NOT_STRICT, ""]
+    assert schedule["issued"].tolist()[:7] == [True, True, False, True, False, False, True]
+    assert len(out) == 73 - 6 and (out["delivery_day"] == pd.Timestamp("2026-10-25")).sum() == 25 and (out["delivery_day"] == pd.Timestamp("2026-10-26")).sum() == 24
+    assert out.loc[out["delivery_day"] == pd.Timestamp("2026-10-26"), "yesterday"].isna().all()  # eligible without yesterday's spread
+    score.validate(out, "2026-10-24", "2026-10-26")
+    score.check_schedule(out, schedule, "2026-10-24", "2026-10-26", expected_hours=73)  # the scoring code accepts exactly what the rebuild writes
+
+
+def test_on_a_saved_day_an_hour_is_issued_whatever_the_weather_flag_and_is_left_out_only_for_a_price_or_proxy():
+    feat, pred, classes, day = _toy()
+    frame = feat["frame"]
+    saved_day = pd.Timestamp("2026-10-26")
+    rows = frame.index[np.asarray(day == saved_day)]
+    frame.loc[rows, "weather_point_in_time"] = False  # the rebuild's flag says nothing about a forecast that was really issued
+    frame.loc[rows[:3], "fr"] = np.nan
+    frame["spread"] = frame["fr"] - frame["de"]
+    feat["y"] = frame["spread"]
+    record = {"timestamps_utc": [t.strftime("%Y-%m-%dT%H:%M:%SZ") for t in rows], "forecasts": {m: [7.0] * 24 for m in rb.SAVED_MODELS}, "evidence": {"input_hours_missing_for_D": {}}}
+    out, schedule, _ = rb.assemble(feat, pred, {}, {**classes, saved_day: "saved"}, {saved_day: record}, "2026-10-24", "2026-10-26")
+    on_day = schedule["delivery_day"] == saved_day
+    assert schedule.loc[on_day, "issued"].all() and schedule.loc[on_day, "unscored_reason"].tolist()[:4] == [score.PRICE_REASONS[0]] * 3 + [""]
+    kept = out[out["delivery_day"] == saved_day]
+    assert len(kept) == 21 and (kept["W"] == 7.0).all() and (kept["C"] == 8.0).all() and (kept["provenance"] == "saved").all()
