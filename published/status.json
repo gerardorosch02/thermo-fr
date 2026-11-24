@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-11-24T09:32:50Z",
+  "written_at_utc": "2026-11-24T13:22:10Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -12,12 +12,12 @@
   "from_day": "2026-08-26",
   "tomorrow": "2026-11-25",
   "forecast_versions": 74,
-  "actual_days": 48,
-  "scored_versions": 70,
+  "actual_days": 49,
+  "scored_versions": 72,
   "live_record": {
     "default": {
       "feature_set": "honest_v2",
-      "days": 27,
+      "days": 28,
       "late_only_days": [
         {
           "delivery_day": "2026-10-13",
@@ -32,10 +32,10 @@
       ],
       "window_days": 30,
       "first_premarket_day": "2026-10-14",
-      "last_premarket_day": "2026-11-24",
-      "days_in_window": 27,
-      "model_mae": 26.85,
-      "model_rmse": 32.79,
+      "last_premarket_day": "2026-11-25",
+      "days_in_window": 28,
+      "model_mae": 26.52,
+      "model_rmse": 32.46,
       "scored_against": "the auction result; the EEX traded price is the only benchmark (Versus the market)",
       "status": "ok"
     },
@@ -156,11 +156,11 @@
   },
   "last_run": {
     "run_id": 1,
-    "command": "morning-run",
+    "command": "settle",
     "kind": "scheduled",
-    "delivery_day": "2026-11-25",
-    "started_at_utc": "2026-11-24T09:30:39Z",
-    "finished_at_utc": "2026-11-24T09:32:49Z",
+    "delivery_day": null,
+    "started_at_utc": "2026-11-24T13:21:28Z",
+    "finished_at_utc": "2026-11-24T13:22:08Z",
     "status": "ok",
     "message": ""
   },
@@ -183,37 +183,37 @@
     "carried_note": "this machine holds no traded prices; the aggregates are the last ones computed on the laptop"
   },
   "shape_battery": {
-    "days": 29,
+    "days": 30,
     "shape": {
-      "hours": 696,
-      "days": 29,
+      "hours": 720,
+      "days": 30,
       "model": {
-        "shape_mae": 20.11,
-        "spread_error": 17.37,
-        "cheapest2_hit_rate": 0.603,
-        "dearest2_hit_rate": 0.603
+        "shape_mae": 19.99,
+        "spread_error": 17.81,
+        "cheapest2_hit_rate": 0.617,
+        "dearest2_hit_rate": 0.6
       },
       "d1": {
-        "shape_mae": 26.48,
-        "spread_error": 23.67,
-        "cheapest2_hit_rate": 0.414,
-        "dearest2_hit_rate": 0.621
+        "shape_mae": 26.12,
+        "spread_error": 23.73,
+        "cheapest2_hit_rate": 0.433,
+        "dearest2_hit_rate": 0.617
       }
     },
     "battery": {
-      "days": 29,
-      "perfect_eur_per_day": 235.0,
+      "days": 30,
+      "perfect_eur_per_day": 232.06,
       "model": {
-        "eur_per_day": 215.1,
-        "share_of_perfect": 0.915,
-        "days_traded": 29,
+        "eur_per_day": 211.56,
+        "share_of_perfect": 0.912,
+        "days_traded": 30,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 191.52,
-        "share_of_perfect": 0.815,
-        "days_traded": 29,
+        "eur_per_day": 188.76,
+        "share_of_perfect": 0.813,
+        "days_traded": 30,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -221,20 +221,20 @@
   },
   "probabilistic": {
     "live": {
-      "days": 27,
-      "hours": 648,
+      "days": 28,
+      "hours": 672,
       "negative": {
         "events": 3,
-        "hours": 648,
-        "brier": 0.00457,
-        "brier_base_rate": 0.00461,
-        "log_loss": 0.0222,
+        "hours": 672,
+        "brier": 0.00441,
+        "brier_base_rate": 0.00444,
+        "log_loss": 0.0214,
         "reliability": [
           {
             "bin": "0.0-0.1",
-            "n": 632,
-            "mean_forecast": 0.0071,
-            "observed_frequency": 0.0032
+            "n": 656,
+            "mean_forecast": 0.0069,
+            "observed_frequency": 0.003
           },
           {
             "bin": "0.1-0.2",
@@ -292,7 +292,7 @@
           }
         ]
       },
-      "negative_calibrated_hours": 648
+      "negative_calibrated_hours": 672
     },
     "backtest_file": "probabilistic_backtest.json",
     "calibration": {
