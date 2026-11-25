@@ -235,37 +235,37 @@
     }
   },
   "live": {
-    "days": 30,
+    "days": 31,
     "shape": {
-      "hours": 720,
-      "days": 30,
+      "hours": 744,
+      "days": 31,
       "model": {
-        "shape_mae": 19.99,
-        "spread_error": 17.81,
-        "cheapest2_hit_rate": 0.617,
-        "dearest2_hit_rate": 0.6
+        "shape_mae": 20.15,
+        "spread_error": 18.67,
+        "cheapest2_hit_rate": 0.629,
+        "dearest2_hit_rate": 0.597
       },
       "d1": {
-        "shape_mae": 26.12,
-        "spread_error": 23.73,
-        "cheapest2_hit_rate": 0.433,
-        "dearest2_hit_rate": 0.617
+        "shape_mae": 25.89,
+        "spread_error": 23.94,
+        "cheapest2_hit_rate": 0.452,
+        "dearest2_hit_rate": 0.597
       }
     },
     "battery": {
-      "days": 30,
-      "perfect_eur_per_day": 232.06,
+      "days": 31,
+      "perfect_eur_per_day": 233.1,
       "model": {
-        "eur_per_day": 211.56,
-        "share_of_perfect": 0.912,
-        "days_traded": 30,
+        "eur_per_day": 212.81,
+        "share_of_perfect": 0.913,
+        "days_traded": 31,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 188.76,
-        "share_of_perfect": 0.813,
-        "days_traded": 30,
+        "eur_per_day": 188.88,
+        "share_of_perfect": 0.81,
+        "days_traded": 31,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -720,6 +720,21 @@
         "discharge_d1": 7,
         "shape_mae_model": 16.594973958333327,
         "shape_mae_d1": 15.812473958333337
+      },
+      {
+        "delivery_day": "2026-11-26",
+        "hours": 24,
+        "value_perfect": 264.3338,
+        "value_model": 250.37699999999995,
+        "traded_model": true,
+        "charge_model": 3,
+        "discharge_model": 18,
+        "value_d1": 192.43779999999992,
+        "traded_d1": true,
+        "charge_d1": 3,
+        "discharge_d1": 15,
+        "shape_mae_model": 24.67652777777778,
+        "shape_mae_d1": 18.73366319444445
       }
     ]
   },
