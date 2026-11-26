@@ -235,37 +235,37 @@
     }
   },
   "live": {
-    "days": 31,
+    "days": 32,
     "shape": {
-      "hours": 744,
-      "days": 31,
+      "hours": 768,
+      "days": 32,
       "model": {
-        "shape_mae": 20.15,
-        "spread_error": 18.67,
-        "cheapest2_hit_rate": 0.629,
-        "dearest2_hit_rate": 0.597
+        "shape_mae": 20.27,
+        "spread_error": 19.05,
+        "cheapest2_hit_rate": 0.625,
+        "dearest2_hit_rate": 0.578
       },
       "d1": {
-        "shape_mae": 25.89,
-        "spread_error": 23.94,
-        "cheapest2_hit_rate": 0.452,
-        "dearest2_hit_rate": 0.597
+        "shape_mae": 25.87,
+        "spread_error": 23.23,
+        "cheapest2_hit_rate": 0.453,
+        "dearest2_hit_rate": 0.578
       }
     },
     "battery": {
-      "days": 31,
-      "perfect_eur_per_day": 233.1,
+      "days": 32,
+      "perfect_eur_per_day": 233.59,
       "model": {
-        "eur_per_day": 212.81,
-        "share_of_perfect": 0.913,
-        "days_traded": 31,
+        "eur_per_day": 211.24,
+        "share_of_perfect": 0.904,
+        "days_traded": 32,
         "days_skipped": 0,
         "losing_days": 0
       },
       "d1": {
-        "eur_per_day": 188.88,
-        "share_of_perfect": 0.81,
-        "days_traded": 31,
+        "eur_per_day": 188.03,
+        "share_of_perfect": 0.805,
+        "days_traded": 32,
         "days_skipped": 0,
         "losing_days": 0
       }
@@ -735,6 +735,21 @@
         "discharge_d1": 15,
         "shape_mae_model": 24.67652777777778,
         "shape_mae_d1": 18.73366319444445
+      },
+      {
+        "delivery_day": "2026-11-27",
+        "hours": 24,
+        "value_perfect": 248.95030000000003,
+        "value_model": 162.5673000000001,
+        "traded_model": true,
+        "charge_model": 3,
+        "discharge_model": 16,
+        "value_d1": 161.58830000000006,
+        "traded_d1": true,
+        "charge_d1": 3,
+        "discharge_d1": 17,
+        "shape_mae_model": 24.138576388888918,
+        "shape_mae_d1": 25.26666666666667
       }
     ]
   },
