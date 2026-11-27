@@ -1,5 +1,5 @@
 {
-  "written_at_utc": "2026-11-27T09:08:25Z",
+  "written_at_utc": "2026-11-27T13:21:36Z",
   "feature_set": "honest_v2",
   "published_feature_sets": [
     "honest_v2",
@@ -12,7 +12,7 @@
   "from_day": "2026-08-29",
   "tomorrow": "2026-11-28",
   "forecast_versions": 78,
-  "actual_days": 51,
+  "actual_days": 52,
   "scored_versions": 76,
   "live_record": {
     "default": {
@@ -156,13 +156,13 @@
   },
   "last_run": {
     "run_id": 1,
-    "command": "morning-run",
+    "command": "settle",
     "kind": "scheduled",
-    "delivery_day": "2026-11-28",
-    "started_at_utc": "2026-11-27T09:05:38Z",
-    "finished_at_utc": "2026-11-27T09:08:24Z",
-    "status": "failed",
-    "message": "forecast_honest_v2: ValueError: inputs missing for 2026-11-28: price_lag7, price_lag7_mean, price_la"
+    "delivery_day": null,
+    "started_at_utc": "2026-11-27T13:20:46Z",
+    "finished_at_utc": "2026-11-27T13:21:34Z",
+    "status": "ok",
+    "message": ""
   },
   "market": {
     "source": "EEX French Day-Ahead Base and Peak futures traded before the auction, collected locally; traded prices are not republished.",
